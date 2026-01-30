@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #1e1e1e;
+  color: #ffffff;
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #2d2d30;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #5a5a5a;
+}
+
+/* Video container styles */
+.video-container {
+  position: relative;
+  background: #252526;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Participant grid */
+.participants-grid {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  height: 100%;
+}
+
+.participants-grid.grid-1 {
+  grid-template-columns: 1fr;
+}
+
+.participants-grid.grid-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.participants-grid.grid-3-4 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.participants-grid.grid-5-6 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.participants-grid.grid-many {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.5; }
+  100% { transform: scale(0.8); opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+.speaking-indicator {
+  animation: pulse-ring 1.5s ease-in-out infinite;
+}
+
+/* Button styles */
+.btn {
+  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2;
+}
+
+.btn-primary {
+  @apply bg-primary-600 hover:bg-primary-700 text-white;
+}
+
+.btn-secondary {
+  @apply bg-dark-400 hover:bg-dark-500 text-white;
+}
+
+.btn-danger {
+  @apply bg-red-600 hover:bg-red-700 text-white;
+}
+
+.btn-success {
+  @apply bg-green-600 hover:bg-green-700 text-white;
+}
+
+/* Control button */
+.control-btn {
+  @apply w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200;
+}
+
+.control-btn.active {
+  @apply bg-dark-400 hover:bg-dark-500 text-white;
+}
+
+.control-btn.inactive {
+  @apply bg-red-600 hover:bg-red-700 text-white;
+}
+
+/* Chat styles */
+.chat-message {
+  @apply p-3 rounded-lg mb-2 max-w-[80%];
+}
+
+.chat-message.own {
+  @apply bg-primary-600 ml-auto;
+}
+
+.chat-message.other {
+  @apply bg-dark-400;
+}
+
+/* Input styles */
+.input {
+  @apply w-full px-4 py-3 bg-dark-300 border border-dark-400 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 transition-colors;
+}
+
+/* Modal backdrop */
+.modal-backdrop {
+  @apply fixed inset-0 bg-black/60 flex items-center justify-center z-50;
+}
+
+.modal-content {
+  @apply bg-dark-200 rounded-xl p-6 w-full max-w-md animate-slide-up;
+}
