@@ -82,6 +82,18 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+.participants-grid.grid-cols-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.participants-grid.grid-cols-6 {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.participants-grid.grid-cols-7 {
+  grid-template-columns: repeat(7, 1fr);
+}
+
 /* Responsive grid adjustments */
 @media (max-width: 768px) {
   .participants-grid {
@@ -175,6 +187,26 @@ body {
   100% { background-position: 200% 0; }
 }
 
+@keyframes float-up {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-40vh) scale(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-80vh) scale(0.8);
+  }
+}
+
+@keyframes bounce-hand {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.3s ease-out;
 }
@@ -201,6 +233,14 @@ body {
 
 .speaking-border {
   animation: speaking-glow 1.5s ease-in-out infinite;
+}
+
+.animate-float-up {
+  animation: float-up 3s ease-out forwards;
+}
+
+.animate-bounce-hand {
+  animation: bounce-hand 1s ease-in-out infinite;
 }
 
 /* Skeleton loading animation */

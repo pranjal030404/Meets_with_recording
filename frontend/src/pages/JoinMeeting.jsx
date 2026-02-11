@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { 
   Video, 
@@ -6,7 +6,8 @@ import {
   Mic, 
   MicOff, 
   ArrowLeft,
-  Settings
+  Settings,
+  ChevronDown
 } from 'lucide-react'
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
@@ -24,23 +25,46 @@ export default function JoinMeeting() {
   const [isMuted, setIsMuted] = useState(false)
   const [isVideoOff, setIsVideoOff] = useState(false)
   const [isCheckingMeeting, setIsCheckingMeeting] = useState(false)
+  const [showDeviceDropdown, setShowDeviceDropdown] = useState(null) // 'audio' | 'video' | null
+  const [devices, setDevices] = useState({ audioinput: [], videoinput: [], audiooutput: [] })
+  const [selectedAudioDevice, setSelectedAudioDevice] = useState(null)
+  const [selectedVideoDevice, setSelectedVideoDevice] = useState(null)
+  const [audioLevel, setAudioLevel] = useState(0)
 
   const videoRef = useRef(null)
   const streamRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const analyserRef = useRef(null)
+  const animFrameRef = useRef(null)
 
   // Initialize camera preview
   useEffect(() => {
     const initCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 },
-          audio: true
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          }
         })
         streamRef.current = stream
         setLocalStreamState(stream)
         if (videoRef.current) {
           videoRef.current.srcObject = stream
         }
+
+        // Enumerate devices after getting permission
+        const deviceList = await navigator.mediaDevices.enumerateDevices()
+        setDevices({
+          audioinput: deviceList.filter(d => d.kind === 'audioinput'),
+          videoinput: deviceList.filter(d => d.kind === 'videoinput'),
+          audiooutput: deviceList.filter(d => d.kind === 'audiooutput'),
+        })
+
+        // Start audio level monitoring
+        startAudioLevelMonitoring(stream)
       } catch (error) {
         console.error('Camera access error:', error)
         toast.error('Unable to access camera/microphone')
@@ -50,14 +74,39 @@ export default function JoinMeeting() {
     initCamera()
 
     return () => {
-      // Use ref to ensure we always have the current stream reference
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => {
-          track.stop()
-        })
+        streamRef.current.getTracks().forEach(track => track.stop())
         streamRef.current = null
       }
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+        audioContextRef.current = null
+      }
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current)
+      }
     }
+  }, [])
+
+  const startAudioLevelMonitoring = useCallback((stream) => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      audioContextRef.current = audioCtx
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 256
+      analyserRef.current = analyser
+      const source = audioCtx.createMediaStreamSource(stream)
+      source.connect(analyser)
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+      const updateLevel = () => {
+        analyser.getByteFrequencyData(dataArray)
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+        setAudioLevel(Math.min(avg / 128, 1))
+        animFrameRef.current = requestAnimationFrame(updateLevel)
+      }
+      updateLevel()
+    } catch (e) { console.error('Audio monitoring error:', e) }
   }, [])
 
   // Check meeting when roomId from params
@@ -87,7 +136,6 @@ export default function JoinMeeting() {
       return
     }
 
-    // Extract room ID from URL if needed
     let extractedRoomId = roomId.trim()
     if (roomId.includes('/meeting/')) {
       extractedRoomId = roomId.split('/meeting/')[1]
@@ -100,8 +148,17 @@ export default function JoinMeeting() {
   const handleJoinMeeting = async () => {
     if (!meeting) return
 
+    // Set device preferences in store before joining
+    const store = useMeetingStore.getState()
+    if (selectedAudioDevice) store.setSelectedAudioDevice?.(selectedAudioDevice)
+    if (selectedVideoDevice) store.setSelectedVideoDevice?.(selectedVideoDevice)
+
     // Save stream to store before joining
     setLocalStream(localStream)
+
+    // Save muted/video-off state
+    if (isMuted) useMeetingStore.setState({ isMuted: true })
+    if (isVideoOff) useMeetingStore.setState({ isVideoOff: true })
 
     const result = await joinMeeting(meeting.roomId)
     
@@ -116,7 +173,32 @@ export default function JoinMeeting() {
     if (localStream) {
       const audioTrack = localStream.getAudioTracks()[0]
       if (audioTrack) {
-        audioTrack.enabled = isMuted
+        if (!isMuted) {
+          // Mute: stop track (release mic permission, LED off)
+          audioTrack.stop()
+          localStream.removeTrack(audioTrack)
+          setAudioLevel(0)
+        } else {
+          // Unmute: reacquire with noise suppression
+          const constraints = {
+            audio: {
+              deviceId: selectedAudioDevice ? { exact: selectedAudioDevice } : undefined,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            }
+          }
+          navigator.mediaDevices.getUserMedia(constraints).then(newStream => {
+            const newTrack = newStream.getAudioTracks()[0]
+            localStream.addTrack(newTrack)
+            streamRef.current = localStream
+            startAudioLevelMonitoring(localStream)
+          }).catch(err => {
+            console.error('Failed to reacquire mic:', err)
+            toast.error('Failed to access microphone')
+            return
+          })
+        }
         setIsMuted(!isMuted)
       }
     }
@@ -125,11 +207,59 @@ export default function JoinMeeting() {
   const toggleVideo = () => {
     if (localStream) {
       const videoTrack = localStream.getVideoTracks()[0]
-      if (videoTrack) {
-        videoTrack.enabled = isVideoOff
-        setIsVideoOff(!isVideoOff)
+      if (!isVideoOff && videoTrack) {
+        // Turn off: stop track (release camera, LED off)
+        videoTrack.stop()
+        localStream.removeTrack(videoTrack)
+        setIsVideoOff(true)
+      } else {
+        // Turn on: reacquire
+        const constraints = selectedVideoDevice
+          ? { video: { deviceId: { exact: selectedVideoDevice }, width: 640, height: 480 } }
+          : { video: { width: 640, height: 480 } }
+        navigator.mediaDevices.getUserMedia(constraints).then(newStream => {
+          const newTrack = newStream.getVideoTracks()[0]
+          localStream.addTrack(newTrack)
+          streamRef.current = localStream
+          if (videoRef.current) videoRef.current.srcObject = localStream
+          setIsVideoOff(false)
+        }).catch(err => {
+          console.error('Failed to reacquire camera:', err)
+          toast.error('Failed to access camera')
+        })
       }
     }
+  }
+
+  const switchDevice = async (kind, deviceId) => {
+    if (!localStream) return
+    try {
+      if (kind === 'audioinput') {
+        setSelectedAudioDevice(deviceId)
+        if (!isMuted) {
+          const oldTrack = localStream.getAudioTracks()[0]
+          if (oldTrack) { oldTrack.stop(); localStream.removeTrack(oldTrack) }
+          const ns = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } })
+          localStream.addTrack(ns.getAudioTracks()[0])
+          streamRef.current = localStream
+          startAudioLevelMonitoring(localStream)
+        }
+      } else if (kind === 'videoinput') {
+        setSelectedVideoDevice(deviceId)
+        if (!isVideoOff) {
+          const oldTrack = localStream.getVideoTracks()[0]
+          if (oldTrack) { oldTrack.stop(); localStream.removeTrack(oldTrack) }
+          const ns = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId }, width: 640, height: 480 } })
+          localStream.addTrack(ns.getVideoTracks()[0])
+          streamRef.current = localStream
+          if (videoRef.current) videoRef.current.srcObject = localStream
+        }
+      }
+    } catch (err) {
+      console.error('Switch device error:', err)
+      toast.error('Failed to switch device')
+    }
+    setShowDeviceDropdown(null)
   }
 
   return (
@@ -171,30 +301,95 @@ export default function JoinMeeting() {
               <div className="absolute bottom-4 left-4 bg-black/60 px-3 py-1 rounded-lg text-sm">
                 {user?.name} (You)
               </div>
+
+              {/* Mute on entry notice */}
+              {meeting?.settings?.muteOnEntry && (
+                <div className="absolute top-4 left-4 bg-yellow-600/80 px-3 py-1 rounded-lg text-xs">
+                  🔇 You'll be muted when you join
+                </div>
+              )}
             </div>
 
-            {/* Controls */}
-            <div className="p-4 flex justify-center gap-4">
-              <button
-                onClick={toggleMute}
-                className={`control-btn ${isMuted ? 'inactive' : 'active'}`}
-                title={isMuted ? 'Unmute' : 'Mute'}
-              >
-                {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-              </button>
-              <button
-                onClick={toggleVideo}
-                className={`control-btn ${isVideoOff ? 'inactive' : 'active'}`}
-                title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
-              >
-                {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
-              </button>
-              <button
-                className="control-btn active"
-                title="Settings"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
+            {/* Controls + Audio Level */}
+            <div className="p-4">
+              {/* Audio level meter */}
+              {!isMuted && (
+                <div className="mb-3 flex items-center gap-2">
+                  <Mic className="w-4 h-4 text-gray-400" />
+                  <div className="flex-1 h-2 bg-dark-400 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-green-500 rounded-full transition-all duration-75"
+                      style={{ width: `${audioLevel * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-center gap-3">
+                {/* Mic button + device selector */}
+                <div className="flex items-center">
+                  <button
+                    onClick={toggleMute}
+                    className={`control-btn ${isMuted ? 'inactive' : 'active'}`}
+                    title={isMuted ? 'Unmute' : 'Mute'}
+                  >
+                    {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                  </button>
+                  {devices.audioinput.length > 1 && (
+                    <div className="relative">
+                      <button onClick={() => setShowDeviceDropdown(showDeviceDropdown === 'audio' ? null : 'audio')}
+                        className="p-1 ml-0.5 bg-dark-400 hover:bg-dark-500 rounded-r-full transition-colors">
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                      {showDeviceDropdown === 'audio' && (
+                        <div className="absolute bottom-full mb-2 left-0 bg-dark-300 rounded-lg shadow-xl py-1 min-w-[250px] z-20">
+                          <p className="px-3 py-1 text-xs text-gray-400 font-semibold">Microphone</p>
+                          {devices.audioinput.map(d => (
+                            <button key={d.deviceId} onClick={() => switchDevice('audioinput', d.deviceId)}
+                              className={`w-full px-3 py-2 text-left text-sm hover:bg-dark-400 transition-colors truncate ${
+                                d.deviceId === selectedAudioDevice ? 'text-primary-400' : ''
+                              }`}>
+                              {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Video button + device selector */}
+                <div className="flex items-center">
+                  <button
+                    onClick={toggleVideo}
+                    className={`control-btn ${isVideoOff ? 'inactive' : 'active'}`}
+                    title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
+                  >
+                    {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                  </button>
+                  {devices.videoinput.length > 1 && (
+                    <div className="relative">
+                      <button onClick={() => setShowDeviceDropdown(showDeviceDropdown === 'video' ? null : 'video')}
+                        className="p-1 ml-0.5 bg-dark-400 hover:bg-dark-500 rounded-r-full transition-colors">
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                      {showDeviceDropdown === 'video' && (
+                        <div className="absolute bottom-full mb-2 left-0 bg-dark-300 rounded-lg shadow-xl py-1 min-w-[250px] z-20">
+                          <p className="px-3 py-1 text-xs text-gray-400 font-semibold">Camera</p>
+                          {devices.videoinput.map(d => (
+                            <button key={d.deviceId} onClick={() => switchDevice('videoinput', d.deviceId)}
+                              className={`w-full px-3 py-2 text-left text-sm hover:bg-dark-400 transition-colors truncate ${
+                                d.deviceId === selectedVideoDevice ? 'text-primary-400' : ''
+                              }`}>
+                              {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -239,6 +434,9 @@ export default function JoinMeeting() {
                     <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                     {meeting.status === 'active' ? 'Meeting in progress' : 'Ready to start'}
                   </div>
+                  {meeting.settings?.muteOnEntry && (
+                    <p className="text-xs text-yellow-400 mt-2">🔇 Participants are muted on entry</p>
+                  )}
                 </div>
 
                 <button

@@ -599,7 +599,202 @@ export const initializeSocketHandlers = (io) => {
     });
 
     // ============================================
-    // TEAM EVENTS
+    // EXTENDED HOST CONTROL EVENTS
+    // ============================================
+
+    /**
+     * Host forces video off for a participant
+     */
+    socket.on('host:force-video-off', async ({ targetSocketId, roomId }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId });
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          io.to(targetSocketId).emit('host:force-video-off');
+        }
+      } catch (error) {
+        console.error('Host force video off error:', error);
+      }
+    });
+
+    /**
+     * Host requests a participant to unmute
+     */
+    socket.on('host:request-unmute', async ({ targetSocketId, roomId }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId });
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          io.to(targetSocketId).emit('host:request-unmute');
+        }
+      } catch (error) {
+        console.error('Host request unmute error:', error);
+      }
+    });
+
+    /**
+     * Host mutes all participants
+     */
+    socket.on('host:mute-all', async ({ roomId }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId });
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          socket.to(roomId).emit('host:force-mute');
+        }
+      } catch (error) {
+        console.error('Host mute all error:', error);
+      }
+    });
+
+    /**
+     * Host disables all cameras
+     */
+    socket.on('host:disable-all-video', async ({ roomId }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId });
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          socket.to(roomId).emit('host:force-video-off');
+        }
+      } catch (error) {
+        console.error('Host disable all video error:', error);
+      }
+    });
+
+    /**
+     * Host locks/unlocks meeting
+     */
+    socket.on('host:lock-meeting', async ({ roomId, isLocked }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId });
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          meeting.settings.isLocked = isLocked;
+          await meeting.save();
+          io.to(roomId).emit('host:meeting-locked', { isLocked });
+        }
+      } catch (error) {
+        console.error('Host lock meeting error:', error);
+      }
+    });
+
+    /**
+     * Host admits user from waiting room
+     */
+    socket.on('host:admit-user', async ({ roomId, targetSocketId }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId });
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          io.to(targetSocketId).emit('room:admitted');
+          // The admitted user's client will re-attempt join
+        }
+      } catch (error) {
+        console.error('Host admit user error:', error);
+      }
+    });
+
+    /**
+     * Host denies user from waiting room
+     */
+    socket.on('host:deny-user', async ({ roomId, targetSocketId }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId });
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          io.to(targetSocketId).emit('room:denied');
+        }
+      } catch (error) {
+        console.error('Host deny user error:', error);
+      }
+    });
+
+    /**
+     * Host spotlights a user
+     */
+    socket.on('host:spotlight', async ({ roomId, userId }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId });
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          io.to(roomId).emit('host:spotlight', { userId });
+        }
+      } catch (error) {
+        console.error('Host spotlight error:', error);
+      }
+    });
+
+    /**
+     * Host makes a user co-host
+     */
+    socket.on('host:make-cohost', async ({ targetSocketId, roomId }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId }).populate('participants.user');
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          // Find the target user
+          const targetSocket = io.sockets.sockets.get(targetSocketId);
+          if (targetSocket && targetSocket.user) {
+            const participant = meeting.participants.find(
+              p => p.user._id.toString() === targetSocket.user._id.toString()
+            );
+            if (participant) {
+              participant.role = 'co-host';
+              await meeting.save();
+              io.to(targetSocketId).emit('host:promoted', { role: 'co-host' });
+              io.to(roomId).emit('room:role-changed', {
+                userId: targetSocket.user._id,
+                role: 'co-host'
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Host make cohost error:', error);
+      }
+    });
+
+    /**
+     * Host updates meeting settings
+     */
+    socket.on('host:update-settings', async ({ roomId, settings }) => {
+      try {
+        const meeting = await Meeting.findOne({ roomId });
+        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+          Object.assign(meeting.settings, settings);
+          await meeting.save();
+          io.to(roomId).emit('meeting:settings-updated', { settings });
+        }
+      } catch (error) {
+        console.error('Host update settings error:', error);
+      }
+    });
+
+    // ============================================
+    // CAPTIONS
+    // ============================================
+
+    /**
+     * Live caption text
+     */
+    socket.on('caption:text', ({ roomId, text }) => {
+      socket.to(roomId).emit('caption:text', {
+        userId: socket.user._id,
+        userName: socket.user.name,
+        text
+      });
+    });
+
+    // ============================================    // WHITEBOARD EVENTS
+    // ============================================
+
+    /**
+     * Whiteboard drawing
+     */
+    socket.on('whiteboard:draw', ({ roomId, x0, y0, x1, y1, color, width, tool }) => {
+      socket.to(roomId).emit('whiteboard:draw', { x0, y0, x1, y1, color, width, tool })
+    });
+
+    /**
+     * Whiteboard clear
+     */
+    socket.on('whiteboard:clear', ({ roomId }) => {
+      socket.to(roomId).emit('whiteboard:clear')
+    });
+
+    // ============================================    // TEAM EVENTS
     // ============================================
 
     /**

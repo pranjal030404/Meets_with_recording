@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import SimplePeer from 'simple-peer'
 import toast from 'react-hot-toast'
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
@@ -13,70 +12,120 @@ import VideoGrid from '../components/VideoGrid'
 import ChatPanel from '../components/ChatPanel'
 import ParticipantsList from '../components/ParticipantsList'
 import MeetingHeader from '../components/MeetingHeader'
+import EmojiReactions from '../components/EmojiReactions'
+import CaptionsOverlay from '../components/CaptionsOverlay'
+import WaitingRoom from '../components/WaitingRoom'
+import DeviceSettings from '../components/DeviceSettings'
+import MeetingSettingsPanel from '../components/MeetingSettingsPanel'
+import Whiteboard from '../components/Whiteboard'
 
 export default function Meeting() {
   const navigate = useNavigate()
   const { roomId } = useParams()
   const { user, token } = useAuthStore()
-  const { 
-    currentMeeting,
-    participants,
-    localStream,
-    isHost,
-    isMuted,
-    isVideoOff,
-    isScreenSharing,
-    isRecording,
-    peers,
-    joinMeeting,
-    leaveMeeting,
-    setLocalStream,
-    setParticipants,
-    setIsHost,
-    addParticipant,
-    removeParticipant,
-    updateParticipant,
-    addPeer,
-    removePeer,
-    toggleMute,
-    toggleVideo,
-    startScreenShare,
-    stopScreenShare,
-    startRecording,
-    stopRecording
+  const {
+    currentMeeting, participants, localStream, isHost,
+    isMuted, isVideoOff, isScreenSharing, isRecording,
+    remoteStreams, mediasoupReady, activeReactions,
+    handRaisedUsers, isHandRaised, layout, pinnedUserId,
+    spotlightUserId, activeSpeakerId, captionsEnabled, captions,
+    isBeingRecorded, waitingRoomUsers, isMeetingLocked, recordingUser, isPiP,
+    joinMeeting, leaveMeeting, setLocalStream,
+    setParticipants, setIsHost, addParticipant, removeParticipant,
+    updateParticipant, toggleMute, toggleVideo,
+    startScreenShare, stopScreenShare, startRecording, stopRecording,
+    initMediasoup, produceAudio, produceVideo,
+    consumeProducer, removeConsumer, removeRemoteStream,
+    toggleHandRaise, addHandRaise, removeHandRaise,
+    addReaction, sendReaction, setLayout, pinUser,
+    spotlightUser, clearSpotlight, setActiveSpeaker,
+    forceMute, forceVideoOff, setBeingRecorded,
+    addToWaitingRoom, admitFromWaitingRoom, denyFromWaitingRoom,
+    toggleCaptions, addCaption, enumerateDevices, enablePiP, disablePiP
   } = useMeetingStore()
-  const { addMessage, loadMessages, clearMessages } = useChatStore()
+  const { addMessage, loadMessages, clearMessages, setTypingUser } = useChatStore()
 
   const [showChat, setShowChat] = useState(false)
   const [showParticipants, setShowParticipants] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [showDeviceSettings, setShowDeviceSettings] = useState(false)
+  const [showMeetingSettings, setShowMeetingSettings] = useState(false)
+  const [showWhiteboard, setShowWhiteboard] = useState(false)
   const [isJoining, setIsJoining] = useState(true)
-  const [peerStreams, setPeerStreams] = useState(new Map())
-  const [screenShareStream, setScreenShareStream] = useState(null)
   const [screenShareUser, setScreenShareUser] = useState(null)
+  const [showLeaveDialog, setShowLeaveDialog] = useState(false)
 
   const localVideoRef = useRef(null)
   const socketRef = useRef(null)
-  const peersRef = useRef(new Map())
+  const producerMapRef = useRef(new Map()) // Map<producerId, { peerId, mediaType }>
 
-  // Initialize socket and join room
+  // =============================================
+  // KEYBOARD SHORTCUTS
+  // =============================================
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ctrl/Cmd + D = toggle mic
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') { e.preventDefault(); toggleMute() }
+      // Ctrl/Cmd + E = toggle video
+      if ((e.ctrlKey || e.metaKey) && e.key === 'e') { e.preventDefault(); toggleVideo() }
+      // Ctrl/Cmd + Shift + S = toggle screen share
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') { e.preventDefault(); handleScreenShare() }
+      // Ctrl/Cmd + Shift + H = raise hand
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'H') { e.preventDefault(); toggleHandRaise() }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isScreenSharing])
+
+  // =============================================
+  // ACTIVE SPEAKER DETECTION
+  // =============================================
+  useEffect(() => {
+    if (!localStream || isMuted) return
+    const audioTracks = localStream.getAudioTracks()
+    if (audioTracks.length === 0) return
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+    const analyser = audioCtx.createAnalyser()
+    analyser.fftSize = 512
+    const source = audioCtx.createMediaStreamSource(localStream)
+    source.connect(analyser)
+    const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+    const interval = setInterval(() => {
+      analyser.getByteFrequencyData(dataArray)
+      const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+      if (avg > 20) {
+        setActiveSpeaker(user._id)
+      }
+    }, 300)
+
+    return () => { clearInterval(interval); audioCtx.close() }
+  }, [localStream, isMuted])
+
+  // =============================================
+  // INITIALIZE SOCKET + MEDIASOUP + JOIN ROOM
+  // =============================================
   useEffect(() => {
     const initialize = async () => {
       try {
-        // Initialize socket
         const socket = initSocket(token)
         socketRef.current = socket
 
-        // Get local media stream if not already obtained
+        // Get local media stream if not already obtained (from pre-join)
         let stream = localStream
         if (!stream) {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 640, height: 480 },
-            audio: true
+            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            }
           })
           setLocalStream(stream)
         }
 
-        // Set local video
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream
         }
@@ -89,16 +138,40 @@ export default function Meeting() {
           return
         }
 
-        // Check if current user is host
         const meeting = result.meeting
-        setIsHost(meeting.host._id === user._id || meeting.host === user._id)
+        const hostId = meeting.host._id || meeting.host
+        setIsHost(hostId === user._id)
 
-        // Load chat messages
+        // Check muteOnEntry setting
+        if (meeting.settings?.muteOnEntry && hostId !== user._id) {
+          const audioTrack = stream.getAudioTracks()[0]
+          if (audioTrack) { audioTrack.stop(); stream.removeTrack(audioTrack) }
+          useMeetingStore.setState({ isMuted: true })
+          toast('You have been muted on entry by the host', { icon: '🔇' })
+        }
+
+        // Initialize mediasoup SFU
+        const sfuResult = await initMediasoup(socket, roomId)
+        if (!sfuResult.success) {
+          console.error('SFU init failed, falling back to audio/video only')
+        }
+
+        // Produce local tracks to SFU
+        const audioTrack = stream.getAudioTracks()[0]
+        const videoTrack = stream.getVideoTracks()[0]
+        if (audioTrack && !useMeetingStore.getState().isMuted) {
+          await produceAudio(audioTrack)
+        }
+        if (videoTrack) {
+          await produceVideo(videoTrack)
+        }
+
+        // Load chat messages & enumerate devices
         loadMessages(roomId)
+        enumerateDevices()
 
         // Join socket room
         socket.emit('room:join', { roomId })
-
         setIsJoining(false)
       } catch (error) {
         console.error('Failed to initialize meeting:', error)
@@ -108,87 +181,118 @@ export default function Meeting() {
     }
 
     initialize()
-
-    return () => {
-      handleCleanup()
-    }
+    return () => { handleCleanup() }
   }, [roomId])
 
-  // Socket event handlers
+  // =============================================
+  // SOCKET EVENT HANDLERS
+  // =============================================
   useEffect(() => {
     const socket = socketRef.current
     if (!socket) return
 
-    // Receive current participants when joining
+    // Room participants (on join)
     socket.on('room:participants', ({ participants: existingParticipants, isHost: hostStatus }) => {
       setParticipants(existingParticipants)
       setIsHost(hostStatus)
-
-      // Create peer connections with existing participants
-      existingParticipants.forEach((participant) => {
-        createPeer(participant.socketId, participant.user, true)
-      })
     })
 
-    // New user joined
+    // Existing mediasoup producers — consume them
+    socket.on('mediasoup:existingProducers', async ({ producers }) => {
+      for (const p of producers) {
+        producerMapRef.current.set(p.producerId, { peerId: p.userId, mediaType: p.mediaType })
+        await consumeProducer(p.producerId, p.userId, { _id: p.userId, name: p.userName }, p.mediaType)
+      }
+    })
+
+    // New remote producer
+    socket.on('mediasoup:newProducer', async ({ producerId, userId, userName, mediaType }) => {
+      producerMapRef.current.set(producerId, { peerId: userId, mediaType })
+      await consumeProducer(producerId, userId, { _id: userId, name: userName }, mediaType)
+    })
+
+    // Remote producer paused
+    socket.on('mediasoup:producerPaused', ({ producerId, socketId }) => {
+      const info = producerMapRef.current.get(producerId)
+      if (info) {
+        // The consumer will automatically be paused
+      }
+    })
+
+    // Remote producer resumed
+    socket.on('mediasoup:producerResumed', ({ producerId, socketId }) => {
+      const info = producerMapRef.current.get(producerId)
+      if (info) {
+        // The consumer will automatically resume
+      }
+    })
+
+    // Remote producer closed
+    socket.on('mediasoup:producerClosed', ({ producerId, socketId }) => {
+      const info = producerMapRef.current.get(producerId)
+      if (info) {
+        removeConsumer(producerId, info.peerId, info.mediaType)
+        producerMapRef.current.delete(producerId)
+      }
+    })
+
+    // User joined
     socket.on('room:user-joined', ({ user: joinedUser, socketId }) => {
-      toast(`${joinedUser.name} joined the meeting`)
+      toast(`${joinedUser.name} joined the meeting`, { icon: '👋' })
       addParticipant({ user: joinedUser, socketId })
+      // Play join sound
+      try { new Audio('/sounds/join.mp3').play().catch(() => {}) } catch {}
     })
 
     // User left
     socket.on('room:user-left', ({ socketId, userId, userName }) => {
       toast(`${userName || 'Someone'} left the meeting`)
       removeParticipant(userId)
-      removePeerConnection(socketId)
+      removeRemoteStream(userId)
+      // Play leave sound
+      try { new Audio('/sounds/leave.mp3').play().catch(() => {}) } catch {}
     })
 
-    // WebRTC signaling
-    socket.on('webrtc:offer', async ({ offer, fromSocketId, fromUser }) => {
-      const peer = createPeer(fromSocketId, fromUser, false)
-      await peer.signal(offer)
-    })
-
-    socket.on('webrtc:answer', async ({ answer, fromSocketId }) => {
-      const peer = peersRef.current.get(fromSocketId)
-      if (peer) {
-        peer.signal(answer)
-      }
-    })
-
-    socket.on('webrtc:ice-candidate', ({ candidate, fromSocketId }) => {
-      const peer = peersRef.current.get(fromSocketId)
-      if (peer) {
-        peer.signal(candidate)
-      }
-    })
-
-    // Media state updates
-    socket.on('media:user-muted', ({ socketId, userId, isMuted }) => {
+    // Media state updates from others
+    socket.on('media:user-muted', ({ userId, isMuted }) => {
       updateParticipant(userId, { isMuted })
     })
 
-    socket.on('media:user-video', ({ socketId, userId, isVideoOff }) => {
+    socket.on('media:user-video', ({ userId, isVideoOff }) => {
       updateParticipant(userId, { isVideoOff })
     })
 
-    socket.on('media:screen-share', ({ socketId, userId, userName, isScreenSharing }) => {
+    socket.on('media:screen-share', ({ userId, userName, isScreenSharing }) => {
       if (isScreenSharing) {
         toast(`${userName} started screen sharing`)
-        setScreenShareUser({ id: userId, name: userName, socketId })
+        setScreenShareUser({ id: userId, name: userName })
       } else {
         toast(`${userName} stopped screen sharing`)
-        setScreenShareStream(null)
         setScreenShareUser(null)
       }
     })
 
     // Host controls
     socket.on('host:force-mute', () => {
-      if (!isMuted) {
-        toggleMute()
-        toast('You have been muted by the host')
-      }
+      forceMute()
+      toast('You have been muted by the host', { icon: '🔇' })
+    })
+
+    socket.on('host:force-video-off', () => {
+      forceVideoOff()
+      toast('Your camera has been turned off by the host', { icon: '📷' })
+    })
+
+    socket.on('host:request-unmute', () => {
+      toast((t) => (
+        <div className="flex flex-col gap-2">
+          <span>The host is asking you to unmute</span>
+          <div className="flex gap-2">
+            <button className="px-3 py-1 bg-primary-600 rounded text-sm text-white" onClick={() => { toggleMute(); toast.dismiss(t.id) }}>Unmute</button>
+            <button className="px-3 py-1 bg-dark-400 rounded text-sm text-white" onClick={() => toast.dismiss(t.id)}>Decline</button>
+          </div>
+        </div>
+      ), { duration: 10000 })
     })
 
     socket.on('host:removed', () => {
@@ -201,149 +305,108 @@ export default function Meeting() {
       handleLeave()
     })
 
-    // Chat messages
+    socket.on('host:spotlight', ({ userId }) => {
+      useMeetingStore.setState({ spotlightUserId: userId })
+    })
+
+    socket.on('host:meeting-locked', ({ isLocked }) => {
+      useMeetingStore.setState({ isMeetingLocked: isLocked })
+      toast(isLocked ? 'Meeting has been locked' : 'Meeting has been unlocked', { icon: isLocked ? '🔒' : '🔓' })
+    })
+
+    // Waiting room
+    socket.on('room:waiting', ({ user: waitingUser, socketId }) => {
+      addToWaitingRoom(waitingUser, socketId)
+      toast(`${waitingUser.name} is waiting to join`, { icon: '🚪' })
+    })
+
+    socket.on('room:admitted', () => {
+      toast.success('You have been admitted to the meeting')
+    })
+
+    socket.on('room:denied', () => {
+      toast.error('Your request to join was denied')
+      navigate('/')
+    })
+
+    // Chat
     socket.on('chat:message', (message) => {
       addMessage(message)
+      if (!showChat) {
+        try { new Audio('/sounds/message.mp3').play().catch(() => {}) } catch {}
+      }
     })
 
     socket.on('chat:user-typing', ({ userId, userName, isTyping }) => {
-      // Handle typing indicator
+      setTypingUser(userId, userName, isTyping)
     })
 
     // Recording notifications
     socket.on('recording:started', ({ userName }) => {
-      toast(`${userName} started recording`)
+      setBeingRecorded(true, userName)
+      toast(`${userName} started recording`, { icon: '🔴' })
     })
 
     socket.on('recording:stopped', ({ userName }) => {
+      setBeingRecorded(false, null)
       toast(`${userName} stopped recording`)
     })
 
-    // Reactions
-    socket.on('reaction:hand-raise', ({ userName, isRaised }) => {
+    // Hand raise
+    socket.on('reaction:hand-raise', ({ userId, userName, isRaised }) => {
       if (isRaised) {
-        toast(`${userName} raised their hand`)
+        addHandRaise(userId, userName)
+        toast(`${userName} raised their hand`, { icon: '✋' })
+      } else {
+        removeHandRaise(userId)
       }
     })
 
-    socket.on('reaction:emoji', ({ userName, emoji }) => {
-      toast(`${userName}: ${emoji}`)
+    // Emoji reactions
+    socket.on('reaction:emoji', ({ userId, userName, emoji }) => {
+      addReaction(userId, userName, emoji)
     })
 
-    // Errors
+    // Captions
+    socket.on('caption:text', ({ userId, userName, text }) => {
+      addCaption(userId, userName, text)
+    })
+
+    // Settings updates
+    socket.on('meeting:settings-updated', ({ settings }) => {
+      if (currentMeeting) {
+        useMeetingStore.setState({
+          currentMeeting: { ...currentMeeting, settings: { ...currentMeeting.settings, ...settings } }
+        })
+      }
+    })
+
     socket.on('error', ({ message }) => {
       toast.error(message)
     })
 
     return () => {
-      socket.off('room:participants')
-      socket.off('room:user-joined')
-      socket.off('room:user-left')
-      socket.off('webrtc:offer')
-      socket.off('webrtc:answer')
-      socket.off('webrtc:ice-candidate')
-      socket.off('media:user-muted')
-      socket.off('media:user-video')
-      socket.off('media:screen-share')
-      socket.off('host:force-mute')
-      socket.off('host:removed')
-      socket.off('meeting:ended')
-      socket.off('chat:message')
-      socket.off('chat:user-typing')
-      socket.off('recording:started')
-      socket.off('recording:stopped')
-      socket.off('reaction:hand-raise')
-      socket.off('reaction:emoji')
-      socket.off('error')
+      const events = [
+        'room:participants', 'room:user-joined', 'room:user-left',
+        'mediasoup:existingProducers', 'mediasoup:newProducer', 'mediasoup:producerPaused',
+        'mediasoup:producerResumed', 'mediasoup:producerClosed',
+        'media:user-muted', 'media:user-video', 'media:screen-share',
+        'host:force-mute', 'host:force-video-off', 'host:request-unmute',
+        'host:removed', 'meeting:ended', 'host:spotlight', 'host:meeting-locked',
+        'room:waiting', 'room:admitted', 'room:denied',
+        'chat:message', 'chat:user-typing',
+        'recording:started', 'recording:stopped',
+        'reaction:hand-raise', 'reaction:emoji',
+        'caption:text', 'meeting:settings-updated', 'error'
+      ]
+      events.forEach(e => socket.off(e))
     }
-  }, [socketRef.current])
-
-  // Create peer connection
-  const createPeer = useCallback((targetSocketId, targetUser, initiator) => {
-    if (peersRef.current.has(targetSocketId)) {
-      return peersRef.current.get(targetSocketId)
-    }
-
-    const peer = new SimplePeer({
-      initiator,
-      trickle: true,
-      stream: localStream,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' }
-        ]
-      }
-    })
-
-    peer.on('signal', (data) => {
-      const socket = socketRef.current
-      if (!socket) return
-
-      if (data.type === 'offer') {
-        socket.emit('webrtc:offer', { targetSocketId, offer: data })
-      } else if (data.type === 'answer') {
-        socket.emit('webrtc:answer', { targetSocketId, answer: data })
-      } else if (data.candidate) {
-        socket.emit('webrtc:ice-candidate', { targetSocketId, candidate: data })
-      }
-    })
-
-    peer.on('stream', (remoteStream) => {
-      setPeerStreams((prev) => {
-        const newMap = new Map(prev)
-        newMap.set(targetSocketId, { stream: remoteStream, user: targetUser })
-        return newMap
-      })
-    })
-
-    peer.on('close', () => {
-      removePeerConnection(targetSocketId)
-    })
-
-    peer.on('error', (error) => {
-      console.error('Peer error:', error)
-      removePeerConnection(targetSocketId)
-    })
-
-    peersRef.current.set(targetSocketId, peer)
-    addPeer(targetSocketId, peer)
-
-    return peer
-  }, [localStream])
-
-  // Remove peer connection
-  const removePeerConnection = useCallback((socketId) => {
-    const peer = peersRef.current.get(socketId)
-    if (peer) {
-      peer.destroy()
-      peersRef.current.delete(socketId)
-      removePeer(socketId)
-    }
-
-    setPeerStreams((prev) => {
-      const newMap = new Map(prev)
-      newMap.delete(socketId)
-      return newMap
-    })
-  }, [])
+  }, [socketRef.current, showChat])
 
   // Cleanup on unmount
   const handleCleanup = useCallback(() => {
-    // Stop all media tracks to release camera and microphone
     const stream = useMeetingStore.getState().localStream
-    if (stream) {
-      stream.getTracks().forEach(track => {
-        track.stop()
-      })
-    }
-
-    // Close all peer connections
-    peersRef.current.forEach((peer) => peer.destroy())
-    peersRef.current.clear()
-
-    // Clear chat and reset meeting state
+    if (stream) stream.getTracks().forEach(t => t.stop())
     clearMessages()
     useMeetingStore.getState().setLocalStream(null)
   }, [])
@@ -354,50 +417,38 @@ export default function Meeting() {
     navigate('/')
   }, [])
 
-  // Toggle screen share
+  // End meeting for all (host only)
+  const handleEndForAll = useCallback(async () => {
+    const socket = socketRef.current
+    const { currentMeeting } = useMeetingStore.getState()
+    if (socket && currentMeeting) {
+      socket.emit('host:end-meeting', { roomId: currentMeeting.roomId })
+    }
+    await leaveMeeting()
+    navigate('/')
+  }, [])
+
+  // Screen share toggle
   const handleScreenShare = useCallback(async () => {
     if (isScreenSharing) {
-      stopScreenShare()
-      
-      // Replace screen stream with camera stream in all peer connections
-      peersRef.current.forEach((peer) => {
-        if (localStream) {
-          const videoTrack = localStream.getVideoTracks()[0]
-          const sender = peer._pc?.getSenders()?.find(s => s.track?.kind === 'video')
-          if (sender && videoTrack) {
-            sender.replaceTrack(videoTrack)
-          }
-        }
-      })
+      await stopScreenShare()
     } else {
       const result = await startScreenShare()
-      if (result.success) {
-        // Replace camera stream with screen stream in all peer connections
-        peersRef.current.forEach((peer) => {
-          const screenTrack = result.stream.getVideoTracks()[0]
-          const sender = peer._pc?.getSenders()?.find(s => s.track?.kind === 'video')
-          if (sender && screenTrack) {
-            sender.replaceTrack(screenTrack)
-          }
-        })
-      } else {
-        toast.error('Failed to share screen')
+      if (!result.success) {
+        toast.error(result.message || 'Failed to share screen')
       }
     }
-  }, [isScreenSharing, localStream])
+  }, [isScreenSharing])
 
-  // Toggle recording
+  // Recording toggle
   const handleRecording = useCallback(() => {
     if (isRecording) {
       stopRecording()
       toast.success('Recording saved')
     } else {
       const result = startRecording()
-      if (result.success) {
-        toast.success('Recording started')
-      } else {
-        toast.error(result.message || 'Failed to start recording')
-      }
+      if (result.success) toast.success('Recording started')
+      else toast.error(result.message || 'Failed to start recording')
     }
   }, [isRecording])
 
@@ -407,6 +458,15 @@ export default function Meeting() {
     navigator.clipboard.writeText(link)
     toast.success('Meeting link copied!')
   }, [roomId])
+
+  // Toggle PiP
+  const handleTogglePiP = useCallback(() => {
+    if (isPiP) {
+      disablePiP()
+    } else {
+      enablePiP()
+    }
+  }, [isPiP, disablePiP, enablePiP])
 
   // Loading state
   if (isJoining) {
@@ -422,37 +482,60 @@ export default function Meeting() {
 
   return (
     <div className="h-screen bg-dark-100 flex flex-col overflow-hidden">
+      {/* Recording banner */}
+      {isBeingRecorded && (
+        <div className="bg-red-600/90 text-white text-center py-1 text-sm flex items-center justify-center gap-2">
+          <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+          This meeting is being recorded{recordingUser ? ` by ${recordingUser}` : ''}
+        </div>
+      )}
+
       {/* Header */}
-      <MeetingHeader 
+      <MeetingHeader
         roomId={roomId}
         title={currentMeeting?.title}
         onCopyLink={handleCopyLink}
         participantCount={participants.length + 1}
+        isBeingRecorded={isBeingRecorded}
+        layout={layout}
+        onLayoutChange={setLayout}
+        handRaisedCount={handRaisedUsers.length}
       />
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Video Grid */}
         <div className="flex-1 relative">
           <VideoGrid
             localStream={localStream}
             localVideoRef={localVideoRef}
-            peerStreams={peerStreams}
+            remoteStreams={remoteStreams}
             user={user}
             participants={participants}
             isMuted={isMuted}
             isVideoOff={isVideoOff}
-            screenShareStream={screenShareStream}
             screenShareUser={screenShareUser}
+            layout={layout}
+            pinnedUserId={pinnedUserId}
+            spotlightUserId={spotlightUserId}
+            activeSpeakerId={activeSpeakerId}
+            handRaisedUsers={handRaisedUsers}
+            isHandRaised={isHandRaised}
+            isHost={isHost}
+            onPinUser={pinUser}
+            onSpotlightUser={spotlightUser}
           />
+
+          {/* Emoji Reactions Overlay */}
+          <EmojiReactions reactions={activeReactions} />
+
+          {/* Captions Overlay */}
+          {captionsEnabled && <CaptionsOverlay captions={captions} />}
         </div>
 
         {/* Side Panels */}
         {showChat && (
-          <ChatPanel 
-            roomId={roomId}
-            onClose={() => setShowChat(false)}
-          />
+          <ChatPanel roomId={roomId} onClose={() => setShowChat(false)} />
         )}
 
         {showParticipants && (
@@ -460,10 +543,53 @@ export default function Meeting() {
             participants={participants}
             user={user}
             isHost={isHost}
+            roomId={roomId}
+            handRaisedUsers={handRaisedUsers}
+            waitingRoomUsers={waitingRoomUsers}
             onClose={() => setShowParticipants(false)}
+            onAdmit={admitFromWaitingRoom}
+            onDeny={denyFromWaitingRoom}
+          />
+        )}
+
+        {showMeetingSettings && (
+          <MeetingSettingsPanel
+            meeting={currentMeeting}
+            isHost={isHost}
+            isMeetingLocked={isMeetingLocked}
+            onClose={() => setShowMeetingSettings(false)}
           />
         )}
       </div>
+
+      {/* Device Settings Modal */}
+      {showDeviceSettings && (
+        <DeviceSettings onClose={() => setShowDeviceSettings(false)} />
+      )}
+
+      {/* Whiteboard Modal */}
+      {showWhiteboard && (
+        <Whiteboard roomId={roomId} onClose={() => setShowWhiteboard(false)} />
+      )}
+
+      {/* Leave Dialog */}
+      {showLeaveDialog && (
+        <div className="modal-backdrop" onClick={() => setShowLeaveDialog(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-4">Leave Meeting</h3>
+            <div className="space-y-3">
+              <button onClick={() => { setShowLeaveDialog(false); handleLeave() }}
+                className="btn btn-secondary w-full">Leave Meeting</button>
+              {isHost && (
+                <button onClick={() => { setShowLeaveDialog(false); handleEndForAll() }}
+                  className="btn btn-danger w-full">End Meeting for All</button>
+              )}
+              <button onClick={() => setShowLeaveDialog(false)}
+                className="btn btn-ghost w-full">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Controls */}
       <MeetingControls
@@ -472,15 +598,27 @@ export default function Meeting() {
         isScreenSharing={isScreenSharing}
         isRecording={isRecording}
         isHost={isHost}
+        isHandRaised={isHandRaised}
         showChat={showChat}
         showParticipants={showParticipants}
+        onTogglePiP={handleTogglePiP}
+        onOpenWhiteboard={() => setShowWhiteboard(true)}
+        isPiP={isPiP}
+        captionsEnabled={captionsEnabled}
+        handRaisedCount={handRaisedUsers.length}
         onToggleMute={toggleMute}
         onToggleVideo={toggleVideo}
         onToggleScreenShare={handleScreenShare}
         onToggleRecording={handleRecording}
         onToggleChat={() => setShowChat(!showChat)}
         onToggleParticipants={() => setShowParticipants(!showParticipants)}
-        onLeave={handleLeave}
+        onToggleHandRaise={toggleHandRaise}
+        onToggleCaptions={toggleCaptions}
+        onSendReaction={sendReaction}
+        onLeave={() => setShowLeaveDialog(true)}
+        onOpenSettings={() => setShowDeviceSettings(true)}
+        onOpenMeetingSettings={() => setShowMeetingSettings(true)}
+        chatUnread={useChatStore.getState().unreadCount}
       />
     </div>
   )

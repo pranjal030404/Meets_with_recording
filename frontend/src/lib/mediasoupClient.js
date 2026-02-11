@@ -177,9 +177,9 @@ class MediasoupClientService {
       this.producers.video = await this.sendTransport.produce({
         track,
         encodings: [
-          { maxBitrate: 100000, scaleResolutionDownBy: 4 },
-          { maxBitrate: 300000, scaleResolutionDownBy: 2 },
-          { maxBitrate: 900000, scaleResolutionDownBy: 1 },
+          { maxBitrate: 150000, scaleResolutionDownBy: 4 },  // Low: 180p
+          { maxBitrate: 500000, scaleResolutionDownBy: 2 },  // Med: 360p-540p
+          { maxBitrate: 2500000, scaleResolutionDownBy: 1 }, // High: 720p-1080p
         ],
         codecOptions: {
           videoGoogleStartBitrate: 1000,

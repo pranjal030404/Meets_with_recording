@@ -9,7 +9,7 @@ const participantSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['host', 'co-host', 'participant'],
+    enum: ['host', 'co-host', 'presenter', 'participant'],
     default: 'participant'
   },
   joinedAt: {
@@ -106,6 +106,10 @@ const meetingSchema = new mongoose.Schema({
       default: true
     },
     muteOnEntry: {
+      type: Boolean,
+      default: false
+    },
+    isLocked: {
       type: Boolean,
       default: false
     },
