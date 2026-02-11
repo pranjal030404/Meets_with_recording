@@ -26,6 +26,7 @@ export default function JoinMeeting() {
   const [isCheckingMeeting, setIsCheckingMeeting] = useState(false)
 
   const videoRef = useRef(null)
+  const streamRef = useRef(null)
 
   // Initialize camera preview
   useEffect(() => {
@@ -35,6 +36,7 @@ export default function JoinMeeting() {
           video: { width: 640, height: 480 },
           audio: true
         })
+        streamRef.current = stream
         setLocalStreamState(stream)
         if (videoRef.current) {
           videoRef.current.srcObject = stream
@@ -48,8 +50,12 @@ export default function JoinMeeting() {
     initCamera()
 
     return () => {
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop())
+      // Use ref to ensure we always have the current stream reference
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop()
+        })
+        streamRef.current = null
       }
     }
   }, [])
@@ -156,7 +162,7 @@ export default function JoinMeeting() {
                   autoPlay
                   muted
                   playsInline
-                  className="w-full h-full object-cover mirror"
+                  className="w-full h-full object-contain bg-dark-300"
                   style={{ transform: 'scaleX(-1)' }}
                 />
               )}

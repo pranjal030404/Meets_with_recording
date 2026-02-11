@@ -103,11 +103,18 @@ teamSchema.pre('save', function(next) {
 
 // Methods
 teamSchema.methods.isMember = function(userId) {
-  return this.members.some(member => member.user.toString() === userId.toString());
+  return this.members.some(member => {
+    // Handle both populated and non-populated user field
+    const memberId = member.user._id || member.user;
+    return memberId.toString() === userId.toString();
+  });
 };
 
 teamSchema.methods.getMemberRole = function(userId) {
-  const member = this.members.find(m => m.user.toString() === userId.toString());
+  const member = this.members.find(m => {
+    const memberId = m.user._id || m.user;
+    return memberId.toString() === userId.toString();
+  });
   return member ? member.role : null;
 };
 
@@ -124,7 +131,10 @@ teamSchema.methods.addMember = function(userId, role = 'member') {
 };
 
 teamSchema.methods.removeMember = function(userId) {
-  this.members = this.members.filter(m => m.user.toString() !== userId.toString());
+  this.members = this.members.filter(m => {
+    const memberId = m.user._id || m.user;
+    return memberId.toString() !== userId.toString();
+  });
   return this;
 };
 

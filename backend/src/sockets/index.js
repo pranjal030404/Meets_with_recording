@@ -2,10 +2,15 @@ import { verifySocketToken } from '../middleware/auth.js';
 import Meeting from '../models/Meeting.js';
 import Message from '../models/Message.js';
 import Team from '../models/Team.js';
+import mediasoupService from '../lib/mediasoup.js';
 
 // Store connected users and their rooms
 const connectedUsers = new Map();
 const roomParticipants = new Map();
+
+// Store user transports and producers
+const userTransports = new Map(); // Map<socketId, { send: transportId, recv: transportId }>
+const userProducers = new Map(); // Map<socketId, { audio: producerId, video: producerId, screen: producerId }>
 
 /**
  * Initialize all Socket.IO event handlers
@@ -92,6 +97,30 @@ export const initializeSocketHandlers = (io) => {
           isHost: meeting.host.toString() === socket.user._id.toString()
         });
 
+        // Send existing producers to joining user
+        const existingProducers = [];
+        for (const [participantSocketId, participant] of roomUsers) {
+          if (participantSocketId !== socket.user._id.toString()) {
+            const producers = userProducers.get(participant.socketId);
+            if (producers) {
+              for (const [mediaType, producerId] of Object.entries(producers)) {
+                existingProducers.push({
+                  producerId,
+                  socketId: participant.socketId,
+                  userId: participant.user._id,
+                  userName: participant.user.name,
+                  kind: mediaType === 'screen' ? 'video' : mediaType,
+                  mediaType,
+                });
+              }
+            }
+          }
+        }
+
+        if (existingProducers.length > 0) {
+          socket.emit('mediasoup:existingProducers', { producers: existingProducers });
+        }
+
         // Notify others about new participant
         socket.to(roomId).emit('room:user-joined', {
           user: {
@@ -118,42 +147,210 @@ export const initializeSocketHandlers = (io) => {
     });
 
     // ============================================
-    // WEBRTC SIGNALING EVENTS
+    // MEDIASOUP SFU SIGNALING EVENTS
     // ============================================
 
     /**
-     * Send WebRTC offer to specific peer
+     * Get router RTP capabilities for a room
      */
-    socket.on('webrtc:offer', ({ targetSocketId, offer }) => {
-      io.to(targetSocketId).emit('webrtc:offer', {
-        offer,
-        fromSocketId: socket.id,
-        fromUser: {
-          _id: socket.user._id,
-          name: socket.user.name,
-          avatar: socket.user.avatar
+    socket.on('mediasoup:getRouterRtpCapabilities', async ({ roomId }, callback) => {
+      try {
+        const rtpCapabilities = await mediasoupService.getRouterRtpCapabilities(roomId);
+        callback({ success: true, rtpCapabilities });
+      } catch (error) {
+        console.error('Get RTP capabilities error:', error);
+        callback({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * Create WebRTC transport (for sending or receiving media)
+     */
+    socket.on('mediasoup:createWebRtcTransport', async ({ roomId, direction }, callback) => {
+      try {
+        const transportParams = await mediasoupService.createWebRtcTransport(roomId, direction);
+        
+        // Store transport ID for this socket
+        if (!userTransports.has(socket.id)) {
+          userTransports.set(socket.id, {});
         }
-      });
+        
+        const transports = userTransports.get(socket.id);
+        if (direction === 'send') {
+          transports.send = transportParams.id;
+        } else {
+          transports.recv = transportParams.id;
+        }
+
+        callback({ success: true, transportParams });
+      } catch (error) {
+        console.error('Create transport error:', error);
+        callback({ success: false, error: error.message });
+      }
     });
 
     /**
-     * Send WebRTC answer to specific peer
+     * Connect transport with DTLS parameters
      */
-    socket.on('webrtc:answer', ({ targetSocketId, answer }) => {
-      io.to(targetSocketId).emit('webrtc:answer', {
-        answer,
-        fromSocketId: socket.id
-      });
+    socket.on('mediasoup:connectTransport', async ({ transportId, dtlsParameters }, callback) => {
+      try {
+        await mediasoupService.connectTransport(transportId, dtlsParameters);
+        callback({ success: true });
+      } catch (error) {
+        console.error('Connect transport error:', error);
+        callback({ success: false, error: error.message });
+      }
     });
 
     /**
-     * Send ICE candidate to specific peer
+     * Produce media (start sending audio/video/screen)
      */
-    socket.on('webrtc:ice-candidate', ({ targetSocketId, candidate }) => {
-      io.to(targetSocketId).emit('webrtc:ice-candidate', {
-        candidate,
-        fromSocketId: socket.id
-      });
+    socket.on('mediasoup:produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
+      try {
+        const { id: producerId } = await mediasoupService.produce(
+          transportId,
+          kind,
+          rtpParameters,
+          { ...appData, socketId: socket.id, userId: socket.user._id }
+        );
+
+        // Store producer ID
+        if (!userProducers.has(socket.id)) {
+          userProducers.set(socket.id, {});
+        }
+        
+        const producers = userProducers.get(socket.id);
+        const mediaType = appData.mediaType || kind; // 'audio', 'video', or 'screen'
+        producers[mediaType] = producerId;
+
+        // Notify all other users in the room about new producer
+        if (socket.roomId) {
+          socket.to(socket.roomId).emit('mediasoup:newProducer', {
+            producerId,
+            socketId: socket.id,
+            userId: socket.user._id,
+            userName: socket.user.name,
+            kind,
+            mediaType,
+          });
+        }
+
+        callback({ success: true, producerId });
+      } catch (error) {
+        console.error('Produce error:', error);
+        callback({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * Consume media (start receiving from another user)
+     */
+    socket.on('mediasoup:consume', async ({ roomId, producerId, rtpCapabilities }, callback) => {
+      try {
+        const transports = userTransports.get(socket.id);
+        if (!transports || !transports.recv) {
+          throw new Error('Receive transport not created');
+        }
+
+        const consumerParams = await mediasoupService.consume(
+          roomId,
+          transports.recv,
+          producerId,
+          rtpCapabilities
+        );
+
+        callback({ success: true, consumerParams });
+      } catch (error) {
+        console.error('Consume error:', error);
+        callback({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * Resume consumer (start receiving media after initial setup)
+     */
+    socket.on('mediasoup:resumeConsumer', async ({ consumerId }, callback) => {
+      try {
+        await mediasoupService.resumeConsumer(consumerId);
+        callback({ success: true });
+      } catch (error) {
+        console.error('Resume consumer error:', error);
+        callback({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * Pause/Resume producer
+     */
+    socket.on('mediasoup:pauseProducer', async ({ producerId }, callback) => {
+      try {
+        await mediasoupService.pauseProducer(producerId);
+        
+        // Notify room about paused producer
+        if (socket.roomId) {
+          socket.to(socket.roomId).emit('mediasoup:producerPaused', {
+            producerId,
+            socketId: socket.id,
+          });
+        }
+        
+        callback({ success: true });
+      } catch (error) {
+        console.error('Pause producer error:', error);
+        callback({ success: false, error: error.message });
+      }
+    });
+
+    socket.on('mediasoup:resumeProducer', async ({ producerId }, callback) => {
+      try {
+        await mediasoupService.resumeProducer(producerId);
+        
+        // Notify room about resumed producer
+        if (socket.roomId) {
+          socket.to(socket.roomId).emit('mediasoup:producerResumed', {
+            producerId,
+            socketId: socket.id,
+          });
+        }
+        
+        callback({ success: true });
+      } catch (error) {
+        console.error('Resume producer error:', error);
+        callback({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * Close producer (stop sending media)
+     */
+    socket.on('mediasoup:closeProducer', ({ producerId }, callback) => {
+      try {
+        mediasoupService.closeProducer(producerId);
+        
+        // Remove from user producers
+        const producers = userProducers.get(socket.id);
+        if (producers) {
+          for (const [key, value] of Object.entries(producers)) {
+            if (value === producerId) {
+              delete producers[key];
+              break;
+            }
+          }
+        }
+
+        // Notify room
+        if (socket.roomId) {
+          socket.to(socket.roomId).emit('mediasoup:producerClosed', {
+            producerId,
+            socketId: socket.id,
+          });
+        }
+
+        callback({ success: true });
+      } catch (error) {
+        console.error('Close producer error:', error);
+        callback({ success: false, error: error.message });
+      }
     });
 
     // ============================================
@@ -465,6 +662,22 @@ export const initializeSocketHandlers = (io) => {
     socket.on('disconnect', () => {
       console.log(`❌ User disconnected: ${socket.user.name} (${socket.id})`);
       
+      // Clean up mediasoup resources
+      const producers = userProducers.get(socket.id);
+      if (producers) {
+        for (const producerId of Object.values(producers)) {
+          mediasoupService.closeProducer(producerId);
+        }
+        userProducers.delete(socket.id);
+      }
+
+      const transports = userTransports.get(socket.id);
+      if (transports) {
+        if (transports.send) mediasoupService.closeTransport(transports.send);
+        if (transports.recv) mediasoupService.closeTransport(transports.recv);
+        userTransports.delete(socket.id);
+      }
+
       handleRoomLeave(socket, io);
       connectedUsers.delete(socket.user._id.toString());
     });

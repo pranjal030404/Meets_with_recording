@@ -30,7 +30,8 @@ const useTeamStore = create((set, get) => ({
       set({ currentTeam: response.data, teamMembers: response.data.members, loading: false });
       return response.data;
     } catch (error) {
-      set({ error: error.response?.data?.message || 'Failed to fetch team', loading: false });
+      const errorMessage = error.response?.data?.message || 'Failed to fetch team';
+      set({ error: errorMessage, loading: false, currentTeam: null });
       throw error;
     }
   },

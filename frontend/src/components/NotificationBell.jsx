@@ -138,9 +138,9 @@ const NotificationBell = () => {
       {/* Bell Icon */}
       <button
         onClick={() => setShowDropdown(!showDropdown)}
-        className="relative p-2 hover:bg-gray-100 rounded-lg transition"
+        className="relative p-2 hover:bg-dark-400 rounded-lg transition"
       >
-        <Bell className="w-6 h-6 text-gray-700" />
+        <Bell className="w-6 h-6 text-gray-300" />
         {unreadCount > 0 && (
           <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">
             {unreadCount > 9 ? '9+' : unreadCount}
@@ -150,24 +150,24 @@ const NotificationBell = () => {
 
       {/* Dropdown */}
       {showDropdown && (
-        <div className="absolute right-0 mt-2 w-96 bg-white rounded-lg shadow-2xl border border-gray-200 z-50 max-h-[600px] flex flex-col">
+        <div className="absolute right-0 mt-2 w-96 bg-dark-200 rounded-xl shadow-2xl border border-dark-400 z-50 max-h-[600px] flex flex-col">
           {/* Header */}
-          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900">Notifications</h3>
+          <div className="p-4 border-b border-dark-400 flex items-center justify-between">
+            <h3 className="font-semibold text-white">Notifications</h3>
             <div className="flex items-center gap-2">
               {unreadCount > 0 && (
                 <button
                   onClick={markAllAsRead}
-                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                  className="text-xs text-primary-400 hover:text-primary-300 font-medium transition"
                 >
                   Mark all read
                 </button>
               )}
               <button
                 onClick={() => setShowDropdown(false)}
-                className="p-1 hover:bg-gray-100 rounded"
+                className="p-1 hover:bg-dark-400 rounded transition"
               >
-                <X className="w-4 h-4 text-gray-500" />
+                <X className="w-4 h-4 text-gray-400" />
               </button>
             </div>
           </div>
@@ -176,17 +176,17 @@ const NotificationBell = () => {
           <div className="overflow-y-auto flex-1">
             {notifications.length === 0 ? (
               <div className="p-8 text-center">
-                <Bell className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                <Bell className="w-12 h-12 text-gray-600 mx-auto mb-3" />
                 <p className="text-gray-500">No notifications</p>
               </div>
             ) : (
-              <div className="divide-y divide-gray-100">
+              <div className="divide-y divide-dark-400">
                 {notifications.map(notification => (
                   <div
                     key={notification._id}
                     onClick={() => handleNotificationClick(notification)}
-                    className={`p-4 hover:bg-gray-50 cursor-pointer transition ${
-                      !notification.isRead ? 'bg-blue-50' : ''
+                    className={`p-4 hover:bg-dark-300 cursor-pointer transition ${
+                      !notification.isRead ? 'bg-primary-600/10' : ''
                     } ${getPriorityColor(notification.priority)}`}
                   >
                     <div className="flex gap-3">
@@ -195,14 +195,14 @@ const NotificationBell = () => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
-                          <p className="font-semibold text-gray-900 text-sm">
+                          <p className="font-semibold text-white text-sm">
                             {notification.title}
                           </p>
                           {!notification.isRead && (
-                            <span className="flex-shrink-0 w-2 h-2 bg-blue-600 rounded-full mt-1"></span>
+                            <span className="flex-shrink-0 w-2 h-2 bg-primary-500 rounded-full mt-1"></span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-700 mt-1 line-clamp-2">
+                        <p className="text-sm text-gray-400 mt-1 line-clamp-2">
                           {notification.message}
                         </p>
                         <div className="flex items-center justify-between mt-2">
@@ -214,7 +214,7 @@ const NotificationBell = () => {
                               e.stopPropagation();
                               deleteNotification(notification._id);
                             }}
-                            className="p-1 hover:bg-gray-200 rounded text-gray-500 hover:text-red-600"
+                            className="p-1 hover:bg-dark-400 rounded text-gray-500 hover:text-red-400 transition"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -229,13 +229,13 @@ const NotificationBell = () => {
 
           {/* Footer */}
           {notifications.length > 0 && (
-            <div className="p-3 border-t border-gray-200 text-center">
+            <div className="p-3 border-t border-dark-400 text-center">
               <button
                 onClick={() => {
                   navigate('/notifications');
                   setShowDropdown(false);
                 }}
-                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                className="text-sm text-primary-400 hover:text-primary-300 font-medium transition"
               >
                 View all notifications
               </button>

@@ -331,12 +331,21 @@ export default function Meeting() {
 
   // Cleanup on unmount
   const handleCleanup = useCallback(() => {
+    // Stop all media tracks to release camera and microphone
+    const stream = useMeetingStore.getState().localStream
+    if (stream) {
+      stream.getTracks().forEach(track => {
+        track.stop()
+      })
+    }
+
     // Close all peer connections
     peersRef.current.forEach((peer) => peer.destroy())
     peersRef.current.clear()
 
-    // Clear chat
+    // Clear chat and reset meeting state
     clearMessages()
+    useMeetingStore.getState().setLocalStream(null)
   }, [])
 
   // Leave meeting
