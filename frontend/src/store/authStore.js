@@ -31,7 +31,9 @@ export const useAuthStore = create((set, get) => ({
 
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.message || 'Login failed'
+      const message = !error.response
+        ? 'Cannot reach backend server. Start backend (port 5000) and MongoDB, then try again.'
+        : error.response?.data?.message || 'Login failed'
       set({ isLoading: false, error: message })
       return { success: false, message }
     }
@@ -59,7 +61,9 @@ export const useAuthStore = create((set, get) => ({
 
       return { success: true }
     } catch (error) {
-      const message = error.response?.data?.message || 'Signup failed'
+      const message = !error.response
+        ? 'Cannot reach backend server. Start backend (port 5000) and MongoDB, then try again.'
+        : error.response?.data?.message || 'Signup failed'
       set({ isLoading: false, error: message })
       return { success: false, message }
     }

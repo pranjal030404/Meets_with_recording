@@ -7,7 +7,11 @@ import {
   ArrowLeft,
   Calendar,
   ExternalLink,
-  Trash2
+  Download,
+  FileText,
+  FileJson,
+  Subtitles,
+  CircleDot
 } from 'lucide-react'
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
@@ -118,9 +122,32 @@ export default function MeetingHistory() {
   )
 }
 
+function toAbsoluteUrl(pathOrUrl) {
+  if (!pathOrUrl) return null
+  if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+    return pathOrUrl
+  }
+
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+  return `${apiBase}${pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`}`
+}
+
+function formatRecordingDuration(seconds) {
+  const duration = Number(seconds)
+  if (!Number.isFinite(duration) || duration <= 0) return 'N/A'
+
+  const rounded = Math.floor(duration)
+  const mins = Math.floor(rounded / 60)
+  const secs = rounded % 60
+
+  if (mins === 0) return `${secs}s`
+  return `${mins}m ${secs}s`
+}
+
 function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration }) {
   const isHost = meeting.host?._id === currentUserId
   const participantCount = meeting.participants?.length || 0
+  const recordings = Array.isArray(meeting.recordings) ? [...meeting.recordings].reverse() : []
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -186,6 +213,97 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
             </button>
           )}
         </div>
+      </div>
+
+      <div className="mt-5 border-t border-dark-400 pt-4">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+            <Download className="w-4 h-4 text-primary-400" />
+            Recordings & Transcripts
+          </h4>
+          <span className="text-xs text-gray-400">
+            {recordings.length} file set{recordings.length !== 1 ? 's' : ''}
+          </span>
+        </div>
+
+        {recordings.length === 0 ? (
+          <p className="text-sm text-gray-500">No recordings uploaded for this meeting yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {recordings.map((recording, index) => {
+              const recordingUrl = toAbsoluteUrl(recording.url)
+              const transcript = recording.transcription || {}
+              const transcriptFiles = transcript.files || {}
+
+              const transcriptLinks = [
+                { label: 'JSON', url: toAbsoluteUrl(transcriptFiles.json?.url), icon: FileJson },
+                { label: 'TXT', url: toAbsoluteUrl(transcriptFiles.txt?.url), icon: FileText },
+                { label: 'SRT', url: toAbsoluteUrl(transcriptFiles.srt?.url), icon: Subtitles },
+                { label: 'VTT', url: toAbsoluteUrl(transcriptFiles.vtt?.url), icon: CircleDot }
+              ].filter(file => file.url)
+
+              return (
+                <div key={`${recording.filename || 'recording'}-${index}`} className="bg-dark-100 rounded-lg p-3">
+                  <div className="flex flex-wrap items-center gap-2 justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-white">
+                        {recording.originalName || recording.filename || `Recording ${index + 1}`}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        Duration: {formatRecordingDuration(recording.duration)}
+                        {recording.createdAt ? ` • Uploaded ${formatDate(recording.createdAt)}` : ''}
+                      </p>
+                    </div>
+
+                    {recordingUrl && (
+                      <a
+                        href={recordingUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-secondary text-xs"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download Recording
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="mt-2 text-xs">
+                    <span className={`px-2 py-0.5 rounded-full ${
+                      transcript.status === 'completed'
+                        ? 'bg-green-500/20 text-green-300'
+                        : transcript.status === 'failed'
+                        ? 'bg-red-500/20 text-red-300'
+                        : 'bg-yellow-500/20 text-yellow-300'
+                    }`}>
+                      Transcript: {transcript.status || 'pending'}
+                    </span>
+                  </div>
+
+                  {transcriptLinks.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {transcriptLinks.map((file) => {
+                        const Icon = file.icon
+                        return (
+                          <a
+                            key={`${recording.filename || 'rec'}-${file.label}`}
+                            href={file.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-dark-300 hover:bg-dark-400 text-gray-200 text-xs transition-colors"
+                          >
+                            <Icon className="w-3.5 h-3.5" />
+                            {file.label}
+                          </a>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )

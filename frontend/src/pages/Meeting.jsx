@@ -444,7 +444,7 @@ export default function Meeting() {
   const handleRecording = useCallback(() => {
     if (isRecording) {
       stopRecording()
-      toast.success('Recording saved')
+      toast.success('Recording stopped. Upload and transcription are processing.')
     } else {
       const result = startRecording()
       if (result.success) toast.success('Recording started')

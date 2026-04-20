@@ -419,15 +419,31 @@ export const useMeetingStore = create((set, get) => ({
       return { success: false, message: 'No active audio or video tracks available' }
     }
     try {
+      const recordingStartedAt = Date.now()
       const mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: 'video/webm;codecs=vp9,opus' })
       const recordedChunks = []
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data) }
       mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunks, { type: 'video/webm' })
         const url = URL.createObjectURL(blob)
+        const fileName = `meeting-recording-${Date.now()}.webm`
         const a = document.createElement('a'); a.href = url
-        a.download = `meeting-recording-${Date.now()}.webm`
+        a.download = fileName
         document.body.appendChild(a); a.click(); document.body.removeChild(a)
+
+        if (currentMeeting?.roomId) {
+          const durationSeconds = Number(((Date.now() - recordingStartedAt) / 1000).toFixed(2))
+          const formData = new FormData()
+          formData.append('recording', blob, fileName)
+          formData.append('duration', String(durationSeconds))
+          formData.append('mimeType', blob.type || 'video/webm')
+
+          api.post(`/meetings/${currentMeeting.roomId}/recordings`, formData)
+            .catch((error) => {
+              console.error('Recording upload error:', error)
+            })
+        }
+
         URL.revokeObjectURL(url); set({ recordedChunks: [] })
       }
       mediaRecorder.start(1000)
