@@ -1,10 +1,40 @@
 import express from 'express';
+import fs from 'fs/promises';
+import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import Meeting from '../models/Meeting.js';
 import Team from '../models/Team.js';
 import Notification from '../models/Notification.js';
 import { protect } from '../middleware/auth.js';
+import { saveMeetingRecording } from '../services/recordingService.js';
 
 const router = express.Router();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const temporaryRecordingRoot = path.resolve(__dirname, '../../uploads/tmp/recordings');
+
+const recordingUpload = multer({
+  storage: multer.diskStorage({
+    destination: async (req, file, callback) => {
+      try {
+        const roomTempDir = path.join(temporaryRecordingRoot, req.params.roomId);
+        await fs.mkdir(roomTempDir, { recursive: true });
+        callback(null, roomTempDir);
+      } catch (error) {
+        callback(error);
+      }
+    },
+    filename: (req, file, callback) => {
+      const extension = path.extname(file.originalname || '').toLowerCase() || '.webm';
+      callback(null, `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${extension}`);
+    }
+  }),
+  limits: {
+    fileSize: 1024 * 1024 * 512
+  }
+});
 
 /**
  * @route   POST /api/meetings
@@ -493,6 +523,72 @@ router.post('/:roomId/end', protect, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error ending meeting',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/meetings/:roomId/recordings
+ * @desc    Upload a meeting recording and generate transcript artifacts
+ * @access  Private
+ */
+router.post('/:roomId/recordings', protect, recordingUpload.single('recording'), async (req, res) => {
+  try {
+    const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        message: 'Meeting not found'
+      });
+    }
+
+    const isMeetingMember = meeting.isHost(req.user._id) || meeting.hasParticipant(req.user._id);
+    if (!isMeetingMember) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only meeting participants can upload recordings'
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Recording file is required'
+      });
+    }
+
+    const duration = Number(req.body.duration);
+    const language = req.body.language || process.env.TRANSCRIPTION_LANGUAGE || 'en';
+
+    const result = await saveMeetingRecording({
+      roomId: meeting.roomId,
+      sourcePath: req.file.path,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      duration: Number.isFinite(duration) ? duration : 0,
+      recordedBy: req.user._id,
+      language
+    });
+
+    meeting.recordings.push(result.recording);
+    await meeting.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Recording uploaded and transcribed successfully',
+      data: {
+        recording: result.recording,
+        transcript: result.transcript
+      }
+    });
+  } catch (error) {
+    console.error('Upload recording error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error uploading recording',
       error: error.message
     });
   }

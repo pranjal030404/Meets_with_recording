@@ -4,6 +4,8 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -22,7 +24,10 @@ import { initializeSocketHandlers } from './sockets/index.js';
 import ReminderService from './services/reminderService.js';
 import mediasoupService from './lib/mediasoup.js';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const app = express();
 const httpServer = createServer(app);
@@ -43,6 +48,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -68,10 +74,16 @@ app.set('io', io);
 // MongoDB Connection
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/meetclone');
+    const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/meetclone';
+
+    await mongoose.connect(mongoUri, {
+      serverSelectionTimeoutMS: 5000
+    });
     console.log('✅ MongoDB connected successfully');
   } catch (error) {
     console.error('❌ MongoDB connection error:', error.message);
+    console.error('ℹ️  Ensure MongoDB is running and MONGODB_URI is correctly set in backend/.env');
+    console.error('ℹ️  Example: MONGODB_URI=mongodb://127.0.0.1:27017/meetclone');
     process.exit(1);
   }
 };

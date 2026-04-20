@@ -33,6 +33,59 @@ const participantSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
+const transcriptFileSchema = new mongoose.Schema({
+  path: String,
+  url: String
+}, { _id: false });
+
+const transcriptSegmentSchema = new mongoose.Schema({
+  id: Number,
+  start: Number,
+  end: Number,
+  text: String
+}, { _id: false });
+
+const transcriptionSchema = new mongoose.Schema({
+  status: {
+    type: String,
+    enum: ['pending', 'completed', 'failed'],
+    default: 'pending'
+  },
+  language: String,
+  provider: String,
+  model: String,
+  text: String,
+  duration: Number,
+  generatedAt: Date,
+  error: String,
+  files: {
+    json: transcriptFileSchema,
+    txt: transcriptFileSchema,
+    srt: transcriptFileSchema,
+    vtt: transcriptFileSchema
+  },
+  segments: [transcriptSegmentSchema]
+}, { _id: false });
+
+const recordingSchema = new mongoose.Schema({
+  filename: String,
+  originalName: String,
+  url: String,
+  path: String,
+  duration: Number,
+  mimeType: String,
+  size: Number,
+  recordedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  transcription: transcriptionSchema,
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { _id: false });
+
 const meetingSchema = new mongoose.Schema({
   roomId: {
     type: String,
@@ -118,19 +171,7 @@ const meetingSchema = new mongoose.Schema({
       default: 50
     }
   },
-  recordings: [{
-    filename: String,
-    url: String,
-    duration: Number,
-    recordedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    createdAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
+  recordings: [recordingSchema],
   isInstant: {
     type: Boolean,
     default: true

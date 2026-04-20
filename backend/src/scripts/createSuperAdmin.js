@@ -1,8 +1,13 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import User from '../models/User.js';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const SUPERADMIN_CREDENTIALS = {
   name: 'Super Admin',
@@ -14,7 +19,11 @@ const SUPERADMIN_CREDENTIALS = {
 const createSuperAdmin = async () => {
   try {
     // Connect to MongoDB
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/meetclone');
+    const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/meetclone';
+
+    await mongoose.connect(mongoUri, {
+      serverSelectionTimeoutMS: 5000
+    });
     console.log('✅ MongoDB connected');
 
     // Check if superadmin already exists
@@ -42,6 +51,10 @@ const createSuperAdmin = async () => {
     process.exit(0);
   } catch (error) {
     console.error('❌ Error:', error.message);
+    if (error.message.includes('ECONNREFUSED')) {
+      console.error('ℹ️  MongoDB is not reachable at the configured URI.');
+      console.error('ℹ️  Start MongoDB locally or set MONGODB_URI in backend/.env (Atlas/local URI).');
+    }
     process.exit(1);
   }
 };
