@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "db:create": "node src/database/createdb.js",
     "migrate": "node src/database/migrate.js",
+    "db:setup": "node src/database/createdb.js && node src/database/migrate.js",
     "create-admin": "node src/scripts/createSuperAdmin.js"
   },
   "dependencies": {
