@@ -1,6 +1,8 @@
 import { useRef, useEffect, useState } from 'react'
 import { MicOff, VideoOff, Pin, PinOff, Hand, Maximize2, User, Star } from 'lucide-react'
 
+const getUserId = (u) => u?.id || u?._id
+
 export default function VideoGrid({
   localStream,
   localVideoRef,
@@ -47,8 +49,10 @@ export default function VideoGrid({
 
   // Speaker / spotlight / pinned layout
   if (focusedUserId && !screenShareUser) {
-    const isLocalFocused = focusedUserId === user?._id
+    const isLocalFocused = focusedUserId === user?.id
     const focusedRemote = remoteEntries.find(([peerId]) => peerId === focusedUserId)
+
+    const findParticipant = (id) => participants.find(p => getUserId(p.user) === id)
 
     return (
       <div className="h-full p-4 flex flex-col lg:flex-row gap-4">
@@ -57,14 +61,14 @@ export default function VideoGrid({
             <VideoTile
               stream={localStream} user={user} isMuted={isMuted}
               isVideoOff={isVideoOff} isLocal={true} videoRef={localVideoRef}
-              isHandRaised={isHandRaised} isActiveSpeaker={activeSpeakerId === user?._id}
-              isPinned={pinnedUserId === user?._id} onPin={() => onPinUser?.(user?._id)}
+              isHandRaised={isHandRaised} isActiveSpeaker={activeSpeakerId === getUserId(user)}
+              isPinned={pinnedUserId === getUserId(user)} onPin={() => onPinUser?.(getUserId(user))}
             />
           ) : focusedRemote ? (
             <VideoTile
               stream={focusedRemote[1].stream} user={focusedRemote[1].user}
-              isMuted={participants.find(p => p.user._id === focusedRemote[0])?.isMuted}
-              isVideoOff={participants.find(p => p.user._id === focusedRemote[0])?.isVideoOff}
+              isMuted={findParticipant(focusedRemote[0])?.isMuted}
+              isVideoOff={findParticipant(focusedRemote[0])?.isVideoOff}
               isHandRaised={isHandUp(focusedRemote[0])}
               isActiveSpeaker={activeSpeakerId === focusedRemote[0]}
               isPinned={pinnedUserId === focusedRemote[0]}
@@ -78,11 +82,11 @@ export default function VideoGrid({
             <VideoTile stream={localStream} user={user} isMuted={isMuted}
               isVideoOff={isVideoOff} isLocal={true} videoRef={localVideoRef}
               small={true} isHandRaised={isHandRaised}
-              isActiveSpeaker={activeSpeakerId === user?._id}
-              onPin={() => onPinUser?.(user?._id)} />
+              isActiveSpeaker={activeSpeakerId === getUserId(user)}
+              onPin={() => onPinUser?.(getUserId(user))} />
           )}
           {remoteEntries.filter(([id]) => id !== focusedUserId).map(([peerId, { stream, user: peerUser }]) => {
-            const p = participants.find(p => p.user._id === peerUser?._id)
+            const p = findParticipant(getUserId(peerUser))
             return (
               <VideoTile key={peerId} stream={stream} user={peerUser}
                 isMuted={p?.isMuted} isVideoOff={p?.isVideoOff} small={true}
@@ -98,6 +102,7 @@ export default function VideoGrid({
 
   // Screen share layout
   if (screenShareUser) {
+    const findParticipant = (id) => participants.find(p => getUserId(p.user) === id)
     return (
       <div className="h-full p-4 flex flex-col lg:flex-row gap-4">
         <div className="flex-1 bg-dark-300 rounded-2xl flex items-center justify-center relative shadow-xl overflow-hidden">
@@ -122,8 +127,8 @@ export default function VideoGrid({
             small={true} isHandRaised={isHandRaised} />
           {remoteEntries.map(([peerId, { stream, user: peerUser }]) => (
             <VideoTile key={peerId} stream={stream} user={peerUser}
-              isMuted={participants.find(p => p.user._id === peerUser?._id)?.isMuted}
-              isVideoOff={participants.find(p => p.user._id === peerUser?._id)?.isVideoOff}
+              isMuted={findParticipant(getUserId(peerUser))?.isMuted}
+              isVideoOff={findParticipant(getUserId(peerUser))?.isVideoOff}
               small={true} isHandRaised={isHandUp(peerId)} />
           ))}
         </div>
@@ -132,15 +137,16 @@ export default function VideoGrid({
   }
 
   // Grid layout (default)
+  const findParticipant = (id) => participants.find(p => getUserId(p.user) === id)
   return (
     <div className={`participants-grid h-full ${getGridClass()}`}>
       <VideoTile stream={localStream} user={user} isMuted={isMuted}
         isVideoOff={isVideoOff} isLocal={true} videoRef={localVideoRef}
-        isHandRaised={isHandRaised} isActiveSpeaker={activeSpeakerId === user?._id}
-        isPinned={pinnedUserId === user?._id} onPin={() => onPinUser?.(user?._id)}
+        isHandRaised={isHandRaised} isActiveSpeaker={activeSpeakerId === getUserId(user)}
+        isPinned={pinnedUserId === getUserId(user)} onPin={() => onPinUser?.(getUserId(user))}
       />
       {remoteEntries.map(([peerId, { stream, user: peerUser }]) => {
-        const p = participants.find(p => p.user._id === peerUser?._id)
+        const p = findParticipant(getUserId(peerUser))
         return (
           <VideoTile key={peerId} stream={stream} user={peerUser}
             isMuted={p?.isMuted} isVideoOff={p?.isVideoOff}

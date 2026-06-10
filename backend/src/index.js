@@ -70,12 +70,20 @@ const startServer = async () => {
   try {
     await connectDB();
 
-    await mediasoupService.init();
+    try {
+      await mediasoupService.init();
+      console.log('Mediasoup SFU ready');
+    } catch (mediasoupError) {
+      console.warn('Mediasoup initialization failed, running without SFU:', mediasoupError.message);
+    }
 
     httpServer.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Socket.IO ready for connections`);
-      console.log(`Mediasoup SFU ready`);
+
+      if (mediasoupService.workers.length > 0) {
+        console.log('Mediasoup SFU active');
+      }
 
       const reminderService = new ReminderService(io);
       reminderService.start();

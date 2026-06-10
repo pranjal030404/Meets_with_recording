@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
 import { useChatStore } from '../store/chatStore'
-import { getSocket, initSocket } from '../lib/socket'
+import { getSocket, initSocket, waitForSocket, isSocketConnected } from '../lib/socket'
 
 // Components
 import MeetingControls from '../components/MeetingControls'
@@ -95,8 +95,8 @@ export default function Meeting() {
     const interval = setInterval(() => {
       analyser.getByteFrequencyData(dataArray)
       const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
-      if (avg > 20) {
-        setActiveSpeaker(user._id)
+      if (avg > 20 && user?.id) {
+        setActiveSpeaker(user.id)
       }
     }, 300)
 
@@ -111,6 +111,13 @@ export default function Meeting() {
       try {
         const socket = initSocket(token)
         socketRef.current = socket
+
+        // Wait for socket connection (with timeout)
+        try {
+          await waitForSocket(10000)
+        } catch (socketError) {
+          console.warn('Socket connection timed out, continuing with REST API only:', socketError.message)
+        }
 
         // Get local media stream if not already obtained (from pre-join)
         let stream = localStream
@@ -139,31 +146,36 @@ export default function Meeting() {
         }
 
         const meeting = result.meeting
-        const hostId = meeting.host._id || meeting.host
-        setIsHost(hostId === user._id)
+        const hostId = meeting.host?.id || meeting.host?.hostId || meeting.hostId
+        const currentUserId = user?.id || user?._id
+        setIsHost(hostId === currentUserId)
 
         // Check muteOnEntry setting
-        if (meeting.settings?.muteOnEntry && hostId !== user._id) {
+        if (meeting.settings?.muteOnEntry && hostId !== currentUserId) {
           const audioTrack = stream.getAudioTracks()[0]
           if (audioTrack) { audioTrack.stop(); stream.removeTrack(audioTrack) }
           useMeetingStore.setState({ isMuted: true })
           toast('You have been muted on entry by the host', { icon: '🔇' })
         }
 
-        // Initialize mediasoup SFU
-        const sfuResult = await initMediasoup(socket, roomId)
-        if (!sfuResult.success) {
-          console.error('SFU init failed, falling back to audio/video only')
-        }
+        // Initialize mediasoup SFU (graceful failure)
+        if (socket.connected) {
+          const sfuResult = await initMediasoup(socket, roomId)
+          if (!sfuResult.success) {
+            console.error('SFU init failed, falling back to audio/video only')
+          }
 
-        // Produce local tracks to SFU
-        const audioTrack = stream.getAudioTracks()[0]
-        const videoTrack = stream.getVideoTracks()[0]
-        if (audioTrack && !useMeetingStore.getState().isMuted) {
-          await produceAudio(audioTrack)
-        }
-        if (videoTrack) {
-          await produceVideo(videoTrack)
+          // Produce local tracks to SFU
+          const audioTrack = stream.getAudioTracks()[0]
+          const videoTrack = stream.getVideoTracks()[0]
+          if (audioTrack && !useMeetingStore.getState().isMuted) {
+            await produceAudio(audioTrack)
+          }
+          if (videoTrack) {
+            await produceVideo(videoTrack)
+          }
+        } else {
+          console.warn('Socket not connected, skipping SFU initialization')
         }
 
         // Load chat messages & enumerate devices
@@ -171,7 +183,9 @@ export default function Meeting() {
         enumerateDevices()
 
         // Join socket room
-        socket.emit('room:join', { roomId })
+        if (socket.connected) {
+          socket.emit('room:join', { roomId })
+        }
         setIsJoining(false)
       } catch (error) {
         console.error('Failed to initialize meeting:', error)
@@ -401,7 +415,7 @@ export default function Meeting() {
       ]
       events.forEach(e => socket.off(e))
     }
-  }, [socketRef.current, showChat])
+  }, [socketRef.current])
 
   // Cleanup on unmount
   const handleCleanup = useCallback(() => {

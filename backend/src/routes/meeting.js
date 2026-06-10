@@ -308,7 +308,10 @@ router.get('/:roomId', protect, async (req, res) => {
 
 router.post('/:roomId/join', protect, async (req, res) => {
   try {
-    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
+    const meeting = await Meeting.findOne({
+      where: { roomId: req.params.roomId },
+      include: [includeHost()]
+    });
 
     if (!meeting) {
       return res.status(404).json({

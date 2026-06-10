@@ -97,7 +97,9 @@ export default function ChatPanel({ roomId, onClose }) {
           </div>
         ) : (
           messages.map((message) => {
-            const isOwn = message.sender._id === user._id || message.sender === user._id
+            const msgUserId = message.sender?.id || message.sender?._id
+            const curUserId = user?.id || user?._id
+            const isOwn = msgUserId === curUserId || message.sender === curUserId
             
             return (
               <div key={message._id} className={`group flex ${isOwn ? 'justify-end' : 'justify-start'}`}>

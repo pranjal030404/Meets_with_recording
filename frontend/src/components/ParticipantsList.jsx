@@ -63,20 +63,20 @@ export default function ParticipantsList({
           {/* Hand raised users first */}
           {participants
             .sort((a, b) => {
-              const aRaised = isHandRaised(a.user._id)
-              const bRaised = isHandRaised(b.user._id)
+              const aRaised = isHandRaised(a.user?.id || a.user?._id)
+              const bRaised = isHandRaised(b.user?.id || b.user?._id)
               if (aRaised && !bRaised) return -1
               if (!aRaised && bRaised) return 1
               return 0
             })
             .map((participant) => (
               <ParticipantItem
-                key={participant.user._id}
+                key={participant.user?.id || participant.user?._id}
                 participant={participant}
                 isCurrentUser={false}
                 isHost={isHost}
                 canControl={isHost}
-                isHandRaised={isHandRaised(participant.user._id)}
+                isHandRaised={isHandRaised(participant.user?.id || participant.user?._id)}
                 roomId={roomId}
               />
             ))}

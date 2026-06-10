@@ -668,13 +668,14 @@ export const useMeetingStore = create((set, get) => ({
 
   addParticipant: (participant) => {
     const { participants } = get()
-    if (!participants.find(p => p.user._id === participant.user._id)) {
+    const pid = participant.user?.id || participant.user?._id
+    if (!participants.find(p => (p.user?.id || p.user?._id) === pid)) {
       set({ participants: [...participants, participant] })
     }
   },
 
   removeParticipant: (userId) => {
-    set({ participants: get().participants.filter(p => p.user._id !== userId) })
+    set({ participants: get().participants.filter(p => (p.user?.id || p.user?._id) !== userId) })
     get().removeRemoteStream(userId)
     get().removeHandRaise(userId)
   },
@@ -682,7 +683,7 @@ export const useMeetingStore = create((set, get) => ({
   updateParticipant: (userId, data) => {
     set({
       participants: get().participants.map(p =>
-        p.user._id === userId ? { ...p, ...data } : p
+        (p.user?.id || p.user?._id) === userId ? { ...p, ...data } : p
       )
     })
   },
