@@ -1,90 +1,69 @@
-import mongoose from 'mongoose';
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../database/index.js';
 
-const pollOptionSchema = new mongoose.Schema({
-  text: {
-    type: String,
-    required: true,
-    trim: true
+const Poll = sequelize.define('Poll', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
   },
-  votes: [{
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    votedAt: {
-      type: Date,
-      default: Date.now
-    }
-  }]
-}, { _id: true });
-
-const pollSchema = new mongoose.Schema({
-  meeting: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Meeting',
-    required: true
+  meetingId: {
+    type: DataTypes.UUID,
+    allowNull: false
   },
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+  createdById: {
+    type: DataTypes.UUID,
+    allowNull: false
   },
   question: {
-    type: String,
-    required: true,
-    trim: true
+    type: DataTypes.TEXT,
+    allowNull: false
   },
-  options: [pollOptionSchema],
   allowMultiple: {
-    type: Boolean,
-    default: false
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   },
   isAnonymous: {
-    type: Boolean,
-    default: false
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   },
   status: {
-    type: String,
-    enum: ['draft', 'active', 'ended'],
-    default: 'draft'
+    type: DataTypes.ENUM('draft', 'active', 'ended'),
+    defaultValue: 'draft'
   },
   endsAt: {
-    type: Date
+    type: DataTypes.DATE
   },
   totalVotes: {
-    type: Number,
-    default: 0
+    type: DataTypes.INTEGER,
+    defaultValue: 0
   }
 }, {
-  timestamps: true
+  tableName: 'Polls'
 });
 
-// Index for faster lookups
-pollSchema.index({ meeting: 1 });
-pollSchema.index({ createdBy: 1 });
-pollSchema.index({ status: 1 });
-
-// Virtual for vote count
-pollSchema.virtual('voteCount').get(function() {
-  return this.options.reduce((total, option) => total + option.votes.length, 0);
-});
-
-// Method to check if user has voted
-pollSchema.methods.hasUserVoted = function(userId) {
-  return this.options.some(option => 
-    option.votes.some(vote => vote.user.toString() === userId.toString())
+Poll.prototype.hasUserVoted = function(userId) {
+  if (!this.options) return false;
+  return this.options.some(option =>
+    option.votes && option.votes.some(vote => vote.user.toString() === userId.toString())
   );
 };
 
-// Method to get results
-pollSchema.methods.getResults = function() {
-  return this.options.map(option => ({
+Poll.prototype.getResults = function() {
+  return (this.options || []).map(option => ({
     text: option.text,
-    votes: option.votes.length,
-    percentage: this.totalVotes > 0 ? (option.votes.length / this.totalVotes * 100).toFixed(1) : 0
+    votes: (option.votes || []).length,
+    percentage: this.totalVotes > 0
+      ? ((option.votes || []).length / this.totalVotes * 100).toFixed(1)
+      : 0
   }));
 };
 
-const Poll = mongoose.model('Poll', pollSchema);
+Poll.prototype.toJSON = function() {
+  const values = { ...this.get() };
+  values._id = values.id;
+  values.voteCount = (values.options || []).reduce((total, opt) => total + (opt.votes || []).length, 0);
+  return values;
+};
 
 export default Poll;

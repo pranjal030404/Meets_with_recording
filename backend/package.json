@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "migrate": "node src/database/migrate.js",
     "create-admin": "node src/scripts/createSuperAdmin.js"
   },
   "dependencies": {
@@ -19,9 +20,10 @@
     "jsonwebtoken": "^9.0.2",
     "mediasoup": "^3.19.17",
     "openai": "^4.86.1",
-    "mongoose": "^8.0.3",
     "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.14.1",
     "node-cron": "^3.0.3",
+    "sequelize": "^6.37.7",
     "socket.io": "^4.7.2",
     "uuid": "^9.0.1"
   },

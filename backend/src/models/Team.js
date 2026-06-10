@@ -1,150 +1,104 @@
-import mongoose from 'mongoose';
+import { DataTypes } from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
+import { sequelize } from '../database/index.js';
 
-const teamSchema = new mongoose.Schema({
+const Team = sequelize.define('Team', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
   name: {
-    type: String,
-    required: [true, 'Team name is required'],
-    trim: true,
-    minlength: [2, 'Team name must be at least 2 characters'],
-    maxlength: [100, 'Team name cannot exceed 100 characters']
+    type: DataTypes.STRING(100),
+    allowNull: false,
+    validate: {
+      len: [2, 100]
+    }
   },
   description: {
-    type: String,
-    trim: true,
-    maxlength: [500, 'Description cannot exceed 500 characters']
+    type: DataTypes.STRING(500)
   },
-  owner: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+  ownerId: {
+    type: DataTypes.UUID,
+    allowNull: false
   },
-  members: [{
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    role: {
-      type: String,
-      enum: ['owner', 'admin', 'member', 'guest'],
-      default: 'member'
-    },
-    joinedAt: {
-      type: Date,
-      default: Date.now
-    },
-    notifications: {
-      meetings: { type: Boolean, default: true },
-      chat: { type: Boolean, default: true },
-      mentions: { type: Boolean, default: true }
-    }
-  }],
   inviteCode: {
-    type: String,
+    type: DataTypes.STRING(50),
     unique: true,
-    default: () => uuidv4().split('-')[0]
+    defaultValue: () => uuidv4().split('-')[0]
   },
   settings: {
-    allowMemberInvite: {
-      type: Boolean,
-      default: false
-    },
-    allowGuestJoin: {
-      type: Boolean,
-      default: true
-    },
-    defaultMeetingSettings: {
-      waitingRoom: { type: Boolean, default: false },
-      muteOnEntry: { type: Boolean, default: false },
-      allowRecording: { type: Boolean, default: true }
+    type: DataTypes.JSON,
+    defaultValue: {
+      allowMemberInvite: false,
+      allowGuestJoin: true,
+      defaultMeetingSettings: {
+        waitingRoom: false,
+        muteOnEntry: false,
+        allowRecording: true
+      }
     }
   },
-  channels: [{
-    name: {
-      type: String,
-      required: true
-    },
-    type: {
-      type: String,
-      enum: ['general', 'meetings', 'announcements', 'custom'],
-      default: 'custom'
-    },
-    description: String,
-    createdAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
   isActive: {
-    type: Boolean,
-    default: true
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
   }
 }, {
-  timestamps: true
-});
-
-// Indexes
-teamSchema.index({ owner: 1 });
-teamSchema.index({ 'members.user': 1 });
-teamSchema.index({ inviteCode: 1 });
-
-// Default channels on team creation
-teamSchema.pre('save', function(next) {
-  if (this.isNew && this.channels.length === 0) {
-    this.channels = [
-      { name: 'general', type: 'general', description: 'General team discussions' },
-      { name: 'meetings', type: 'meetings', description: 'Meeting links and schedules' },
-      { name: 'announcements', type: 'announcements', description: 'Important team announcements' }
-    ];
+  tableName: 'Teams',
+  hooks: {
+    beforeCreate: async (team) => {
+      if (team.isNewRecord) {
+        team.inviteCode = team.inviteCode || uuidv4().split('-')[0];
+      }
+    }
   }
-  next();
 });
 
-// Methods
-teamSchema.methods.isMember = function(userId) {
-  return this.members.some(member => {
-    // Handle both populated and non-populated user field
-    const memberId = member.user._id || member.user;
+Team.prototype.isMember = function(userId) {
+  return this.members && this.members.some(m => {
+    const memberId = m.userId || m.id;
     return memberId.toString() === userId.toString();
   });
 };
 
-teamSchema.methods.getMemberRole = function(userId) {
-  const member = this.members.find(m => {
-    const memberId = m.user._id || m.user;
+Team.prototype.getMemberRole = function(userId) {
+  const member = this.members && this.members.find(m => {
+    const memberId = m.userId || m.id;
     return memberId.toString() === userId.toString();
   });
   return member ? member.role : null;
 };
 
-teamSchema.methods.isOwnerOrAdmin = function(userId) {
+Team.prototype.isOwnerOrAdmin = function(userId) {
   const role = this.getMemberRole(userId);
   return role === 'owner' || role === 'admin';
 };
 
-teamSchema.methods.addMember = function(userId, role = 'member') {
+Team.prototype.addMember = function(userId, role = 'member') {
   if (!this.isMember(userId)) {
-    this.members.push({ user: userId, role });
+    if (!this.members) this.members = [];
+    this.members.push({ userId, role });
   }
   return this;
 };
 
-teamSchema.methods.removeMember = function(userId) {
-  this.members = this.members.filter(m => {
-    const memberId = m.user._id || m.user;
-    return memberId.toString() !== userId.toString();
-  });
+Team.prototype.removeMember = function(userId) {
+  if (this.members) {
+    this.members = this.members.filter(m => {
+      const memberId = m.userId || m.id;
+      return memberId.toString() !== userId.toString();
+    });
+  }
   return this;
 };
 
-// Virtual for member count
-teamSchema.virtual('memberCount').get(function() {
-  return this.members.length;
-});
+Team.prototype.toJSON = function() {
+  const values = { ...this.get() };
+  values._id = values.id;
+  if (values.members) {
+    values.memberCount = values.members.length;
+  }
+  return values;
+};
 
-// Ensure virtuals are serialized
-teamSchema.set('toJSON', { virtuals: true });
-teamSchema.set('toObject', { virtuals: true });
-
-export default mongoose.model('Team', teamSchema);
+export default Team;

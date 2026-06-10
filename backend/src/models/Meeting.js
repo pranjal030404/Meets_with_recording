@@ -1,250 +1,86 @@
-import mongoose from 'mongoose';
+import { DataTypes } from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
+import { sequelize } from '../database/index.js';
 
-const participantSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+const Meeting = sequelize.define('Meeting', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
   },
-  role: {
-    type: String,
-    enum: ['host', 'co-host', 'presenter', 'participant'],
-    default: 'participant'
-  },
-  joinedAt: {
-    type: Date,
-    default: Date.now
-  },
-  leftAt: {
-    type: Date
-  },
-  isMuted: {
-    type: Boolean,
-    default: false
-  },
-  isVideoOff: {
-    type: Boolean,
-    default: false
-  },
-  isScreenSharing: {
-    type: Boolean,
-    default: false
-  }
-}, { _id: false });
-
-const transcriptFileSchema = new mongoose.Schema({
-  path: String,
-  url: String
-}, { _id: false });
-
-const transcriptSegmentSchema = new mongoose.Schema({
-  id: Number,
-  start: Number,
-  end: Number,
-  text: String
-}, { _id: false });
-
-const transcriptionSchema = new mongoose.Schema({
-  status: {
-    type: String,
-    enum: ['pending', 'completed', 'failed'],
-    default: 'pending'
-  },
-  language: String,
-  provider: String,
-  model: String,
-  text: String,
-  duration: Number,
-  generatedAt: Date,
-  error: String,
-  files: {
-    json: transcriptFileSchema,
-    txt: transcriptFileSchema,
-    srt: transcriptFileSchema,
-    vtt: transcriptFileSchema
-  },
-  segments: [transcriptSegmentSchema]
-}, { _id: false });
-
-const recordingSchema = new mongoose.Schema({
-  filename: String,
-  originalName: String,
-  url: String,
-  path: String,
-  duration: Number,
-  mimeType: String,
-  size: Number,
-  recordedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  transcription: transcriptionSchema,
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
-}, { _id: false });
-
-const meetingSchema = new mongoose.Schema({
   roomId: {
-    type: String,
+    type: DataTypes.STRING(50),
     unique: true,
-    default: () => uuidv4().substring(0, 8) + '-' + uuidv4().substring(0, 4) + '-' + uuidv4().substring(0, 4)
+    defaultValue: () => uuidv4().substring(0, 8) + '-' + uuidv4().substring(0, 4) + '-' + uuidv4().substring(0, 4)
   },
   title: {
-    type: String,
-    default: 'Untitled Meeting',
-    trim: true
+    type: DataTypes.STRING(255),
+    defaultValue: 'Untitled Meeting'
   },
   description: {
-    type: String,
-    trim: true
+    type: DataTypes.TEXT
   },
-  host: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+  hostId: {
+    type: DataTypes.UUID,
+    allowNull: false
   },
-  team: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Team'
+  teamId: {
+    type: DataTypes.UUID
   },
   meetingLink: {
-    type: String
+    type: DataTypes.STRING(500)
   },
-  participants: [participantSchema],
-  invitees: [{
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    email: String,
-    status: {
-      type: String,
-      enum: ['pending', 'accepted', 'declined'],
-      default: 'pending'
-    },
-    respondedAt: Date
-  }],
   status: {
-    type: String,
-    enum: ['scheduled', 'active', 'ended', 'cancelled'],
-    default: 'scheduled'
+    type: DataTypes.ENUM('scheduled', 'active', 'ended', 'cancelled'),
+    defaultValue: 'scheduled'
   },
   scheduledAt: {
-    type: Date
+    type: DataTypes.DATE
   },
   startedAt: {
-    type: Date
+    type: DataTypes.DATE
   },
   endedAt: {
-    type: Date
+    type: DataTypes.DATE
   },
   settings: {
-    waitingRoom: {
-      type: Boolean,
-      default: false
-    },
-    allowScreenShare: {
-      type: Boolean,
-      default: true
-    },
-    allowChat: {
-      type: Boolean,
-      default: true
-    },
-    allowRecording: {
-      type: Boolean,
-      default: true
-    },
-    muteOnEntry: {
-      type: Boolean,
-      default: false
-    },
-    isLocked: {
-      type: Boolean,
-      default: false
-    },
-    maxParticipants: {
-      type: Number,
-      default: 50
+    type: DataTypes.JSON,
+    defaultValue: {
+      waitingRoom: false,
+      allowScreenShare: true,
+      allowChat: true,
+      allowRecording: true,
+      muteOnEntry: false,
+      isLocked: false,
+      maxParticipants: 50
     }
   },
-  recordings: [recordingSchema],
   isInstant: {
-    type: Boolean,
-    default: true
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
   },
   recurrence: {
-    enabled: {
-      type: Boolean,
-      default: false
-    },
-    pattern: {
-      type: String,
-      enum: ['daily', 'weekly', 'monthly', 'custom'],
-      default: 'weekly'
-    },
-    interval: {
-      type: Number,
-      default: 1
-    },
-    daysOfWeek: [Number],
-    endDate: Date,
-    maxOccurrences: Number
+    type: DataTypes.JSON,
+    defaultValue: { enabled: false }
   },
-  reminders: [{
-    time: {
-      type: Number,
-      required: true
-    },
-    unit: {
-      type: String,
-      enum: ['minutes', 'hours', 'days'],
-      default: 'minutes'
-    },
-    sent: {
-      type: Boolean,
-      default: false
-    },
-    sentAt: Date
-  }],
   notificationsSent: {
-    scheduled: { type: Boolean, default: false },
-    reminder15min: { type: Boolean, default: false },
-    reminder1hour: { type: Boolean, default: false },
-    reminder1day: { type: Boolean, default: false },
-    started: { type: Boolean, default: false }
+    type: DataTypes.JSON,
+    defaultValue: {
+      scheduled: false,
+      reminder15min: false,
+      reminder1hour: false,
+      reminder1day: false,
+      started: false
+    }
   }
 }, {
-  timestamps: true
+  tableName: 'Meetings'
 });
 
-// Index for faster room lookups
-meetingSchema.index({ host: 1 });
-meetingSchema.index({ status: 1 });
-meetingSchema.index({ team: 1 });
-meetingSchema.index({ scheduledAt: 1 });
-meetingSchema.index({ 'invitees.user': 1 });
-
-// Virtual for participant count
-meetingSchema.virtual('participantCount').get(function() {
-  return this.participants.filter(p => !p.leftAt).length;
-});
-
-// Method to check if user is host
-meetingSchema.methods.isHost = function(userId) {
-  return this.host.toString() === userId.toString();
+Meeting.prototype.toJSON = function() {
+  const values = { ...this.get() };
+  values._id = values.id;
+  return values;
 };
-
-// Method to check if user is in meeting
-meetingSchema.methods.hasParticipant = function(userId) {
-  return this.participants.some(
-    p => p.user.toString() === userId.toString() && !p.leftAt
-  );
-};
-
-const Meeting = mongoose.model('Meeting', meetingSchema);
 
 export default Meeting;

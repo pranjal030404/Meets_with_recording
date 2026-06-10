@@ -1,14 +1,18 @@
-import mongoose from 'mongoose';
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../database/index.js';
 
-const notificationSchema = new mongoose.Schema({
-  recipient: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+const Notification = sequelize.define('Notification', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  recipientId: {
+    type: DataTypes.UUID,
+    allowNull: false
   },
   type: {
-    type: String,
-    enum: [
+    type: DataTypes.ENUM(
       'meeting_scheduled',
       'meeting_reminder',
       'meeting_started',
@@ -17,49 +21,48 @@ const notificationSchema = new mongoose.Schema({
       'team_member_added',
       'mention',
       'chat_message'
-    ],
-    required: true
+    ),
+    allowNull: false
   },
   title: {
-    type: String,
-    required: true
+    type: DataTypes.STRING(255),
+    allowNull: false
   },
   message: {
-    type: String,
-    required: true
+    type: DataTypes.TEXT,
+    allowNull: false
   },
   data: {
-    meetingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Meeting' },
-    teamId: { type: mongoose.Schema.Types.ObjectId, ref: 'Team' },
-    messageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
-    senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    link: String,
-    metadata: mongoose.Schema.Types.Mixed
+    type: DataTypes.JSON
   },
   isRead: {
-    type: Boolean,
-    default: false
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   },
-  readAt: Date,
+  readAt: {
+    type: DataTypes.DATE
+  },
   priority: {
-    type: String,
-    enum: ['low', 'normal', 'high', 'urgent'],
-    default: 'normal'
+    type: DataTypes.ENUM('low', 'normal', 'high', 'urgent'),
+    defaultValue: 'normal'
   },
-  expiresAt: Date
+  expiresAt: {
+    type: DataTypes.DATE
+  }
 }, {
-  timestamps: true
+  tableName: 'Notifications'
 });
 
-// Indexes
-notificationSchema.index({ recipient: 1, isRead: 1, createdAt: -1 });
-notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-
-// Method to mark as read
-notificationSchema.methods.markAsRead = function() {
+Notification.prototype.markAsRead = async function() {
   this.isRead = true;
   this.readAt = new Date();
-  return this.save();
+  return await this.save();
 };
 
-export default mongoose.model('Notification', notificationSchema);
+Notification.prototype.toJSON = function() {
+  const values = { ...this.get() };
+  values._id = values.id;
+  return values;
+};
+
+export default Notification;
