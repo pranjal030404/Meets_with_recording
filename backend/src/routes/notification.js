@@ -4,42 +4,34 @@ import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// All routes are protected
 router.use(protect);
 
-/**
- * @route   GET /api/notifications
- * @desc    Get user's notifications
- * @access  Private
- */
 router.get('/', async (req, res) => {
   try {
     const { limit = 50, page = 1, unreadOnly = false } = req.query;
 
-    const query = { recipient: req.user._id };
-    
+    const whereClause = { recipientId: req.user.id };
+
     if (unreadOnly === 'true') {
-      query.isRead = false;
+      whereClause.isRead = false;
     }
 
-    const notifications = await Notification.find(query)
-      .populate('data.senderId', 'name email avatar')
-      .populate('data.meetingId', 'roomId title scheduledAt')
-      .populate('data.teamId', 'name')
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
+    const notifications = await Notification.findAll({
+      where: whereClause,
+      order: [['createdAt', 'DESC']],
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit)
+    });
 
-    const total = await Notification.countDocuments(query);
-    const unreadCount = await Notification.countDocuments({ 
-      recipient: req.user._id, 
-      isRead: false 
+    const total = await Notification.count({ where: whereClause });
+    const unreadCount = await Notification.count({
+      where: { recipientId: req.user.id, isRead: false }
     });
 
     res.json({
       success: true,
       data: {
-        notifications,
+        notifications: notifications.map(n => n.toJSON()),
         unreadCount,
         pagination: {
           page: parseInt(page),
@@ -59,14 +51,9 @@ router.get('/', async (req, res) => {
   }
 });
 
-/**
- * @route   PUT /api/notifications/:notificationId/read
- * @desc    Mark notification as read
- * @access  Private
- */
 router.put('/:notificationId/read', async (req, res) => {
   try {
-    const notification = await Notification.findById(req.params.notificationId);
+    const notification = await Notification.findByPk(req.params.notificationId);
 
     if (!notification) {
       return res.status(404).json({
@@ -75,7 +62,7 @@ router.put('/:notificationId/read', async (req, res) => {
       });
     }
 
-    if (notification.recipient.toString() !== req.user._id.toString()) {
+    if (notification.recipientId !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'Unauthorized'
@@ -98,16 +85,11 @@ router.put('/:notificationId/read', async (req, res) => {
   }
 });
 
-/**
- * @route   PUT /api/notifications/read-all
- * @desc    Mark all notifications as read
- * @access  Private
- */
 router.put('/read-all', async (req, res) => {
   try {
-    await Notification.updateMany(
-      { recipient: req.user._id, isRead: false },
-      { isRead: true, readAt: new Date() }
+    await Notification.update(
+      { isRead: true, readAt: new Date() },
+      { where: { recipientId: req.user.id, isRead: false } }
     );
 
     res.json({
@@ -124,14 +106,9 @@ router.put('/read-all', async (req, res) => {
   }
 });
 
-/**
- * @route   DELETE /api/notifications/:notificationId
- * @desc    Delete a notification
- * @access  Private
- */
 router.delete('/:notificationId', async (req, res) => {
   try {
-    const notification = await Notification.findById(req.params.notificationId);
+    const notification = await Notification.findByPk(req.params.notificationId);
 
     if (!notification) {
       return res.status(404).json({
@@ -140,14 +117,14 @@ router.delete('/:notificationId', async (req, res) => {
       });
     }
 
-    if (notification.recipient.toString() !== req.user._id.toString()) {
+    if (notification.recipientId !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'Unauthorized'
       });
     }
 
-    await notification.deleteOne();
+    await notification.destroy();
 
     res.json({
       success: true,
@@ -163,16 +140,10 @@ router.delete('/:notificationId', async (req, res) => {
   }
 });
 
-/**
- * @route   DELETE /api/notifications
- * @desc    Delete all read notifications
- * @access  Private
- */
 router.delete('/', async (req, res) => {
   try {
-    await Notification.deleteMany({
-      recipient: req.user._id,
-      isRead: true
+    await Notification.destroy({
+      where: { recipientId: req.user.id, isRead: true }
     });
 
     res.json({

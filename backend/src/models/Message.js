@@ -1,94 +1,71 @@
-import mongoose from 'mongoose';
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../database/index.js';
 
-const messageSchema = new mongoose.Schema({
-  meeting: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Meeting'
+const Message = sequelize.define('Message', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
   },
-  team: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Team'
+  meetingId: {
+    type: DataTypes.UUID
+  },
+  teamId: {
+    type: DataTypes.UUID
   },
   channelType: {
-    type: String,
-    enum: ['general', 'meetings', 'announcements', 'custom'],
-    default: 'general'
+    type: DataTypes.ENUM('general', 'meetings', 'announcements', 'custom'),
+    defaultValue: 'general'
   },
   channelName: {
-    type: String
+    type: DataTypes.STRING(100)
   },
-  sender: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+  senderId: {
+    type: DataTypes.UUID,
+    allowNull: false
   },
   content: {
-    type: String,
-    required: [true, 'Message content is required'],
-    trim: true,
-    maxlength: [2000, 'Message cannot exceed 2000 characters']
+    type: DataTypes.STRING(2000),
+    allowNull: false
   },
   type: {
-    type: String,
-    enum: ['text', 'file', 'system', 'meeting_link'],
-    default: 'text'
+    type: DataTypes.ENUM('text', 'file', 'system', 'meeting_link'),
+    defaultValue: 'text'
   },
-  // For private messages within meeting
-  recipient: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  recipientId: {
+    type: DataTypes.UUID
   },
   isPrivate: {
-    type: Boolean,
-    default: false
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   },
-  // For meeting link messages
   meetingData: {
-    meetingId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Meeting'
-    },
-    title: String,
-    scheduledAt: Date,
-    link: String
+    type: DataTypes.JSON
   },
-  // For mentions
-  mentions: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }],
-  // For file messages
+  mentions: {
+    type: DataTypes.JSON
+  },
   fileUrl: {
-    type: String
+    type: DataTypes.STRING(500)
   },
   fileName: {
-    type: String
+    type: DataTypes.STRING(255)
   },
   fileType: {
-    type: String
+    type: DataTypes.STRING(100)
   },
-  // For reactions
-  reactions: [{
-    emoji: String,
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }
-  }],
   isDeleted: {
-    type: Boolean,
-    default: false
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   }
 }, {
-  timestamps: true
+  tableName: 'Messages'
 });
 
-// Index for faster message retrieval
-messageSchema.index({ meeting: 1, createdAt: 1 });
-messageSchema.index({ team: 1, channelType: 1, createdAt: 1 });
-messageSchema.index({ sender: 1 });
-messageSchema.index({ mentions: 1 });
-
-const Message = mongoose.model('Message', messageSchema);
+Message.prototype.toJSON = function() {
+  const values = { ...this.get() };
+  values._id = values.id;
+  return values;
+};
 
 export default Message;

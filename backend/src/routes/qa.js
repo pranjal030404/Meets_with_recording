@@ -1,35 +1,31 @@
 import express from 'express';
+import { Op } from 'sequelize';
+import { v4 as uuidv4 } from 'uuid';
 import { protect } from '../middleware/auth.js';
 import Question from '../models/Question.js';
 import Meeting from '../models/Meeting.js';
 
 const router = express.Router();
 
-/**
- * @route   POST /api/qa
- * @desc    Submit a question in Q&A
- * @access  Private
- */
 router.post('/', protect, async (req, res) => {
   try {
     const { meetingId, question } = req.body;
 
-    const meeting = await Meeting.findById(meetingId);
+    const meeting = await Meeting.findByPk(meetingId);
     if (!meeting) {
       return res.status(404).json({ message: 'Meeting not found' });
     }
 
     const newQuestion = await Question.create({
-      meeting: meetingId,
-      askedBy: req.user._id,
-      question
+      meetingId,
+      askedById: req.user.id,
+      question,
+      upvotes: []
     });
-
-    await newQuestion.populate('askedBy', 'name email avatar');
 
     res.status(201).json({
       success: true,
-      data: { question: newQuestion }
+      data: { question: newQuestion.toJSON() }
     });
   } catch (error) {
     console.error('Submit question error:', error);
@@ -37,26 +33,21 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   GET /api/qa/meeting/:meetingId
- * @desc    Get all questions for a meeting
- * @access  Private
- */
 router.get('/meeting/:meetingId', protect, async (req, res) => {
   try {
     const { meetingId } = req.params;
 
-    const questions = await Question.find({
-      meeting: meetingId,
-      isDismissed: false
-    })
-      .populate('askedBy', 'name email avatar')
-      .populate('answeredBy', 'name email avatar')
-      .sort({ upvotes: -1, createdAt: -1 }); // Sort by upvotes first, then by time
+    const questions = await Question.findAll({
+      where: {
+        meetingId,
+        isDismissed: false
+      },
+      order: [['createdAt', 'DESC']]
+    });
 
     res.json({
       success: true,
-      data: { questions }
+      data: { questions: questions.map(q => q.toJSON()) }
     });
   } catch (error) {
     console.error('Get questions error:', error);
@@ -64,36 +55,29 @@ router.get('/meeting/:meetingId', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   PUT /api/qa/:questionId/upvote
- * @desc    Upvote a question
- * @access  Private
- */
 router.put('/:questionId/upvote', protect, async (req, res) => {
   try {
     const { questionId } = req.params;
 
-    const question = await Question.findById(questionId);
+    const question = await Question.findByPk(questionId);
     if (!question) {
       return res.status(404).json({ message: 'Question not found' });
     }
 
-    // Toggle upvote
-    if (question.hasUserUpvoted(req.user._id)) {
-      question.upvotes = question.upvotes.filter(
-        id => id.toString() !== req.user._id.toString()
-      );
+    const upvotes = question.upvotes || [];
+
+    if (question.hasUserUpvoted(req.user.id)) {
+      question.upvotes = upvotes.filter(id => id !== req.user.id);
     } else {
-      question.upvotes.push(req.user._id);
+      upvotes.push(req.user.id);
+      question.upvotes = upvotes;
     }
 
     await question.save();
-    await question.populate('askedBy', 'name email avatar');
-    await question.populate('answeredBy', 'name email avatar');
 
     res.json({
       success: true,
-      data: { question }
+      data: { question: question.toJSON() }
     });
   } catch (error) {
     console.error('Upvote question error:', error);
@@ -101,44 +85,41 @@ router.put('/:questionId/upvote', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   PUT /api/qa/:questionId/answer
- * @desc    Answer a question (host/co-host only)
- * @access  Private
- */
 router.put('/:questionId/answer', protect, async (req, res) => {
   try {
     const { questionId } = req.params;
     const { answer } = req.body;
 
-    const question = await Question.findById(questionId);
+    const question = await Question.findByPk(questionId);
     if (!question) {
       return res.status(404).json({ message: 'Question not found' });
     }
 
-    // Verify permission
-    const meeting = await Meeting.findById(question.meeting);
-    const isHostOrCoHost = meeting.isHost(req.user._id) || 
-      meeting.participants.some(p => 
-        p.user.toString() === req.user._id.toString() && p.role === 'co-host'
-      );
+    const meeting = await Meeting.findByPk(question.meetingId);
+    if (!meeting) {
+      return res.status(404).json({ message: 'Meeting not found' });
+    }
 
-    if (!isHostOrCoHost) {
+    const isHost = meeting.hostId === req.user.id;
+    const participants = meeting.participants || [];
+    const isCoHost = participants.some(
+      p => p.userId === req.user.id && p.role === 'co-host'
+    );
+
+    if (!isHost && !isCoHost) {
       return res.status(403).json({ message: 'Only host or co-host can answer questions' });
     }
 
     question.answer = answer;
-    question.answeredBy = req.user._id;
+    question.answeredById = req.user.id;
     question.answeredAt = new Date();
     question.isAnswered = true;
 
     await question.save();
-    await question.populate('askedBy', 'name email avatar');
-    await question.populate('answeredBy', 'name email avatar');
 
     res.json({
       success: true,
-      data: { question }
+      data: { question: question.toJSON() }
     });
   } catch (error) {
     console.error('Answer question error:', error);
@@ -146,28 +127,23 @@ router.put('/:questionId/answer', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   DELETE /api/qa/:questionId
- * @desc    Dismiss a question (host/co-host only)
- * @access  Private
- */
 router.delete('/:questionId', protect, async (req, res) => {
   try {
     const { questionId } = req.params;
 
-    const question = await Question.findById(questionId);
+    const question = await Question.findByPk(questionId);
     if (!question) {
       return res.status(404).json({ message: 'Question not found' });
     }
 
-    // Verify permission
-    const meeting = await Meeting.findById(question.meeting);
-    const isHostOrCoHost = meeting.isHost(req.user._id) || 
-      meeting.participants.some(p => 
-        p.user.toString() === req.user._id.toString() && p.role === 'co-host'
-      );
+    const meeting = await Meeting.findByPk(question.meetingId);
+    const isHost = meeting && meeting.hostId === req.user.id;
+    const participants = meeting ? (meeting.participants || []) : [];
+    const isCoHost = participants.some(
+      p => p.userId === req.user.id && p.role === 'co-host'
+    );
 
-    if (!isHostOrCoHost && question.askedBy.toString() !== req.user._id.toString()) {
+    if (!isHost && !isCoHost && question.askedById !== req.user.id) {
       return res.status(403).json({ message: 'Not authorized to dismiss this question' });
     }
 

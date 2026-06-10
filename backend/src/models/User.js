@@ -1,73 +1,76 @@
-import mongoose from 'mongoose';
+import { DataTypes } from 'sequelize';
 import bcrypt from 'bcryptjs';
+import { sequelize } from '../database/index.js';
 
-const userSchema = new mongoose.Schema({
+const User = sequelize.define('User', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
   name: {
-    type: String,
-    required: [true, 'Name is required'],
-    trim: true,
-    minlength: [2, 'Name must be at least 2 characters']
-  },
-  email: {
-    type: String,
-    required: [true, 'Email is required'],
-    unique: true,
-    lowercase: true,
-    trim: true,
-    match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email']
-  },
-  password: {
-    type: String,
-    required: [true, 'Password is required'],
-    minlength: [6, 'Password must be at least 6 characters'],
-    select: false // Don't return password by default
-  },
-  avatar: {
-    type: String,
-    default: function() {
-      // Generate default avatar URL based on name
-      return `https://ui-avatars.com/api/?name=${encodeURIComponent(this.name)}&background=random`;
+    type: DataTypes.STRING(100),
+    allowNull: false,
+    validate: {
+      len: [2, 100]
     }
   },
+  email: {
+    type: DataTypes.STRING(255),
+    allowNull: false,
+    unique: true,
+    validate: {
+      isEmail: true
+    }
+  },
+  password: {
+    type: DataTypes.STRING(255),
+    allowNull: false
+  },
+  avatar: {
+    type: DataTypes.STRING(500)
+  },
   isOnline: {
-    type: Boolean,
-    default: false
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   },
   lastSeen: {
-    type: Date,
-    default: Date.now
+    type: DataTypes.DATE,
+    defaultValue: DataTypes.NOW
   },
   role: {
-    type: String,
-    enum: ['user', 'admin', 'superadmin'],
-    default: 'user'
+    type: DataTypes.ENUM('user', 'admin', 'superadmin'),
+    defaultValue: 'user'
   }
 }, {
-  timestamps: true
+  tableName: 'Users',
+  hooks: {
+    beforeSave: async (user) => {
+      if (user.changed('password')) {
+        const salt = await bcrypt.genSalt(12);
+        user.password = await bcrypt.hash(user.password, salt);
+      }
+    }
+  },
+  defaultScope: {
+    attributes: { exclude: ['password'] }
+  },
+  scopes: {
+    withPassword: {
+      attributes: {}
+    }
+  }
 });
 
-// Hash password before saving
-userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
-  
-  const salt = await bcrypt.genSalt(12);
-  this.password = await bcrypt.hash(this.password, salt);
-  next();
-});
-
-// Compare password method
-userSchema.methods.comparePassword = async function(candidatePassword) {
+User.prototype.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Transform output
-userSchema.methods.toJSON = function() {
-  const user = this.toObject();
-  delete user.password;
-  delete user.__v;
-  return user;
+User.prototype.toJSON = function() {
+  const values = { ...this.get() };
+  delete values.password;
+  values._id = values.id;
+  return values;
 };
-
-const User = mongoose.model('User', userSchema);
 
 export default User;

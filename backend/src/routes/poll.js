@@ -1,50 +1,47 @@
 import express from 'express';
+import { v4 as uuidv4 } from 'uuid';
 import { protect } from '../middleware/auth.js';
 import Poll from '../models/Poll.js';
 import Meeting from '../models/Meeting.js';
 
 const router = express.Router();
 
-/**
- * @route   POST /api/polls
- * @desc    Create a new poll
- * @access  Private (host/co-host only)
- */
 router.post('/', protect, async (req, res) => {
   try {
     const { meetingId, question, options, allowMultiple, isAnonymous } = req.body;
 
-    // Verify user is host or co-host
-    const meeting = await Meeting.findById(meetingId);
+    const meeting = await Meeting.findByPk(meetingId);
     if (!meeting) {
       return res.status(404).json({ message: 'Meeting not found' });
     }
 
-    const isHostOrCoHost = meeting.isHost(req.user._id) || 
-      meeting.participants.some(p => 
-        p.user.toString() === req.user._id.toString() && p.role === 'co-host'
-      );
+    const isHost = meeting.hostId === req.user.id;
+    const participants = meeting.participants || [];
+    const isCoHost = participants.some(
+      p => p.userId === req.user.id && p.role === 'co-host'
+    );
 
-    if (!isHostOrCoHost) {
+    if (!isHost && !isCoHost) {
       return res.status(403).json({ message: 'Only host or co-host can create polls' });
     }
 
-    // Create poll
     const poll = await Poll.create({
-      meeting: meetingId,
-      createdBy: req.user._id,
+      meetingId,
+      createdById: req.user.id,
       question,
-      options: options.map(text => ({ text, votes: [] })),
+      options: options.map(text => ({
+        id: uuidv4(),
+        text,
+        votes: []
+      })),
       allowMultiple,
       isAnonymous,
       status: 'active'
     });
 
-    await poll.populate('createdBy', 'name email avatar');
-
     res.status(201).json({
       success: true,
-      data: { poll }
+      data: { poll: poll.toJSON() }
     });
   } catch (error) {
     console.error('Create poll error:', error);
@@ -52,17 +49,12 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   POST /api/polls/:pollId/vote
- * @desc    Vote on a poll
- * @access  Private
- */
 router.post('/:pollId/vote', protect, async (req, res) => {
   try {
     const { pollId } = req.params;
-    const { optionIds } = req.body; // Array of option IDs
+    const { optionIds } = req.body;
 
-    const poll = await Poll.findById(pollId);
+    const poll = await Poll.findByPk(pollId);
     if (!poll) {
       return res.status(404).json({ message: 'Poll not found' });
     }
@@ -71,12 +63,10 @@ router.post('/:pollId/vote', protect, async (req, res) => {
       return res.status(400).json({ message: 'Poll is not active' });
     }
 
-    // Check if user already voted
-    if (poll.hasUserVoted(req.user._id)) {
+    if (poll.hasUserVoted(req.user.id)) {
       return res.status(400).json({ message: 'You have already voted' });
     }
 
-    // Validate option IDs
     if (!Array.isArray(optionIds) || optionIds.length === 0) {
       return res.status(400).json({ message: 'Invalid options' });
     }
@@ -85,23 +75,26 @@ router.post('/:pollId/vote', protect, async (req, res) => {
       return res.status(400).json({ message: 'Multiple votes not allowed' });
     }
 
-    // Add votes
+    const options = poll.options || [];
+
     let votesAdded = 0;
     optionIds.forEach(optionId => {
-      const option = poll.options.id(optionId);
+      const option = options.find(o => o.id === optionId);
       if (option) {
-        option.votes.push({ user: req.user._id });
+        option.votes = option.votes || [];
+        option.votes.push({ user: req.user.id, votedAt: new Date().toISOString() });
         votesAdded++;
       }
     });
 
-    poll.totalVotes += 1;
+    poll.options = options;
+    poll.totalVotes = (poll.totalVotes || 0) + 1;
     await poll.save();
 
     res.json({
       success: true,
       data: {
-        poll,
+        poll: poll.toJSON(),
         results: poll.getResults()
       }
     });
@@ -111,16 +104,11 @@ router.post('/:pollId/vote', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   GET /api/polls/:pollId/results
- * @desc    Get poll results
- * @access  Private
- */
 router.get('/:pollId/results', protect, async (req, res) => {
   try {
     const { pollId } = req.params;
 
-    const poll = await Poll.findById(pollId).populate('createdBy', 'name email avatar');
+    const poll = await Poll.findByPk(pollId);
     if (!poll) {
       return res.status(404).json({ message: 'Poll not found' });
     }
@@ -128,7 +116,7 @@ router.get('/:pollId/results', protect, async (req, res) => {
     res.json({
       success: true,
       data: {
-        poll,
+        poll: poll.toJSON(),
         results: poll.getResults()
       }
     });
@@ -138,28 +126,27 @@ router.get('/:pollId/results', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   PUT /api/polls/:pollId/end
- * @desc    End a poll
- * @access  Private (host/co-host only)
- */
 router.put('/:pollId/end', protect, async (req, res) => {
   try {
     const { pollId } = req.params;
 
-    const poll = await Poll.findById(pollId);
+    const poll = await Poll.findByPk(pollId);
     if (!poll) {
       return res.status(404).json({ message: 'Poll not found' });
     }
 
-    // Verify permission
-    const meeting = await Meeting.findById(poll.meeting);
-    const isHostOrCoHost = meeting.isHost(req.user._id) || 
-      meeting.participants.some(p => 
-        p.user.toString() === req.user._id.toString() && p.role === 'co-host'
-      );
+    const meeting = await Meeting.findByPk(poll.meetingId);
+    if (!meeting) {
+      return res.status(404).json({ message: 'Meeting not found' });
+    }
 
-    if (!isHostOrCoHost) {
+    const isHost = meeting.hostId === req.user.id;
+    const participants = meeting.participants || [];
+    const isCoHost = participants.some(
+      p => p.userId === req.user.id && p.role === 'co-host'
+    );
+
+    if (!isHost && !isCoHost) {
       return res.status(403).json({ message: 'Only host or co-host can end polls' });
     }
 
@@ -170,7 +157,7 @@ router.put('/:pollId/end', protect, async (req, res) => {
     res.json({
       success: true,
       data: {
-        poll,
+        poll: poll.toJSON(),
         results: poll.getResults()
       }
     });
@@ -180,22 +167,18 @@ router.put('/:pollId/end', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   GET /api/polls/meeting/:meetingId
- * @desc    Get all polls for a meeting
- * @access  Private
- */
 router.get('/meeting/:meetingId', protect, async (req, res) => {
   try {
     const { meetingId } = req.params;
 
-    const polls = await Poll.find({ meeting: meetingId })
-      .populate('createdBy', 'name email avatar')
-      .sort({ createdAt: -1 });
+    const polls = await Poll.findAll({
+      where: { meetingId },
+      order: [['createdAt', 'DESC']]
+    });
 
     res.json({
       success: true,
-      data: { polls }
+      data: { polls: polls.map(p => p.toJSON()) }
     });
   } catch (error) {
     console.error('Get meeting polls error:', error);

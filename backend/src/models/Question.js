@@ -1,63 +1,59 @@
-import mongoose from 'mongoose';
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../database/index.js';
 
-const questionSchema = new mongoose.Schema({
-  meeting: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Meeting',
-    required: true
+const Question = sequelize.define('Question', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
   },
-  askedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+  meetingId: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+  askedById: {
+    type: DataTypes.UUID,
+    allowNull: false
   },
   question: {
-    type: String,
-    required: true,
-    trim: true
+    type: DataTypes.TEXT,
+    allowNull: false
   },
   answer: {
-    type: String,
-    trim: true
+    type: DataTypes.TEXT
   },
-  answeredBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  answeredById: {
+    type: DataTypes.UUID
   },
   answeredAt: {
-    type: Date
+    type: DataTypes.DATE
   },
-  upvotes: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }],
+  upvotes: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
   isAnswered: {
-    type: Boolean,
-    default: false
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   },
   isDismissed: {
-    type: Boolean,
-    default: false
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   }
 }, {
-  timestamps: true
+  tableName: 'Questions'
 });
 
-// Index for faster lookups
-questionSchema.index({ meeting: 1 });
-questionSchema.index({ askedBy: 1 });
-questionSchema.index({ isAnswered: 1 });
-
-// Virtual for upvote count
-questionSchema.virtual('upvoteCount').get(function() {
-  return this.upvotes.length;
-});
-
-// Method to check if user upvoted
-questionSchema.methods.hasUserUpvoted = function(userId) {
-  return this.upvotes.some(id => id.toString() === userId.toString());
+Question.prototype.hasUserUpvoted = function(userId) {
+  const upvotes = this.upvotes || [];
+  return upvotes.some(id => id.toString() === userId.toString());
 };
 
-const Question = mongoose.model('Question', questionSchema);
+Question.prototype.toJSON = function() {
+  const values = { ...this.get() };
+  values._id = values.id;
+  values.upvoteCount = (values.upvotes || []).length;
+  return values;
+};
 
 export default Question;

@@ -2,30 +2,25 @@ import { verifySocketToken } from '../middleware/auth.js';
 import Meeting from '../models/Meeting.js';
 import Message from '../models/Message.js';
 import Team from '../models/Team.js';
+import User from '../models/User.js';
 import mediasoupService from '../lib/mediasoup.js';
 
-// Store connected users and their rooms
 const connectedUsers = new Map();
 const roomParticipants = new Map();
 
-// Store user transports and producers
-const userTransports = new Map(); // Map<socketId, { send: transportId, recv: transportId }>
-const userProducers = new Map(); // Map<socketId, { audio: producerId, video: producerId, screen: producerId }>
+const userTransports = new Map();
+const userProducers = new Map();
 
-/**
- * Initialize all Socket.IO event handlers
- */
 export const initializeSocketHandlers = (io) => {
-  // Authentication middleware
   io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
-    
+
     if (!token) {
       return next(new Error('Authentication required'));
     }
 
     const user = await verifySocketToken(token);
-    
+
     if (!user) {
       return next(new Error('Invalid token'));
     }
@@ -35,79 +30,64 @@ export const initializeSocketHandlers = (io) => {
   });
 
   io.on('connection', (socket) => {
-    console.log(`✅ User connected: ${socket.user.name} (${socket.id})`);
-    
-    // Store user connection
-    connectedUsers.set(socket.user._id.toString(), {
+    console.log(`User connected: ${socket.user.name} (${socket.id})`);
+
+    connectedUsers.set(socket.user.id, {
       socketId: socket.id,
       user: socket.user
     });
 
-    // Join user's personal room for private messages
-    socket.join(`user:${socket.user._id}`);
+    socket.join(`user:${socket.user.id}`);
 
-    // ============================================
-    // ROOM / MEETING EVENTS
-    // ============================================
-
-    /**
-     * Join a meeting room
-     */
     socket.on('room:join', async ({ roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId })
-          .populate('participants.user', 'name email avatar');
+        const meeting = await Meeting.findOne({ where: { roomId } });
 
         if (!meeting) {
           socket.emit('error', { message: 'Meeting not found' });
           return;
         }
 
-        // Join socket room
         socket.join(roomId);
         socket.roomId = roomId;
 
-        // Update room participants map
         if (!roomParticipants.has(roomId)) {
           roomParticipants.set(roomId, new Map());
         }
-        
+
         const roomUsers = roomParticipants.get(roomId);
-        roomUsers.set(socket.user._id.toString(), {
+        roomUsers.set(socket.user.id, {
           socketId: socket.id,
           user: {
-            _id: socket.user._id,
+            id: socket.user.id,
             name: socket.user.name,
             email: socket.user.email,
             avatar: socket.user.avatar
           },
-          isMuted: meeting.settings.muteOnEntry,
+          isMuted: meeting.settings ? meeting.settings.muteOnEntry : false,
           isVideoOff: false,
           isScreenSharing: false
         });
 
-        // Get list of other participants in room
         const participants = Array.from(roomUsers.values()).filter(
-          p => p.user._id.toString() !== socket.user._id.toString()
+          p => p.user.id !== socket.user.id
         );
 
-        // Send current participants to joining user
         socket.emit('room:participants', {
           participants,
-          isHost: meeting.host.toString() === socket.user._id.toString()
+          isHost: meeting.hostId === socket.user.id
         });
 
-        // Send existing producers to joining user
         const existingProducers = [];
         for (const [participantSocketId, participant] of roomUsers) {
-          if (participantSocketId !== socket.user._id.toString()) {
+          if (participantSocketId !== socket.user.id) {
             const producers = userProducers.get(participant.socketId);
             if (producers) {
               for (const [mediaType, producerId] of Object.entries(producers)) {
                 existingProducers.push({
                   producerId,
                   socketId: participant.socketId,
-                  userId: participant.user._id,
+                  userId: participant.user.id,
                   userName: participant.user.name,
                   kind: mediaType === 'screen' ? 'video' : mediaType,
                   mediaType,
@@ -121,10 +101,9 @@ export const initializeSocketHandlers = (io) => {
           socket.emit('mediasoup:existingProducers', { producers: existingProducers });
         }
 
-        // Notify others about new participant
         socket.to(roomId).emit('room:user-joined', {
           user: {
-            _id: socket.user._id,
+            id: socket.user.id,
             name: socket.user.name,
             email: socket.user.email,
             avatar: socket.user.avatar
@@ -132,27 +111,17 @@ export const initializeSocketHandlers = (io) => {
           socketId: socket.id
         });
 
-        console.log(`📍 ${socket.user.name} joined room: ${roomId}`);
+        console.log(`${socket.user.name} joined room: ${roomId}`);
       } catch (error) {
         console.error('Room join error:', error);
         socket.emit('error', { message: 'Error joining room' });
       }
     });
 
-    /**
-     * Leave a meeting room
-     */
     socket.on('room:leave', () => {
       handleRoomLeave(socket, io);
     });
 
-    // ============================================
-    // MEDIASOUP SFU SIGNALING EVENTS
-    // ============================================
-
-    /**
-     * Get router RTP capabilities for a room
-     */
     socket.on('mediasoup:getRouterRtpCapabilities', async ({ roomId }, callback) => {
       try {
         const rtpCapabilities = await mediasoupService.getRouterRtpCapabilities(roomId);
@@ -163,18 +132,14 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Create WebRTC transport (for sending or receiving media)
-     */
     socket.on('mediasoup:createWebRtcTransport', async ({ roomId, direction }, callback) => {
       try {
         const transportParams = await mediasoupService.createWebRtcTransport(roomId, direction);
-        
-        // Store transport ID for this socket
+
         if (!userTransports.has(socket.id)) {
           userTransports.set(socket.id, {});
         }
-        
+
         const transports = userTransports.get(socket.id);
         if (direction === 'send') {
           transports.send = transportParams.id;
@@ -189,9 +154,6 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Connect transport with DTLS parameters
-     */
     socket.on('mediasoup:connectTransport', async ({ transportId, dtlsParameters }, callback) => {
       try {
         await mediasoupService.connectTransport(transportId, dtlsParameters);
@@ -202,33 +164,28 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Produce media (start sending audio/video/screen)
-     */
     socket.on('mediasoup:produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
       try {
         const { id: producerId } = await mediasoupService.produce(
           transportId,
           kind,
           rtpParameters,
-          { ...appData, socketId: socket.id, userId: socket.user._id }
+          { ...appData, socketId: socket.id, userId: socket.user.id }
         );
 
-        // Store producer ID
         if (!userProducers.has(socket.id)) {
           userProducers.set(socket.id, {});
         }
-        
+
         const producers = userProducers.get(socket.id);
-        const mediaType = appData.mediaType || kind; // 'audio', 'video', or 'screen'
+        const mediaType = appData.mediaType || kind;
         producers[mediaType] = producerId;
 
-        // Notify all other users in the room about new producer
         if (socket.roomId) {
           socket.to(socket.roomId).emit('mediasoup:newProducer', {
             producerId,
             socketId: socket.id,
-            userId: socket.user._id,
+            userId: socket.user.id,
             userName: socket.user.name,
             kind,
             mediaType,
@@ -242,9 +199,6 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Consume media (start receiving from another user)
-     */
     socket.on('mediasoup:consume', async ({ roomId, producerId, rtpCapabilities }, callback) => {
       try {
         const transports = userTransports.get(socket.id);
@@ -266,9 +220,6 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Resume consumer (start receiving media after initial setup)
-     */
     socket.on('mediasoup:resumeConsumer', async ({ consumerId }, callback) => {
       try {
         await mediasoupService.resumeConsumer(consumerId);
@@ -279,21 +230,17 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Pause/Resume producer
-     */
     socket.on('mediasoup:pauseProducer', async ({ producerId }, callback) => {
       try {
         await mediasoupService.pauseProducer(producerId);
-        
-        // Notify room about paused producer
+
         if (socket.roomId) {
           socket.to(socket.roomId).emit('mediasoup:producerPaused', {
             producerId,
             socketId: socket.id,
           });
         }
-        
+
         callback({ success: true });
       } catch (error) {
         console.error('Pause producer error:', error);
@@ -304,15 +251,14 @@ export const initializeSocketHandlers = (io) => {
     socket.on('mediasoup:resumeProducer', async ({ producerId }, callback) => {
       try {
         await mediasoupService.resumeProducer(producerId);
-        
-        // Notify room about resumed producer
+
         if (socket.roomId) {
           socket.to(socket.roomId).emit('mediasoup:producerResumed', {
             producerId,
             socketId: socket.id,
           });
         }
-        
+
         callback({ success: true });
       } catch (error) {
         console.error('Resume producer error:', error);
@@ -320,14 +266,10 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Close producer (stop sending media)
-     */
     socket.on('mediasoup:closeProducer', ({ producerId }, callback) => {
       try {
         mediasoupService.closeProducer(producerId);
-        
-        // Remove from user producers
+
         const producers = userProducers.get(socket.id);
         if (producers) {
           for (const [key, value] of Object.entries(producers)) {
@@ -338,7 +280,6 @@ export const initializeSocketHandlers = (io) => {
           }
         }
 
-        // Notify room
         if (socket.roomId) {
           socket.to(socket.roomId).emit('mediasoup:producerClosed', {
             producerId,
@@ -353,77 +294,57 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    // ============================================
-    // MEDIA CONTROL EVENTS
-    // ============================================
-
-    /**
-     * Toggle mute status
-     */
     socket.on('media:toggle-mute', ({ isMuted }) => {
       if (socket.roomId) {
         const roomUsers = roomParticipants.get(socket.roomId);
-        if (roomUsers && roomUsers.has(socket.user._id.toString())) {
-          roomUsers.get(socket.user._id.toString()).isMuted = isMuted;
+        if (roomUsers && roomUsers.has(socket.user.id)) {
+          roomUsers.get(socket.user.id).isMuted = isMuted;
         }
 
         socket.to(socket.roomId).emit('media:user-muted', {
           socketId: socket.id,
-          userId: socket.user._id,
+          userId: socket.user.id,
           isMuted
         });
       }
     });
 
-    /**
-     * Toggle video status
-     */
     socket.on('media:toggle-video', ({ isVideoOff }) => {
       if (socket.roomId) {
         const roomUsers = roomParticipants.get(socket.roomId);
-        if (roomUsers && roomUsers.has(socket.user._id.toString())) {
-          roomUsers.get(socket.user._id.toString()).isVideoOff = isVideoOff;
+        if (roomUsers && roomUsers.has(socket.user.id)) {
+          roomUsers.get(socket.user.id).isVideoOff = isVideoOff;
         }
 
         socket.to(socket.roomId).emit('media:user-video', {
           socketId: socket.id,
-          userId: socket.user._id,
+          userId: socket.user.id,
           isVideoOff
         });
       }
     });
 
-    /**
-     * Toggle screen sharing
-     */
     socket.on('media:screen-share', ({ isScreenSharing }) => {
       if (socket.roomId) {
         const roomUsers = roomParticipants.get(socket.roomId);
-        if (roomUsers && roomUsers.has(socket.user._id.toString())) {
-          roomUsers.get(socket.user._id.toString()).isScreenSharing = isScreenSharing;
+        if (roomUsers && roomUsers.has(socket.user.id)) {
+          roomUsers.get(socket.user.id).isScreenSharing = isScreenSharing;
         }
 
         socket.to(socket.roomId).emit('media:screen-share', {
           socketId: socket.id,
-          userId: socket.user._id,
+          userId: socket.user.id,
           userName: socket.user.name,
           isScreenSharing
         });
       }
     });
 
-    // ============================================
-    // HOST CONTROL EVENTS
-    // ============================================
-
-    /**
-     * Host mutes a participant
-     */
     socket.on('host:mute-user', async ({ targetSocketId, roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+
+        if (meeting && meeting.hostId === socket.user.id) {
           io.to(targetSocketId).emit('host:force-mute');
           io.to(roomId).emit('host:user-muted', { targetSocketId });
         }
@@ -432,24 +353,20 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host removes a participant
-     */
     socket.on('host:remove-user', async ({ targetSocketId, roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+
+        if (meeting && meeting.hostId === socket.user.id) {
           io.to(targetSocketId).emit('host:removed');
-          
-          // Get target socket and remove from room
+
           const targetSocket = io.sockets.sockets.get(targetSocketId);
           if (targetSocket) {
             targetSocket.leave(roomId);
-            
+
             const roomUsers = roomParticipants.get(roomId);
             if (roomUsers && targetSocket.user) {
-              roomUsers.delete(targetSocket.user._id.toString());
+              roomUsers.delete(targetSocket.user.id);
             }
           }
 
@@ -460,25 +377,20 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host ends meeting for everyone
-     */
     socket.on('host:end-meeting', async ({ roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+
+        if (meeting && meeting.hostId === socket.user.id) {
           io.to(roomId).emit('meeting:ended', {
             roomId,
-            endedBy: socket.user._id
+            endedBy: socket.user.id
           });
 
-          // Update meeting status
           meeting.status = 'ended';
           meeting.endedAt = new Date();
           await meeting.save();
 
-          // Clear room participants
           roomParticipants.delete(roomId);
         }
       } catch (error) {
@@ -486,49 +398,50 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    // ============================================
-    // CHAT EVENTS
-    // ============================================
-
-    /**
-     * Send chat message
-     */
     socket.on('chat:send', async ({ roomId, content, recipientId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        
+        const meeting = await Meeting.findOne({ where: { roomId } });
+
         if (!meeting) {
           socket.emit('error', { message: 'Meeting not found' });
           return;
         }
 
-        if (!meeting.settings.allowChat) {
+        if (!meeting.settings || !meeting.settings.allowChat) {
           socket.emit('error', { message: 'Chat is disabled' });
           return;
         }
 
         const messageData = {
-          meeting: meeting._id,
-          sender: socket.user._id,
+          meetingId: meeting.id,
+          senderId: socket.user.id,
           content: content.trim(),
           type: 'text',
           isPrivate: !!recipientId
         };
 
         if (recipientId) {
-          messageData.recipient = recipientId;
+          messageData.recipientId = recipientId;
         }
 
         const message = await Message.create(messageData);
-        await message.populate('sender', 'name email avatar');
-        
+
+        const sender = await User.findByPk(socket.user.id, {
+          attributes: ['id', 'name', 'email', 'avatar']
+        });
+
+        const messageJson = message.toJSON();
+        messageJson.sender = sender;
+        messageJson._id = messageJson.id;
+
         if (recipientId) {
-          await message.populate('recipient', 'name email avatar');
-          // Private message
-          io.to(`user:${socket.user._id}`).to(`user:${recipientId}`).emit('chat:message', message);
+          const recipient = await User.findByPk(recipientId, {
+            attributes: ['id', 'name', 'email', 'avatar']
+          });
+          messageJson.recipient = recipient;
+          io.to(`user:${socket.user.id}`).to(`user:${recipientId}`).emit('chat:message', messageJson);
         } else {
-          // Public message
-          io.to(roomId).emit('chat:message', message);
+          io.to(roomId).emit('chat:message', messageJson);
         }
       } catch (error) {
         console.error('Chat send error:', error);
@@ -536,79 +449,49 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Typing indicator
-     */
     socket.on('chat:typing', ({ roomId, isTyping }) => {
       socket.to(roomId).emit('chat:user-typing', {
-        userId: socket.user._id,
+        userId: socket.user.id,
         userName: socket.user.name,
         isTyping
       });
     });
 
-    // ============================================
-    // RECORDING EVENTS
-    // ============================================
-
-    /**
-     * Recording started notification
-     */
     socket.on('recording:started', ({ roomId }) => {
       socket.to(roomId).emit('recording:started', {
-        userId: socket.user._id,
+        userId: socket.user.id,
         userName: socket.user.name
       });
     });
 
-    /**
-     * Recording stopped notification
-     */
     socket.on('recording:stopped', ({ roomId }) => {
       socket.to(roomId).emit('recording:stopped', {
-        userId: socket.user._id,
+        userId: socket.user.id,
         userName: socket.user.name
       });
     });
 
-    // ============================================
-    // HAND RAISE / REACTIONS
-    // ============================================
-
-    /**
-     * Raise hand
-     */
     socket.on('reaction:hand-raise', ({ roomId, isRaised }) => {
       socket.to(roomId).emit('reaction:hand-raise', {
         socketId: socket.id,
-        userId: socket.user._id,
+        userId: socket.user.id,
         userName: socket.user.name,
         isRaised
       });
     });
 
-    /**
-     * Send reaction (emoji)
-     */
     socket.on('reaction:emoji', ({ roomId, emoji }) => {
       io.to(roomId).emit('reaction:emoji', {
-        userId: socket.user._id,
+        userId: socket.user.id,
         userName: socket.user.name,
         emoji
       });
     });
 
-    // ============================================
-    // EXTENDED HOST CONTROL EVENTS
-    // ============================================
-
-    /**
-     * Host forces video off for a participant
-     */
     socket.on('host:force-video-off', async ({ targetSocketId, roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+        if (meeting && meeting.hostId === socket.user.id) {
           io.to(targetSocketId).emit('host:force-video-off');
         }
       } catch (error) {
@@ -616,13 +499,10 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host requests a participant to unmute
-     */
     socket.on('host:request-unmute', async ({ targetSocketId, roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+        if (meeting && meeting.hostId === socket.user.id) {
           io.to(targetSocketId).emit('host:request-unmute');
         }
       } catch (error) {
@@ -630,13 +510,10 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host mutes all participants
-     */
     socket.on('host:mute-all', async ({ roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+        if (meeting && meeting.hostId === socket.user.id) {
           socket.to(roomId).emit('host:force-mute');
         }
       } catch (error) {
@@ -644,13 +521,10 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host disables all cameras
-     */
     socket.on('host:disable-all-video', async ({ roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+        if (meeting && meeting.hostId === socket.user.id) {
           socket.to(roomId).emit('host:force-video-off');
         }
       } catch (error) {
@@ -658,14 +532,11 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host locks/unlocks meeting
-     */
     socket.on('host:lock-meeting', async ({ roomId, isLocked }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
-          meeting.settings.isLocked = isLocked;
+        const meeting = await Meeting.findOne({ where: { roomId } });
+        if (meeting && meeting.hostId === socket.user.id) {
+          meeting.settings = { ...(meeting.settings || {}), isLocked };
           await meeting.save();
           io.to(roomId).emit('host:meeting-locked', { isLocked });
         }
@@ -674,28 +545,21 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host admits user from waiting room
-     */
     socket.on('host:admit-user', async ({ roomId, targetSocketId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+        if (meeting && meeting.hostId === socket.user.id) {
           io.to(targetSocketId).emit('room:admitted');
-          // The admitted user's client will re-attempt join
         }
       } catch (error) {
         console.error('Host admit user error:', error);
       }
     });
 
-    /**
-     * Host denies user from waiting room
-     */
     socket.on('host:deny-user', async ({ roomId, targetSocketId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+        if (meeting && meeting.hostId === socket.user.id) {
           io.to(targetSocketId).emit('room:denied');
         }
       } catch (error) {
@@ -703,13 +567,10 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host spotlights a user
-     */
     socket.on('host:spotlight', async ({ roomId, userId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+        if (meeting && meeting.hostId === socket.user.id) {
           io.to(roomId).emit('host:spotlight', { userId });
         }
       } catch (error) {
@@ -717,25 +578,24 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host makes a user co-host
-     */
     socket.on('host:make-cohost', async ({ targetSocketId, roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId }).populate('participants.user');
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
-          // Find the target user
+        const meeting = await Meeting.findOne({ where: { roomId } });
+
+        if (meeting && meeting.hostId === socket.user.id) {
           const targetSocket = io.sockets.sockets.get(targetSocketId);
           if (targetSocket && targetSocket.user) {
-            const participant = meeting.participants.find(
-              p => p.user._id.toString() === targetSocket.user._id.toString()
+            const participants = meeting.participants || [];
+            const participant = participants.find(
+              p => p.userId === targetSocket.user.id
             );
             if (participant) {
               participant.role = 'co-host';
+              meeting.participants = participants;
               await meeting.save();
               io.to(targetSocketId).emit('host:promoted', { role: 'co-host' });
               io.to(roomId).emit('room:role-changed', {
-                userId: targetSocket.user._id,
+                userId: targetSocket.user.id,
                 role: 'co-host'
               });
             }
@@ -746,14 +606,11 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Host updates meeting settings
-     */
     socket.on('host:update-settings', async ({ roomId, settings }) => {
       try {
-        const meeting = await Meeting.findOne({ roomId });
-        if (meeting && meeting.host.toString() === socket.user._id.toString()) {
-          Object.assign(meeting.settings, settings);
+        const meeting = await Meeting.findOne({ where: { roomId } });
+        if (meeting && meeting.hostId === socket.user.id) {
+          Object.assign(meeting.settings || {}, settings);
           await meeting.save();
           io.to(roomId).emit('meeting:settings-updated', { settings });
         }
@@ -762,64 +619,40 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    // ============================================
-    // CAPTIONS
-    // ============================================
-
-    /**
-     * Live caption text
-     */
     socket.on('caption:text', ({ roomId, text }) => {
       socket.to(roomId).emit('caption:text', {
-        userId: socket.user._id,
+        userId: socket.user.id,
         userName: socket.user.name,
         text
       });
     });
 
-    // ============================================    // WHITEBOARD EVENTS
-    // ============================================
-
-    /**
-     * Whiteboard drawing
-     */
     socket.on('whiteboard:draw', ({ roomId, x0, y0, x1, y1, color, width, tool }) => {
-      socket.to(roomId).emit('whiteboard:draw', { x0, y0, x1, y1, color, width, tool })
+      socket.to(roomId).emit('whiteboard:draw', { x0, y0, x1, y1, color, width, tool });
     });
 
-    /**
-     * Whiteboard clear
-     */
     socket.on('whiteboard:clear', ({ roomId }) => {
-      socket.to(roomId).emit('whiteboard:clear')
+      socket.to(roomId).emit('whiteboard:clear');
     });
 
-    // ============================================    // TEAM EVENTS
-    // ============================================
-
-    /**
-     * Join a team room for team chat
-     */
     socket.on('team:join', async ({ teamId }) => {
       try {
-        const team = await Team.findById(teamId).populate('members.user', 'name email avatar');
+        const team = await Team.findByPk(teamId);
 
         if (!team) {
           socket.emit('error', { message: 'Team not found' });
           return;
         }
 
-        // Check membership
-        if (!team.isMember(socket.user._id)) {
+        if (!team.isMember(socket.user.id)) {
           socket.emit('error', { message: 'You are not a member of this team' });
           return;
         }
 
-        // Join socket room for team
         socket.join(`team:${teamId}`);
-        
-        console.log(`📍 ${socket.user.name} joined team: ${team.name}`);
-        
+
+        console.log(`${socket.user.name} joined team: ${team.name}`);
+
         socket.emit('team:joined', {
           teamId,
           teamName: team.name
@@ -830,34 +663,23 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    /**
-     * Leave a team room
-     */
     socket.on('team:leave', ({ teamId }) => {
       socket.leave(`team:${teamId}`);
-      console.log(`📍 ${socket.user.name} left team: ${teamId}`);
+      console.log(`${socket.user.name} left team: ${teamId}`);
     });
 
-    /**
-     * User is typing in team chat
-     */
     socket.on('team:typing', ({ teamId, channelType, isTyping }) => {
       socket.to(`team:${teamId}`).emit('team:user-typing', {
-        userId: socket.user._id,
+        userId: socket.user.id,
         userName: socket.user.name,
         channelType,
         isTyping
       });
     });
 
-    // ============================================
-    // DISCONNECT
-    // ============================================
-
     socket.on('disconnect', () => {
-      console.log(`❌ User disconnected: ${socket.user.name} (${socket.id})`);
-      
-      // Clean up mediasoup resources
+      console.log(`User disconnected: ${socket.user.name} (${socket.id})`);
+
       const producers = userProducers.get(socket.id);
       if (producers) {
         for (const producerId of Object.values(producers)) {
@@ -874,40 +696,34 @@ export const initializeSocketHandlers = (io) => {
       }
 
       handleRoomLeave(socket, io);
-      connectedUsers.delete(socket.user._id.toString());
+      connectedUsers.delete(socket.user.id);
     });
   });
 };
 
-/**
- * Handle user leaving room
- */
 function handleRoomLeave(socket, io) {
   if (socket.roomId) {
     const roomId = socket.roomId;
-    
-    // Remove from room participants
+
     const roomUsers = roomParticipants.get(roomId);
     if (roomUsers) {
-      roomUsers.delete(socket.user._id.toString());
-      
-      // Clean up empty rooms
+      roomUsers.delete(socket.user.id);
+
       if (roomUsers.size === 0) {
         roomParticipants.delete(roomId);
       }
     }
 
-    // Notify others
     io.to(roomId).emit('room:user-left', {
       socketId: socket.id,
-      userId: socket.user._id,
+      userId: socket.user.id,
       userName: socket.user.name
     });
 
     socket.leave(roomId);
     socket.roomId = null;
 
-    console.log(`📍 ${socket.user.name} left room: ${roomId}`);
+    console.log(`${socket.user.name} left room: ${roomId}`);
   }
 }
 

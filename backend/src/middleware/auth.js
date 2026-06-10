@@ -1,14 +1,10 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
-/**
- * Protect routes - require authentication
- */
 export const protect = async (req, res, next) => {
   try {
     let token;
 
-    // Check for token in Authorization header
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     }
@@ -20,12 +16,12 @@ export const protect = async (req, res, next) => {
       });
     }
 
-    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Get user from token
-    const user = await User.findById(decoded.id);
-    
+    const user = await User.findByPk(decoded.id, {
+      attributes: { include: ['password'] }
+    });
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -44,16 +40,13 @@ export const protect = async (req, res, next) => {
   }
 };
 
-/**
- * Verify socket.io connection token
- */
 export const verifySocketToken = async (token) => {
   try {
     if (!token) return null;
-    
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
-    
+    const user = await User.findByPk(decoded.id);
+
     return user;
   } catch (error) {
     console.error('Socket auth error:', error.message);
@@ -61,9 +54,6 @@ export const verifySocketToken = async (token) => {
   }
 };
 
-/**
- * Generate JWT token
- */
 export const generateToken = (userId) => {
   return jwt.sign(
     { id: userId },

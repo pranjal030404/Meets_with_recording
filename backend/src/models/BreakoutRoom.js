@@ -1,75 +1,61 @@
-import mongoose from 'mongoose';
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../database/index.js';
 
-const breakoutRoomSchema = new mongoose.Schema({
-  parentMeeting: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Meeting',
-    required: true
+const BreakoutRoom = sequelize.define('BreakoutRoom', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  parentMeetingId: {
+    type: DataTypes.UUID,
+    allowNull: false
   },
   roomNumber: {
-    type: Number,
-    required: true
+    type: DataTypes.INTEGER,
+    allowNull: false
   },
   name: {
-    type: String,
-    required: true,
-    trim: true
+    type: DataTypes.STRING(255),
+    allowNull: false
   },
-  assignedParticipants: [{
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    joinedAt: {
-      type: Date
-    },
-    leftAt: {
-      type: Date
-    }
-  }],
   status: {
-    type: String,
-    enum: ['open', 'closed'],
-    default: 'open'
+    type: DataTypes.ENUM('open', 'closed'),
+    defaultValue: 'open'
   },
   duration: {
-    type: Number, // in minutes
-    default: 0 // 0 means no auto-close
+    type: DataTypes.INTEGER,
+    defaultValue: 0
   },
   autoCloseAt: {
-    type: Date
+    type: DataTypes.DATE
   },
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+  createdById: {
+    type: DataTypes.UUID,
+    allowNull: false
   }
 }, {
-  timestamps: true
+  tableName: 'BreakoutRooms'
 });
 
-// Index for faster lookups
-breakoutRoomSchema.index({ parentMeeting: 1 });
-breakoutRoomSchema.index({ status: 1 });
-
-// Virtual for active participant count
-breakoutRoomSchema.virtual('activeParticipantCount').get(function() {
-  return this.assignedParticipants.filter(p => p.joinedAt && !p.leftAt).length;
-});
-
-// Method to check if user is assigned
-breakoutRoomSchema.methods.isUserAssigned = function(userId) {
+BreakoutRoom.prototype.isUserAssigned = function(userId) {
+  if (!this.assignedParticipants) return false;
   return this.assignedParticipants.some(
-    p => p.user.toString() === userId.toString()
+    p => p.userId.toString() === userId.toString()
   );
 };
 
-// Method to get active participants
-breakoutRoomSchema.methods.getActiveParticipants = function() {
+BreakoutRoom.prototype.getActiveParticipants = function() {
+  if (!this.assignedParticipants) return [];
   return this.assignedParticipants.filter(p => p.joinedAt && !p.leftAt);
 };
 
-const BreakoutRoom = mongoose.model('BreakoutRoom', breakoutRoomSchema);
+BreakoutRoom.prototype.toJSON = function() {
+  const values = { ...this.get() };
+  values._id = values.id;
+  values.activeParticipantCount = (values.assignedParticipants || [])
+    .filter(p => p.joinedAt && !p.leftAt).length;
+  return values;
+};
 
 export default BreakoutRoom;

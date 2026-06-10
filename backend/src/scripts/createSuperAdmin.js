@@ -1,7 +1,8 @@
-import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { sequelize } from '../database/index.js';
 import User from '../models/User.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,50 +11,49 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const SUPERADMIN_CREDENTIALS = {
-  name: 'Super Admin',
-  email: 'admin@meetclone.com',
-  password: 'SuperAdmin@2026',
+  name: process.env.SUPERADMIN_NAME || 'Super Admin',
+  email: process.env.SUPERADMIN_EMAIL || 'admin@meetclone.com',
+  password: process.env.SUPERADMIN_PASSWORD || 'SuperAdmin@2026',
   role: 'superadmin'
 };
 
 const createSuperAdmin = async () => {
   try {
-    // Connect to MongoDB
-    const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/meetclone';
+    await sequelize.authenticate();
+    console.log('Database connected');
 
-    await mongoose.connect(mongoUri, {
-      serverSelectionTimeoutMS: 5000
+    const existingAdmin = await User.findOne({
+      where: { email: SUPERADMIN_CREDENTIALS.email }
     });
-    console.log('✅ MongoDB connected');
 
-    // Check if superadmin already exists
-    const existingAdmin = await User.findOne({ email: SUPERADMIN_CREDENTIALS.email });
-    
     if (existingAdmin) {
-      console.log('ℹ️  Superadmin already exists');
+      console.log('Superadmin already exists');
       console.log('Email:', SUPERADMIN_CREDENTIALS.email);
       console.log('Password: (unchanged)');
     } else {
-      // Create superadmin
-      const superAdmin = await User.create(SUPERADMIN_CREDENTIALS);
-      
-      console.log('✅ Superadmin created successfully!');
-      console.log('\n📧 LOGIN CREDENTIALS:');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      const salt = await bcrypt.genSalt(12);
+      const hashedPassword = await bcrypt.hash(SUPERADMIN_CREDENTIALS.password, salt);
+
+      await User.create({
+        name: SUPERADMIN_CREDENTIALS.name,
+        email: SUPERADMIN_CREDENTIALS.email,
+        password: hashedPassword,
+        role: SUPERADMIN_CREDENTIALS.role,
+        avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(SUPERADMIN_CREDENTIALS.name)}&background=random`
+      });
+
+      console.log('Superadmin created successfully!');
+      console.log('\nLOGIN CREDENTIALS:');
       console.log('Email:    ', SUPERADMIN_CREDENTIALS.email);
       console.log('Password: ', SUPERADMIN_CREDENTIALS.password);
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('\n⚠️  Please change the password after first login!');
+      console.log('\nPlease change the password after first login!');
     }
 
-    await mongoose.disconnect();
-    console.log('✅ Database disconnected');
     process.exit(0);
   } catch (error) {
-    console.error('❌ Error:', error.message);
-    if (error.message.includes('ECONNREFUSED')) {
-      console.error('ℹ️  MongoDB is not reachable at the configured URI.');
-      console.error('ℹ️  Start MongoDB locally or set MONGODB_URI in backend/.env (Atlas/local URI).');
+    console.error('Error:', error.message);
+    if (error.message.includes('ECONNREFUSED') || error.message.includes('connect')) {
+      console.error('MySQL is not reachable. Check your DB_HOST, DB_USER, DB_PASSWORD in backend/.env');
     }
     process.exit(1);
   }

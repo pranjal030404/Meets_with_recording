@@ -1,25 +1,21 @@
 import express from 'express';
+import { v4 as uuidv4 } from 'uuid';
 import { protect } from '../middleware/auth.js';
 import BreakoutRoom from '../models/BreakoutRoom.js';
 import Meeting from '../models/Meeting.js';
 
 const router = express.Router();
 
-/**
- * @route   POST /api/breakout
- * @desc    Create breakout rooms
- * @access  Private (host only)
- */
 router.post('/', protect, async (req, res) => {
   try {
-    const { meetingId, rooms } = req.body; // rooms: [{ name, participantIds }]
+    const { meetingId, rooms } = req.body;
 
-    const meeting = await Meeting.findById(meetingId);
+    const meeting = await Meeting.findByPk(meetingId);
     if (!meeting) {
       return res.status(404).json({ message: 'Meeting not found' });
     }
 
-    if (!meeting.isHost(req.user._id)) {
+    if (meeting.hostId !== req.user.id) {
       return res.status(403).json({ message: 'Only host can create breakout rooms' });
     }
 
@@ -27,18 +23,21 @@ router.post('/', protect, async (req, res) => {
     for (let i = 0; i < rooms.length; i++) {
       const room = rooms[i];
       const breakoutRoom = await BreakoutRoom.create({
-        parentMeeting: meetingId,
+        parentMeetingId: meetingId,
         roomNumber: i + 1,
         name: room.name || `Room ${i + 1}`,
-        assignedParticipants: room.participantIds.map(userId => ({ user: userId })),
-        createdBy: req.user._id
+        assignedParticipants: (room.participantIds || []).map(userId => ({
+          id: uuidv4(),
+          userId
+        })),
+        createdById: req.user.id
       });
       breakoutRooms.push(breakoutRoom);
     }
 
     res.status(201).json({
       success: true,
-      data: { breakoutRooms }
+      data: { breakoutRooms: breakoutRooms.map(b => b.toJSON()) }
     });
   } catch (error) {
     console.error('Create breakout rooms error:', error);
@@ -46,23 +45,17 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   GET /api/breakout/meeting/:meetingId
- * @desc    Get breakout rooms for a meeting
- * @access  Private
- */
 router.get('/meeting/:meetingId', protect, async (req, res) => {
   try {
     const { meetingId } = req.params;
 
-    const breakoutRooms = await BreakoutRoom.find({
-      parentMeeting: meetingId,
-      status: 'open'
-    }).populate('assignedParticipants.user', 'name email avatar');
+    const breakoutRooms = await BreakoutRoom.findAll({
+      where: { parentMeetingId: meetingId, status: 'open' }
+    });
 
     res.json({
       success: true,
-      data: { breakoutRooms }
+      data: { breakoutRooms: breakoutRooms.map(b => b.toJSON()) }
     });
   } catch (error) {
     console.error('Get breakout rooms error:', error);
@@ -70,38 +63,35 @@ router.get('/meeting/:meetingId', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   PUT /api/breakout/:breakoutRoomId/assign
- * @desc    Assign participants to breakout room
- * @access  Private (host only)
- */
 router.put('/:breakoutRoomId/assign', protect, async (req, res) => {
   try {
     const { breakoutRoomId } = req.params;
     const { participantIds } = req.body;
 
-    const breakoutRoom = await BreakoutRoom.findById(breakoutRoomId);
+    const breakoutRoom = await BreakoutRoom.findByPk(breakoutRoomId);
     if (!breakoutRoom) {
       return res.status(404).json({ message: 'Breakout room not found' });
     }
 
-    const meeting = await Meeting.findById(breakoutRoom.parentMeeting);
-    if (!meeting.isHost(req.user._id)) {
+    const meeting = await Meeting.findByPk(breakoutRoom.parentMeetingId);
+    if (meeting.hostId !== req.user.id) {
       return res.status(403).json({ message: 'Only host can assign participants' });
     }
 
-    // Add new participants
+    const assignedParticipants = breakoutRoom.assignedParticipants || [];
+
     participantIds.forEach(userId => {
-      if (!breakoutRoom.isUserAssigned(userId)) {
-        breakoutRoom.assignedParticipants.push({ user: userId });
+      if (!assignedParticipants.some(p => p.userId === userId)) {
+        assignedParticipants.push({ id: uuidv4(), userId });
       }
     });
 
+    breakoutRoom.assignedParticipants = assignedParticipants;
     await breakoutRoom.save();
 
     res.json({
       success: true,
-      data: { breakoutRoom }
+      data: { breakoutRoom: breakoutRoom.toJSON() }
     });
   } catch (error) {
     console.error('Assign participants error:', error);
@@ -109,16 +99,11 @@ router.put('/:breakoutRoomId/assign', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   POST /api/breakout/:breakoutRoomId/join
- * @desc    Join breakout room
- * @access  Private
- */
 router.post('/:breakoutRoomId/join', protect, async (req, res) => {
   try {
     const { breakoutRoomId } = req.params;
 
-    const breakoutRoom = await BreakoutRoom.findById(breakoutRoomId);
+    const breakoutRoom = await BreakoutRoom.findByPk(breakoutRoomId);
     if (!breakoutRoom) {
       return res.status(404).json({ message: 'Breakout room not found' });
     }
@@ -127,24 +112,25 @@ router.post('/:breakoutRoomId/join', protect, async (req, res) => {
       return res.status(400).json({ message: 'Breakout room is closed' });
     }
 
-    if (!breakoutRoom.isUserAssigned(req.user._id)) {
+    const assignedParticipants = breakoutRoom.assignedParticipants || [];
+    if (!assignedParticipants.some(p => p.userId === req.user.id)) {
       return res.status(403).json({ message: 'You are not assigned to this room' });
     }
 
-    // Update join time
-    const participant = breakoutRoom.assignedParticipants.find(
-      p => p.user.toString() === req.user._id.toString()
+    const participant = assignedParticipants.find(
+      p => p.userId === req.user.id
     );
     if (participant) {
-      participant.joinedAt = new Date();
+      participant.joinedAt = new Date().toISOString();
       participant.leftAt = null;
     }
 
+    breakoutRoom.assignedParticipants = assignedParticipants;
     await breakoutRoom.save();
 
     res.json({
       success: true,
-      data: { breakoutRoom }
+      data: { breakoutRoom: breakoutRoom.toJSON() }
     });
   } catch (error) {
     console.error('Join breakout room error:', error);
@@ -152,27 +138,22 @@ router.post('/:breakoutRoomId/join', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   POST /api/breakout/close-all
- * @desc    Close all breakout rooms and return participants to main meeting
- * @access  Private (host only)
- */
 router.post('/close-all', protect, async (req, res) => {
   try {
     const { meetingId } = req.body;
 
-    const meeting = await Meeting.findById(meetingId);
+    const meeting = await Meeting.findByPk(meetingId);
     if (!meeting) {
       return res.status(404).json({ message: 'Meeting not found' });
     }
 
-    if (!meeting.isHost(req.user._id)) {
+    if (meeting.hostId !== req.user.id) {
       return res.status(403).json({ message: 'Only host can close breakout rooms' });
     }
 
-    await BreakoutRoom.updateMany(
-      { parentMeeting: meetingId, status: 'open' },
-      { status: 'closed' }
+    await BreakoutRoom.update(
+      { status: 'closed' },
+      { where: { parentMeetingId: meetingId, status: 'open' } }
     );
 
     res.json({

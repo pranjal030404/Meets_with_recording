@@ -1,11 +1,14 @@
 import express from 'express';
+import { Op, fn, col, where as seqWhere, cast } from 'sequelize';
 import fs from 'fs/promises';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { v4 as uuidv4 } from 'uuid';
 import Meeting from '../models/Meeting.js';
 import Team from '../models/Team.js';
 import Notification from '../models/Notification.js';
+import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
 import { saveMeetingRecording } from '../services/recordingService.js';
 
@@ -36,25 +39,31 @@ const recordingUpload = multer({
   }
 });
 
-/**
- * @route   POST /api/meetings
- * @desc    Create a new meeting
- * @access  Private
- */
+const includeHost = () => ({
+  model: User,
+  as: 'host',
+  attributes: ['id', 'name', 'email', 'avatar']
+});
+
+const includeTeam = () => ({
+  model: Team,
+  as: 'team',
+  attributes: ['id', 'name', 'description']
+});
+
 router.post('/', protect, async (req, res) => {
   try {
     const { title, description, scheduledAt, settings, teamId, invitees, reminders, recurrence } = req.body;
 
-    // Validate team membership if teamId provided
     if (teamId) {
-      const team = await Team.findById(teamId);
+      const team = await Team.findByPk(teamId);
       if (!team) {
         return res.status(404).json({
           success: false,
           message: 'Team not found'
         });
       }
-      if (!team.isMember(req.user._id)) {
+      if (!team.isMember(req.user.id)) {
         return res.status(403).json({
           success: false,
           message: 'You are not a member of this team'
@@ -63,62 +72,78 @@ router.post('/', protect, async (req, res) => {
     }
 
     const isInstant = !scheduledAt;
+
+    const participantEntry = {
+      id: uuidv4(),
+      userId: req.user.id,
+      user: { id: req.user.id, name: req.user.name, email: req.user.email, avatar: req.user.avatar },
+      role: 'host',
+      joinedAt: isInstant ? new Date().toISOString() : undefined
+    };
+
     const meetingData = {
       title: title || 'Untitled Meeting',
       description,
-      host: req.user._id,
-      team: teamId,
+      hostId: req.user.id,
+      teamId,
       scheduledAt,
       isInstant,
       settings: settings || {},
-      participants: [{
-        user: req.user._id,
-        role: 'host',
-        joinedAt: isInstant ? new Date() : undefined
-      }],
+      participants: [participantEntry],
+      participantIds: [req.user.id],
+      invitees: [],
+      inviteeIds: [],
+      recordings: [],
+      reminders: [],
       recurrence: recurrence || { enabled: false }
     };
 
-    // Generate meeting link
     const meeting = await Meeting.create(meetingData);
     meeting.meetingLink = `${req.protocol}://${req.get('host')}/meeting/${meeting.roomId}`;
-    
-    // Add invitees
+
     if (invitees && Array.isArray(invitees)) {
-      meeting.invitees = invitees.map(inv => ({
-        user: inv.userId,
-        email: inv.email,
-        status: 'pending'
-      }));
+      const inviteeEntries = [];
+      const inviteeIdEntries = [];
+      for (const inv of invitees) {
+        const entry = {
+          id: uuidv4(),
+          userId: inv.userId,
+          email: inv.email,
+          status: 'pending'
+        };
+        inviteeEntries.push(entry);
+        if (inv.userId) inviteeIdEntries.push(inv.userId);
+      }
+      meeting.invitees = inviteeEntries;
+      meeting.inviteeIds = inviteeIdEntries;
     }
 
-    // Add default reminders for scheduled meetings
     if (scheduledAt) {
       meeting.reminders = reminders || [
-        { time: 15, unit: 'minutes' },
-        { time: 1, unit: 'hours' },
-        { time: 1, unit: 'days' }
+        { id: uuidv4(), time: 15, unit: 'minutes', sent: false },
+        { id: uuidv4(), time: 1, unit: 'hours', sent: false },
+        { id: uuidv4(), time: 1, unit: 'days', sent: false }
       ];
     }
 
-    await meeting.save();
-    await meeting.populate('host', 'name email avatar');
-    if (teamId) {
-      await meeting.populate('team', 'name');
+    if (isInstant) {
+      meeting.status = 'active';
+      meeting.startedAt = new Date();
     }
 
-    // Create notifications for invitees
+    await meeting.save();
+
     if (invitees && scheduledAt) {
       const notificationPromises = invitees.map(inv => {
         if (inv.userId) {
           return Notification.create({
-            recipient: inv.userId,
+            recipientId: inv.userId,
             type: 'meeting_scheduled',
             title: 'Meeting Invitation',
             message: `You've been invited to "${meeting.title}"`,
             data: {
-              meetingId: meeting._id,
-              senderId: req.user._id,
+              meetingId: meeting.id,
+              senderId: req.user.id,
               link: meeting.meetingLink
             },
             priority: 'normal'
@@ -128,17 +153,14 @@ router.post('/', protect, async (req, res) => {
       await Promise.all(notificationPromises.filter(Boolean));
     }
 
-    // If instant meeting, activate it
-    if (isInstant) {
-      meeting.status = 'active';
-      meeting.startedAt = new Date();
-      await meeting.save();
-    }
+    const fullMeeting = await Meeting.findByPk(meeting.id, {
+      include: [includeHost(), teamId ? includeTeam() : null].filter(Boolean)
+    });
 
     res.status(201).json({
       success: true,
       message: 'Meeting created successfully',
-      data: { meeting }
+      data: { meeting: fullMeeting.toJSON() }
     });
   } catch (error) {
     console.error('Create meeting error:', error);
@@ -150,42 +172,36 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   GET /api/meetings
- * @desc    Get user's meetings (hosted + participated)
- * @access  Private
- */
 router.get('/', protect, async (req, res) => {
   try {
     const { status, limit = 20, page = 1 } = req.query;
-    
-    const query = {
-      $or: [
-        { host: req.user._id },
-        { 'participants.user': req.user._id },
-        { 'invitees.user': req.user._id }
+
+    const whereClause = {
+      [Op.or]: [
+        { hostId: req.user.id },
+        seqWhere(fn('JSON_CONTAINS', col('participantIds'), cast(JSON.stringify(req.user.id), 'json')), 1),
+        seqWhere(fn('JSON_CONTAINS', col('inviteeIds'), cast(JSON.stringify(req.user.id), 'json')), 1)
       ]
     };
 
     if (status) {
-      query.status = status;
+      whereClause.status = status;
     }
 
-    const meetings = await Meeting.find(query)
-      .populate('host', 'name email avatar')
-      .populate('team', 'name')
-      .populate('participants.user', 'name email avatar')
-      .populate('invitees.user', 'name email')
-      .sort({ scheduledAt: -1, createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
+    const meetings = await Meeting.findAll({
+      where: whereClause,
+      include: [includeHost(), includeTeam()],
+      order: [['scheduledAt', 'DESC'], ['createdAt', 'DESC']],
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit)
+    });
 
-    const total = await Meeting.countDocuments(query);
+    const total = await Meeting.count({ where: whereClause });
 
     res.json({
       success: true,
       data: {
-        meetings,
+        meetings: meetings.map(m => m.toJSON()),
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -204,15 +220,10 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   GET /api/meetings/team/:teamId
- * @desc    Get all meetings for a team
- * @access  Private
- */
 router.get('/team/:teamId', protect, async (req, res) => {
   try {
-    const team = await Team.findById(req.params.teamId);
-    
+    const team = await Team.findByPk(req.params.teamId);
+
     if (!team) {
       return res.status(404).json({
         success: false,
@@ -220,7 +231,7 @@ router.get('/team/:teamId', protect, async (req, res) => {
       });
     }
 
-    if (!team.isMember(req.user._id)) {
+    if (!team.isMember(req.user.id)) {
       return res.status(403).json({
         success: false,
         message: 'You are not a member of this team'
@@ -228,26 +239,27 @@ router.get('/team/:teamId', protect, async (req, res) => {
     }
 
     const { status, limit = 50, page = 1 } = req.query;
-    const query = { team: req.params.teamId };
-    
+    const whereClause = { teamId: req.params.teamId };
+
     if (status) {
-      query.status = status;
+      whereClause.status = status;
     }
 
-    const meetings = await Meeting.find(query)
-      .populate('host', 'name email avatar')
-      .populate('participants.user', 'name email avatar')
-      .sort({ scheduledAt: -1, createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
+    const meetings = await Meeting.findAll({
+      where: whereClause,
+      include: [includeHost()],
+      order: [['scheduledAt', 'DESC'], ['createdAt', 'DESC']],
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit)
+    });
 
-    const total = await Meeting.countDocuments(query);
+    const total = await Meeting.count({ where: whereClause });
 
     res.json({
       success: true,
       data: {
-        meetings,
-        team: { _id: team._id, name: team.name },
+        meetings: meetings.map(m => m.toJSON()),
+        team: { id: team.id, name: team.name },
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -266,18 +278,12 @@ router.get('/team/:teamId', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   GET /api/meetings/:roomId
- * @desc    Get meeting by room ID
- * @access  Private
- */
 router.get('/:roomId', protect, async (req, res) => {
   try {
-    const meeting = await Meeting.findOne({ roomId: req.params.roomId })
-      .populate('host', 'name email avatar')
-      .populate('team', 'name description')
-      .populate('participants.user', 'name email avatar')
-      .populate('invitees.user', 'name email');
+    const meeting = await Meeting.findOne({
+      where: { roomId: req.params.roomId },
+      include: [includeHost(), includeTeam()]
+    });
 
     if (!meeting) {
       return res.status(404).json({
@@ -288,7 +294,7 @@ router.get('/:roomId', protect, async (req, res) => {
 
     res.json({
       success: true,
-      data: { meeting }
+      data: { meeting: meeting.toJSON() }
     });
   } catch (error) {
     console.error('Get meeting error:', error);
@@ -300,14 +306,9 @@ router.get('/:roomId', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   POST /api/meetings/:roomId/join
- * @desc    Join a meeting
- * @access  Private
- */
 router.post('/:roomId/join', protect, async (req, res) => {
   try {
-    const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
       return res.status(404).json({
@@ -316,7 +317,6 @@ router.post('/:roomId/join', protect, async (req, res) => {
       });
     }
 
-    // Check if meeting has ended
     if (meeting.status === 'ended') {
       return res.status(400).json({
         success: false,
@@ -324,43 +324,47 @@ router.post('/:roomId/join', protect, async (req, res) => {
       });
     }
 
-    // Check max participants
-    const activeParticipants = meeting.participants.filter(p => !p.leftAt).length;
-    if (activeParticipants >= meeting.settings.maxParticipants) {
+    const participants = meeting.participants || [];
+    const activeParticipants = participants.filter(p => !p.leftAt).length;
+    const maxParticipants = (meeting.settings && meeting.settings.maxParticipants) || 50;
+
+    if (activeParticipants >= maxParticipants) {
       return res.status(400).json({
         success: false,
         message: 'Meeting is full'
       });
     }
 
-    // Check if user is already in meeting
-    const existingParticipant = meeting.participants.find(
-      p => p.user.toString() === req.user._id.toString() && !p.leftAt
+    const existingParticipant = participants.find(
+      p => p.userId === req.user.id && !p.leftAt
     );
 
     if (!existingParticipant) {
-      meeting.participants.push({
-        user: req.user._id,
-        role: 'participant',
-        joinedAt: new Date(),
-        isMuted: meeting.settings.muteOnEntry
-      });
+      meeting.participants = [
+        ...participants,
+        {
+          id: uuidv4(),
+          userId: req.user.id,
+          user: { id: req.user.id, name: req.user.name, email: req.user.email, avatar: req.user.avatar },
+          role: 'participant',
+          joinedAt: new Date().toISOString(),
+          isMuted: meeting.settings && meeting.settings.muteOnEntry
+        }
+      ];
+      meeting.participantIds = [...(meeting.participantIds || []), req.user.id];
     }
 
-    // Start meeting if not already active
     if (meeting.status === 'scheduled') {
       meeting.status = 'active';
       meeting.startedAt = new Date();
     }
 
     await meeting.save();
-    await meeting.populate('host', 'name email avatar');
-    await meeting.populate('participants.user', 'name email avatar');
 
     res.json({
       success: true,
       message: 'Joined meeting successfully',
-      data: { meeting }
+      data: { meeting: meeting.toJSON() }
     });
   } catch (error) {
     console.error('Join meeting error:', error);
@@ -372,14 +376,9 @@ router.post('/:roomId/join', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   POST /api/meetings/:roomId/leave
- * @desc    Leave a meeting
- * @access  Private
- */
 router.post('/:roomId/leave', protect, async (req, res) => {
   try {
-    const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
       return res.status(404).json({
@@ -388,24 +387,24 @@ router.post('/:roomId/leave', protect, async (req, res) => {
       });
     }
 
-    // Find participant and mark as left
-    const participant = meeting.participants.find(
-      p => p.user.toString() === req.user._id.toString() && !p.leftAt
+    const participants = meeting.participants || [];
+    const participant = participants.find(
+      p => p.userId === req.user.id && !p.leftAt
     );
 
     if (participant) {
-      participant.leftAt = new Date();
+      participant.leftAt = new Date().toISOString();
     }
 
-    // If host leaves and no other active participants, end meeting
-    const isHost = meeting.host.toString() === req.user._id.toString();
-    const activeParticipants = meeting.participants.filter(p => !p.leftAt).length;
+    const isHost = meeting.hostId === req.user.id;
+    const activeParticipants = participants.filter(p => !p.leftAt).length;
 
     if (isHost || activeParticipants === 0) {
       meeting.status = 'ended';
       meeting.endedAt = new Date();
     }
 
+    meeting.participants = participants;
     await meeting.save();
 
     res.json({
@@ -422,14 +421,9 @@ router.post('/:roomId/leave', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   PUT /api/meetings/:roomId/settings
- * @desc    Update meeting settings (host only)
- * @access  Private
- */
 router.put('/:roomId/settings', protect, async (req, res) => {
   try {
-    const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
       return res.status(404).json({
@@ -438,8 +432,7 @@ router.put('/:roomId/settings', protect, async (req, res) => {
       });
     }
 
-    // Only host can update settings
-    if (meeting.host.toString() !== req.user._id.toString()) {
+    if (meeting.hostId !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'Only the host can update meeting settings'
@@ -450,16 +443,15 @@ router.put('/:roomId/settings', protect, async (req, res) => {
 
     if (title) meeting.title = title;
     if (settings) {
-      meeting.settings = { ...meeting.settings, ...settings };
+      meeting.settings = { ...(meeting.settings || {}), ...settings };
     }
 
     await meeting.save();
-    await meeting.populate('host', 'name email avatar');
 
     res.json({
       success: true,
       message: 'Meeting updated successfully',
-      data: { meeting }
+      data: { meeting: meeting.toJSON() }
     });
   } catch (error) {
     console.error('Update meeting error:', error);
@@ -471,14 +463,9 @@ router.put('/:roomId/settings', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   POST /api/meetings/:roomId/end
- * @desc    End a meeting (host only)
- * @access  Private
- */
 router.post('/:roomId/end', protect, async (req, res) => {
   try {
-    const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
       return res.status(404).json({
@@ -487,8 +474,7 @@ router.post('/:roomId/end', protect, async (req, res) => {
       });
     }
 
-    // Only host can end meeting
-    if (meeting.host.toString() !== req.user._id.toString()) {
+    if (meeting.hostId !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'Only the host can end the meeting'
@@ -498,20 +484,18 @@ router.post('/:roomId/end', protect, async (req, res) => {
     meeting.status = 'ended';
     meeting.endedAt = new Date();
 
-    // Mark all participants as left
-    meeting.participants.forEach(p => {
-      if (!p.leftAt) {
-        p.leftAt = new Date();
-      }
-    });
+    const participants = (meeting.participants || []).map(p => ({
+      ...p,
+      leftAt: p.leftAt || new Date().toISOString()
+    }));
+    meeting.participants = participants;
 
     await meeting.save();
 
-    // Notify all participants via Socket.IO
     const io = req.app.get('io');
     io.to(meeting.roomId).emit('meeting:ended', {
       roomId: meeting.roomId,
-      endedBy: req.user._id
+      endedBy: req.user.id
     });
 
     res.json({
@@ -528,14 +512,9 @@ router.post('/:roomId/end', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   POST /api/meetings/:roomId/recordings
- * @desc    Upload a meeting recording and generate transcript artifacts
- * @access  Private
- */
 router.post('/:roomId/recordings', protect, recordingUpload.single('recording'), async (req, res) => {
   try {
-    const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
       return res.status(404).json({
@@ -544,8 +523,11 @@ router.post('/:roomId/recordings', protect, recordingUpload.single('recording'),
       });
     }
 
-    const isMeetingMember = meeting.isHost(req.user._id) || meeting.hasParticipant(req.user._id);
-    if (!isMeetingMember) {
+    const participants = meeting.participants || [];
+    const isHost = meeting.hostId === req.user.id;
+    const isParticipant = participants.some(p => p.userId === req.user.id && !p.leftAt);
+
+    if (!isHost && !isParticipant) {
       return res.status(403).json({
         success: false,
         message: 'Only meeting participants can upload recordings'
@@ -569,11 +551,13 @@ router.post('/:roomId/recordings', protect, recordingUpload.single('recording'),
       mimeType: req.file.mimetype,
       size: req.file.size,
       duration: Number.isFinite(duration) ? duration : 0,
-      recordedBy: req.user._id,
+      recordedBy: req.user.id,
       language
     });
 
-    meeting.recordings.push(result.recording);
+    const recordings = meeting.recordings || [];
+    recordings.push(result.recording);
+    meeting.recordings = recordings;
     await meeting.save();
 
     res.status(201).json({
@@ -594,15 +578,10 @@ router.post('/:roomId/recordings', protect, recordingUpload.single('recording'),
   }
 });
 
-/**
- * @route   POST /api/meetings/:roomId/invite
- * @desc    Add invitees to a meeting
- * @access  Private
- */
 router.post('/:roomId/invite', protect, async (req, res) => {
   try {
     const { invitees } = req.body;
-    const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
       return res.status(404).json({
@@ -611,8 +590,7 @@ router.post('/:roomId/invite', protect, async (req, res) => {
       });
     }
 
-    // Only host can invite
-    if (meeting.host.toString() !== req.user._id.toString()) {
+    if (meeting.hostId !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'Only the host can invite participants'
@@ -620,45 +598,50 @@ router.post('/:roomId/invite', protect, async (req, res) => {
     }
 
     if (invitees && Array.isArray(invitees)) {
-      invitees.forEach(inv => {
-        // Check if already invited
-        const alreadyInvited = meeting.invitees.some(
-          existing => existing.user && existing.user.toString() === inv.userId
+      const currentInvitees = meeting.invitees || [];
+      const currentInviteeIds = meeting.inviteeIds || [];
+
+      for (const inv of invitees) {
+        const alreadyInvited = currentInvitees.some(
+          existing => existing.userId && existing.userId === inv.userId
         );
-        
+
         if (!alreadyInvited) {
-          meeting.invitees.push({
-            user: inv.userId,
+          currentInvitees.push({
+            id: uuidv4(),
+            userId: inv.userId,
             email: inv.email,
             status: 'pending'
           });
+          if (inv.userId) currentInviteeIds.push(inv.userId);
 
-          // Create notification
           if (inv.userId) {
             Notification.create({
-              recipient: inv.userId,
+              recipientId: inv.userId,
               type: 'meeting_scheduled',
               title: 'Meeting Invitation',
               message: `You've been invited to "${meeting.title}"`,
               data: {
-                meetingId: meeting._id,
-                senderId: req.user._id,
+                meetingId: meeting.id,
+                senderId: req.user.id,
                 link: meeting.meetingLink
               },
               priority: 'normal'
             }).catch(err => console.error('Notification error:', err));
           }
         }
-      });
+      }
+
+      meeting.invitees = currentInvitees;
+      meeting.inviteeIds = currentInviteeIds;
     }
 
     await meeting.save();
-    await meeting.populate('invitees.user', 'name email');
 
     res.json({
       success: true,
       message: 'Invitations sent successfully',
-      data: { invitees: meeting.invitees }
+      data: { invitees: meeting.invitees || [] }
     });
   } catch (error) {
     console.error('Invite error:', error);
@@ -670,15 +653,10 @@ router.post('/:roomId/invite', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   PUT /api/meetings/:roomId/respond
- * @desc    Respond to meeting invitation (accept/decline)
- * @access  Private
- */
 router.put('/:roomId/respond', protect, async (req, res) => {
   try {
-    const { status } = req.body; // 'accepted' or 'declined'
-    const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+    const { status } = req.body;
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
       return res.status(404).json({
@@ -687,8 +665,9 @@ router.put('/:roomId/respond', protect, async (req, res) => {
       });
     }
 
-    const invitee = meeting.invitees.find(
-      inv => inv.user && inv.user.toString() === req.user._id.toString()
+    const invitees = meeting.invitees || [];
+    const invitee = invitees.find(
+      inv => inv.userId && inv.userId === req.user.id
     );
 
     if (!invitee) {
@@ -699,28 +678,33 @@ router.put('/:roomId/respond', protect, async (req, res) => {
     }
 
     invitee.status = status;
-    invitee.respondedAt = new Date();
+    invitee.respondedAt = new Date().toISOString();
 
-    // If accepted, add to participants
     if (status === 'accepted') {
-      const alreadyParticipant = meeting.participants.some(
-        p => p.user.toString() === req.user._id.toString()
+      const participants = meeting.participants || [];
+      const alreadyParticipant = participants.some(
+        p => p.userId === req.user.id
       );
-      
+
       if (!alreadyParticipant) {
-        meeting.participants.push({
-          user: req.user._id,
+        participants.push({
+          id: uuidv4(),
+          userId: req.user.id,
+          user: { id: req.user.id, name: req.user.name, email: req.user.email, avatar: req.user.avatar },
           role: 'participant'
         });
+        meeting.participants = participants;
+        meeting.participantIds = [...(meeting.participantIds || []), req.user.id];
       }
     }
 
+    meeting.invitees = invitees;
     await meeting.save();
 
     res.json({
       success: true,
       message: `Invitation ${status}`,
-      data: { meeting }
+      data: { meeting: meeting.toJSON() }
     });
   } catch (error) {
     console.error('Respond to invitation error:', error);
@@ -732,14 +716,9 @@ router.put('/:roomId/respond', protect, async (req, res) => {
   }
 });
 
-/**
- * @route   PUT /api/meetings/:roomId/cancel
- * @desc    Cancel a scheduled meeting
- * @access  Private
- */
 router.put('/:roomId/cancel', protect, async (req, res) => {
   try {
-    const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
       return res.status(404).json({
@@ -748,8 +727,7 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
       });
     }
 
-    // Only host can cancel
-    if (meeting.host.toString() !== req.user._id.toString()) {
+    if (meeting.hostId !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'Only the host can cancel the meeting'
@@ -766,17 +744,17 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
     meeting.status = 'cancelled';
     await meeting.save();
 
-    // Notify all invitees
-    const notificationPromises = meeting.invitees.map(inv => {
-      if (inv.user) {
+    const invitees = meeting.invitees || [];
+    const notificationPromises = invitees.map(inv => {
+      if (inv.userId) {
         return Notification.create({
-          recipient: inv.user,
+          recipientId: inv.userId,
           type: 'meeting_cancelled',
           title: 'Meeting Cancelled',
           message: `"${meeting.title}" has been cancelled`,
           data: {
-            meetingId: meeting._id,
-            senderId: req.user._id
+            meetingId: meeting.id,
+            senderId: req.user.id
           },
           priority: 'high'
         });
@@ -788,7 +766,7 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
     res.json({
       success: true,
       message: 'Meeting cancelled successfully',
-      data: { meeting }
+      data: { meeting: meeting.toJSON() }
     });
   } catch (error) {
     console.error('Cancel meeting error:', error);
