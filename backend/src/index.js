@@ -20,7 +20,7 @@ import { initializeSocketHandlers } from './sockets/index.js';
 import ReminderService from './services/reminderService.js';
 import mediasoupService from './lib/mediasoup.js';
 
-import { connectDB } from './database/index.js';
+import { connectDB, sequelize } from './database/index.js';
 import './models/associations.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -69,6 +69,9 @@ const PORT = process.env.PORT || 5000;
 const startServer = async () => {
   try {
     await connectDB();
+
+    await sequelize.sync({ alter: false });
+    console.log('Database tables synchronized');
 
     try {
       await mediasoupService.init();

@@ -146,7 +146,7 @@ export default function Meeting() {
         }
 
         const meeting = result.meeting
-        const hostId = meeting.host?.id || meeting.host?.hostId || meeting.hostId
+        const hostId = meeting.host?.id || meeting.hostId
         const currentUserId = user?.id || user?._id
         setIsHost(hostId === currentUserId)
 
