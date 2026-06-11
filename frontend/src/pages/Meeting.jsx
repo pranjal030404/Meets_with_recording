@@ -167,6 +167,11 @@ export default function Meeting() {
           }
         }
 
+        // Start audio level monitoring for unmuted mic
+        if (stream && !useMeetingStore.getState().isMuted) {
+          useMeetingStore.getState().startAudioLevelMonitor()
+        }
+
         // Join meeting via API
         const joinResult = await joinMeeting(roomId)
         if (!joinResult.success) {
@@ -183,6 +188,11 @@ export default function Meeting() {
 
         // Re-read stream from store (may have been updated)
         stream = useMeetingStore.getState().localStream
+
+        // Restart audio level monitor with refreshed stream
+        if (stream && !useMeetingStore.getState().isMuted) {
+          useMeetingStore.getState().startAudioLevelMonitor()
+        }
 
         // Check muteOnEntry setting
         if (meeting.settings?.muteOnEntry && hostId !== currentUserId) {

@@ -1,15 +1,17 @@
 import { io } from 'socket.io-client'
 
 const SOCKET_URL = import.meta.env.DEV
-  ? import.meta.env.VITE_SOCKET_URL || 'http://localhost:5173'
+  ? import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'
   : ''
 
 let socket = null
+let keepAliveTimer = null
 
-const CONNECTION_TIMEOUT = 10000
-const MAX_RECONNECT_ATTEMPTS = 10
-const RECONNECT_BASE_DELAY = 1000
-const RECONNECT_MAX_DELAY = 10000
+const CONNECTION_TIMEOUT = 15000
+const MAX_RECONNECT_ATTEMPTS = 20
+const RECONNECT_BASE_DELAY = 500
+const RECONNECT_MAX_DELAY = 5000
+const KEEPALIVE_INTERVAL = 20000
 
 export const initSocket = (token) => {
   if (socket?.connected) {
@@ -30,29 +32,34 @@ export const initSocket = (token) => {
     reconnectionDelay: RECONNECT_BASE_DELAY,
     reconnectionDelayMax: RECONNECT_MAX_DELAY,
     randomizationFactor: 0.5,
-    timeout: CONNECTION_TIMEOUT
+    timeout: CONNECTION_TIMEOUT,
+    closeOnBeforeunload: false,
   })
 
   socket.on('connect', () => {
-    console.log('🔌 Socket connected:', socket.id)
+    if (keepAliveTimer) clearInterval(keepAliveTimer)
+    keepAliveTimer = setInterval(() => {
+      if (socket?.connected) socket.volatile.emit('ping')
+    }, KEEPALIVE_INTERVAL)
   })
 
   socket.on('connect_error', (error) => {
-    console.error('🔌 Socket connection error:', error.message)
+    if (error.message === 'websocket error') return
+    console.error('Socket connection error:', error.message)
   })
 
   socket.on('disconnect', (reason) => {
-    if (reason === 'io server disconnect' || reason === 'transport close') {
-      console.log('🔌 Socket disconnected:', reason)
-    }
+    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null }
   })
 
   socket.on('reconnect_attempt', (attempt) => {
-    console.log(`🔌 Socket reconnection attempt ${attempt}/${MAX_RECONNECT_ATTEMPTS}`)
+    if (attempt % 5 === 0) {
+      window.location.reload()
+    }
   })
 
   socket.on('reconnect_failed', () => {
-    console.error('🔌 Socket reconnection failed after all attempts')
+    window.location.reload()
   })
 
   return socket
@@ -61,6 +68,7 @@ export const initSocket = (token) => {
 export const getSocket = () => socket
 
 export const disconnectSocket = () => {
+  if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null }
   if (socket) {
     socket.removeAllListeners()
     socket.disconnect()

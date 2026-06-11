@@ -20,10 +20,17 @@ const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
   dialect: 'mysql',
   logging: process.env.NODE_ENV === 'development' ? false : false,
   pool: {
-    max: 10,
-    min: 0,
-    acquire: 30000,
-    idle: 10000
+    max: parseInt(process.env.DB_POOL_MAX) || 50,
+    min: parseInt(process.env.DB_POOL_MIN) || 5,
+    acquire: parseInt(process.env.DB_POOL_ACQUIRE) || 30000,
+    idle: parseInt(process.env.DB_POOL_IDLE) || 10000,
+    evict: 1000,
+  },
+  dialectOptions: {
+    connectTimeout: 60000,
+  },
+  retry: {
+    max: 3,
   },
   define: {
     timestamps: true,

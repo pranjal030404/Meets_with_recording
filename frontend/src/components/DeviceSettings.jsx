@@ -4,8 +4,9 @@ import { useMeetingStore } from '../store/meetingStore'
 
 export default function DeviceSettings({ onClose }) {
   const {
-    availableDevices, selectedAudioDevice, selectedVideoDevice, videoQuality,
-    enumerateDevices, switchAudioDevice, switchVideoDevice, setVideoQuality
+    availableDevices, selectedAudioDevice, selectedVideoDevice, selectedAudioOutputDevice,
+    videoQuality, audioLevel, isSpeaking,
+    enumerateDevices, switchAudioDevice, switchVideoDevice, switchAudioOutput, setVideoQuality
   } = useMeetingStore()
 
   const [tab, setTab] = useState('audio')
@@ -58,7 +59,11 @@ export default function DeviceSettings({ onClose }) {
             </div>
             <div>
               <label className="block text-sm text-gray-400 mb-2">Speaker</label>
-              <select className="input">
+              <select
+                value={selectedAudioOutputDevice || ''}
+                onChange={(e) => switchAudioOutput(e.target.value)}
+                className="input"
+              >
                 <option value="">Default</option>
                 {availableDevices.audiooutput.map(device => (
                   <option key={device.deviceId} value={device.deviceId}>
@@ -67,6 +72,22 @@ export default function DeviceSettings({ onClose }) {
                 ))}
               </select>
             </div>
+            {audioLevel > 0 && (
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">Microphone Level</label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-2 bg-dark-400 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-100 ${isSpeaking ? 'bg-green-500' : 'bg-primary-500'}`}
+                      style={{ width: `${Math.min(audioLevel * 100, 100)}%` }}
+                    />
+                  </div>
+                  <span className={`text-xs font-medium ${isSpeaking ? 'text-green-400' : 'text-gray-400'}`}>
+                    {isSpeaking ? 'Speaking' : 'Silent'}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

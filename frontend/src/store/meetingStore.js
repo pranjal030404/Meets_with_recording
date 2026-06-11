@@ -52,7 +52,10 @@ export const useMeetingStore = create((set, get) => ({
   // Devices
   selectedAudioDevice: null,
   selectedVideoDevice: null,
+  selectedAudioOutputDevice: null,
   availableDevices: { audioinput: [], videoinput: [], audiooutput: [] },
+  audioLevel: 0,
+  isSpeaking: false,
 
   // Recording indicator
   isBeingRecorded: false,
@@ -257,24 +260,58 @@ export const useMeetingStore = create((set, get) => ({
 
   setLocalStream: (stream) => set({ localStream: stream }),
 
+  getAudioConstraints: () => {
+    const { selectedAudioDevice } = get()
+    const constraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: { ideal: 48000 },
+      channelCount: { ideal: 1 },
+    }
+    if (selectedAudioDevice) {
+      constraints.deviceId = { exact: selectedAudioDevice }
+    }
+    return constraints
+  },
+
+  startAudioLevelMonitor: () => {
+    const { localStream } = get()
+    if (!localStream) return
+    const audioTrack = localStream.getAudioTracks()[0]
+    if (!audioTrack) return
+
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 256
+      const source = audioCtx.createMediaStreamSource(
+        new MediaStream([audioTrack])
+      )
+      source.connect(analyser)
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+      const interval = setInterval(() => {
+        analyser.getByteFrequencyData(dataArray)
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+        const normalized = Math.min(avg / 128, 1)
+        set({ audioLevel: normalized, isSpeaking: normalized > 0.15 })
+      }, 100)
+
+      return () => { clearInterval(interval); audioCtx.close() }
+    } catch (e) {
+      console.error('Audio level monitor error:', e)
+    }
+  },
+
   toggleMute: async () => {
     const state = get()
     const { localStream, isMuted, producers } = state
     const socket = getSocket()
 
     if (isMuted) {
-      // Unmute: reacquire audio with AI noise suppression
       try {
-        const { selectedAudioDevice } = get()
-        const audioConstraints = {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        }
-        if (selectedAudioDevice) {
-          audioConstraints.deviceId = { exact: selectedAudioDevice }
-        }
-        const constraints = { audio: audioConstraints }
+        const constraints = { audio: get().getAudioConstraints() }
         const gumStream = await navigator.mediaDevices.getUserMedia(constraints)
         const newAudioTrack = gumStream.getAudioTracks()[0]
 
@@ -286,19 +323,23 @@ export const useMeetingStore = create((set, get) => ({
 
         targetStream.getAudioTracks().forEach(t => { t.stop(); targetStream.removeTrack(t) })
         targetStream.addTrack(newAudioTrack)
-
-        // Stop the gum stream since tracks are now owned by targetStream
         gumStream.getTracks().forEach(t => { if (t !== newAudioTrack) t.stop() })
 
         if (mediasoupClient) await get().produceAudio(newAudioTrack)
         set({ isMuted: false })
+        get().startAudioLevelMonitor()
         if (socket) socket.emit('media:toggle-mute', { isMuted: false })
       } catch (error) {
         console.error('Failed to unmute:', error)
-        toast.error('Failed to access microphone. Please check your permissions.')
+        if (error.name === 'NotAllowedError') {
+          toast.error('Microphone permission denied. Check browser settings.')
+        } else if (error.name === 'NotFoundError') {
+          toast.error('No microphone found. Connect a mic and try again.')
+        } else {
+          toast.error('Failed to access microphone. Please check your permissions.')
+        }
       }
     } else {
-      // Mute: stop audio track fully (release mic permission)
       if (localStream) {
         const audioTrack = localStream.getAudioTracks()[0]
         if (audioTrack) { audioTrack.stop(); localStream.removeTrack(audioTrack) }
@@ -307,7 +348,7 @@ export const useMeetingStore = create((set, get) => ({
         await mediasoupClient.closeProducer('audio')
         set(s => ({ producers: { ...s.producers, audio: null } }))
       }
-      set({ isMuted: true })
+      set({ isMuted: true, audioLevel: 0, isSpeaking: false })
       if (socket) socket.emit('media:toggle-mute', { isMuted: true })
     }
   },
@@ -631,17 +672,36 @@ export const useMeetingStore = create((set, get) => ({
 
   setSelectedAudioDevice: (deviceId) => set({ selectedAudioDevice: deviceId }),
   setSelectedVideoDevice: (deviceId) => set({ selectedVideoDevice: deviceId }),
+  setSelectedAudioOutputDevice: (deviceId) => set({ selectedAudioOutputDevice: deviceId }),
+
+  switchAudioOutput: async (deviceId) => {
+    set({ selectedAudioOutputDevice: deviceId })
+    try {
+      const videoElements = document.querySelectorAll('video')
+      for (const video of videoElements) {
+        if (typeof video.setSinkId === 'function') {
+          await video.setSinkId(deviceId)
+        }
+      }
+    } catch (e) {
+      console.error('Switch audio output error:', e)
+    }
+  },
 
   enumerateDevices: async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices()
+      const audiooutput = devices.filter(d => d.kind === 'audiooutput')
       set({
         availableDevices: {
           audioinput: devices.filter(d => d.kind === 'audioinput'),
           videoinput: devices.filter(d => d.kind === 'videoinput'),
-          audiooutput: devices.filter(d => d.kind === 'audiooutput'),
+          audiooutput,
         }
       })
+      if (audiooutput.length > 0 && !get().selectedAudioOutputDevice) {
+        set({ selectedAudioOutputDevice: audiooutput[0].deviceId })
+      }
     } catch (e) { console.error('Enumerate devices error:', e) }
   },
 
