@@ -1,6 +1,8 @@
 import { io } from 'socket.io-client'
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'
+const SOCKET_URL = import.meta.env.DEV
+  ? import.meta.env.VITE_SOCKET_URL || 'http://localhost:5173'
+  : ''
 
 let socket = null
 
@@ -80,24 +82,15 @@ export const waitForSocket = (timeout = 15000) => {
 
     const timer = setTimeout(() => {
       socket.off('connect', onConnect)
-      socket.off('connect_error', onError)
       reject(new Error('Socket connection timed out'))
     }, timeout)
 
     const onConnect = () => {
       clearTimeout(timer)
-      socket.off('connect_error', onError)
       resolve(socket)
     }
 
-    const onError = (error) => {
-      clearTimeout(timer)
-      socket.off('connect', onConnect)
-      reject(error)
-    }
-
     socket.once('connect', onConnect)
-    socket.once('connect_error', onError)
   })
 }
 

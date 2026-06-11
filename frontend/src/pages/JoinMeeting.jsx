@@ -179,15 +179,15 @@ export default function JoinMeeting() {
           localStream.removeTrack(audioTrack)
           setAudioLevel(0)
         } else {
-          // Unmute: reacquire with noise suppression
-          const constraints = {
-            audio: {
-              deviceId: selectedAudioDevice ? { exact: selectedAudioDevice } : undefined,
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            }
+          const audioConstraints = {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
           }
+          if (selectedAudioDevice) {
+            audioConstraints.deviceId = { exact: selectedAudioDevice }
+          }
+          const constraints = { audio: audioConstraints }
           navigator.mediaDevices.getUserMedia(constraints).then(newStream => {
             const newTrack = newStream.getAudioTracks()[0]
             localStream.addTrack(newTrack)

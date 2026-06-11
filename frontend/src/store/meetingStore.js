@@ -262,14 +262,15 @@ export const useMeetingStore = create((set, get) => ({
       // Unmute: reacquire audio with AI noise suppression
       try {
         const { selectedAudioDevice } = get()
-        const constraints = { 
-          audio: {
-            deviceId: selectedAudioDevice ? { exact: selectedAudioDevice } : undefined,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          }
+        const audioConstraints = {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
         }
+        if (selectedAudioDevice) {
+          audioConstraints.deviceId = { exact: selectedAudioDevice }
+        }
+        const constraints = { audio: audioConstraints }
         const newStream = await navigator.mediaDevices.getUserMedia(constraints)
         const newAudioTrack = newStream.getAudioTracks()[0]
         if (localStream) {
@@ -300,7 +301,6 @@ export const useMeetingStore = create((set, get) => ({
     const socket = getSocket()
 
     if (isVideoOff) {
-      // Turn on: reacquire video with HD quality
       try {
         const { selectedVideoDevice, videoQuality } = get()
         const qualitySettings = {
@@ -308,24 +308,26 @@ export const useMeetingStore = create((set, get) => ({
           '720p': { width: { ideal: 1280 }, height: { ideal: 720 } },
           '1080p': { width: { ideal: 1920 }, height: { ideal: 1080 } }
         }
-        const constraints = {
-          video: {
-            ...qualitySettings[videoQuality],
-            deviceId: selectedVideoDevice ? { exact: selectedVideoDevice } : undefined
-          }
+        const videoConstraints = {
+          ...qualitySettings[videoQuality] || qualitySettings['720p']
         }
-        const newStream = await navigator.mediaDevices.getUserMedia(constraints)
+        if (selectedVideoDevice) {
+          videoConstraints.deviceId = { exact: selectedVideoDevice }
+        }
+        const newStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints })
         const newVideoTrack = newStream.getVideoTracks()[0]
         if (localStream) {
-          localStream.getVideoTracks().forEach(t => localStream.removeTrack(t))
+          localStream.getVideoTracks().forEach(t => { t.stop(); localStream.removeTrack(t) })
           localStream.addTrack(newVideoTrack)
+        } else {
+          const newLocalStream = new MediaStream([newVideoTrack])
+          set({ localStream: newLocalStream })
         }
         if (mediasoupClient) await get().produceVideo(newVideoTrack)
         set({ isVideoOff: false })
         if (socket) socket.emit('media:toggle-video', { isVideoOff: false })
       } catch (error) { console.error('Failed to enable video:', error) }
     } else {
-      // Turn off: stop video track fully (camera LED turns off)
       if (localStream) {
         const videoTrack = localStream.getVideoTracks()[0]
         if (videoTrack) { videoTrack.stop(); localStream.removeTrack(videoTrack) }

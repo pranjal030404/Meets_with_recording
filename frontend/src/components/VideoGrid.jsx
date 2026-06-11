@@ -172,7 +172,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
     if (ref.current && stream) {
       ref.current.srcObject = stream
     }
-  }, [stream])
+  }, [stream, isVideoOff])
 
   const tileClasses = small
     ? 'min-w-40 lg:min-w-0 aspect-video bg-dark-300 rounded-xl relative overflow-hidden flex-shrink-0 transition-all duration-300'

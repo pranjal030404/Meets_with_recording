@@ -321,6 +321,7 @@ router.post('/:roomId/join', protect, async (req, res) => {
     }
 
     if (meeting.status === 'ended') {
+      console.warn(`Join failed: meeting ${roomId} has status 'ended'`);
       return res.status(400).json({
         success: false,
         message: 'This meeting has ended'
@@ -332,6 +333,7 @@ router.post('/:roomId/join', protect, async (req, res) => {
     const maxParticipants = (meeting.settings && meeting.settings.maxParticipants) || 50;
 
     if (activeParticipants >= maxParticipants) {
+      console.warn(`Join failed: meeting ${roomId} is full (${activeParticipants}/${maxParticipants})`);
       return res.status(400).json({
         success: false,
         message: 'Meeting is full'

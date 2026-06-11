@@ -205,6 +205,14 @@ export default function Meeting() {
     const socket = socketRef.current
     if (!socket) return
 
+    // Re-emit room:join on socket reconnect
+    const onReconnect = () => {
+      if (roomId) {
+        socket.emit('room:join', { roomId })
+      }
+    }
+    socket.on('connect', onReconnect)
+
     // Room participants (on join)
     socket.on('room:participants', ({ participants: existingParticipants, isHost: hostStatus }) => {
       setParticipants(existingParticipants)
@@ -400,6 +408,7 @@ export default function Meeting() {
     })
 
     return () => {
+      socket.off('connect', onReconnect)
       const events = [
         'room:participants', 'room:user-joined', 'room:user-left',
         'mediasoup:existingProducers', 'mediasoup:newProducer', 'mediasoup:producerPaused',

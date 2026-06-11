@@ -63,6 +63,30 @@ const Meeting = sequelize.define('Meeting', {
     type: DataTypes.JSON,
     defaultValue: { enabled: false }
   },
+  participants: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
+  participantIds: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
+  invitees: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
+  inviteeIds: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
+  recordings: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
+  reminders: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
   notificationsSent: {
     type: DataTypes.JSON,
     defaultValue: {
