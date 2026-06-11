@@ -7,6 +7,7 @@ export default function VideoGrid({
   localStream,
   localVideoRef,
   remoteStreams,
+  screenStream,
   user,
   participants,
   isMuted,
@@ -102,13 +103,15 @@ export default function VideoGrid({
 
   // Screen share layout
   if (screenShareUser) {
+    const isLocalScreenShare = user && screenShareUser.id === getUserId(user)
+    const screenSrcStream = isLocalScreenShare ? screenStream : screenShareEntry?.[1]?.stream
     const findParticipant = (id) => participants.find(p => getUserId(p.user) === id)
     return (
       <div className="h-full p-4 flex flex-col lg:flex-row gap-4">
         <div className="flex-1 bg-dark-300 rounded-2xl flex items-center justify-center relative shadow-xl overflow-hidden">
-          {screenShareEntry ? (
+          {screenSrcStream ? (
             <video autoPlay playsInline
-              ref={(el) => { if (el && screenShareEntry[1].stream) el.srcObject = screenShareEntry[1].stream }}
+              ref={(el) => { if (el) el.srcObject = screenSrcStream }}
               className="w-full h-full object-contain bg-dark-300" />
           ) : (
             <div className="text-center">

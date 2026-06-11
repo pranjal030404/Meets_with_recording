@@ -30,6 +30,7 @@ export default function Meeting() {
     handRaisedUsers, isHandRaised, layout, pinnedUserId,
     spotlightUserId, activeSpeakerId, captionsEnabled, captions,
     isBeingRecorded, waitingRoomUsers, isMeetingLocked, recordingUser, isPiP,
+    screenStream,
     joinMeeting, leaveMeeting, setLocalStream,
     setParticipants, setIsHost, addParticipant, removeParticipant,
     updateParticipant, toggleMute, toggleVideo,
@@ -455,13 +456,16 @@ export default function Meeting() {
   const handleScreenShare = useCallback(async () => {
     if (isScreenSharing) {
       await stopScreenShare()
+      setScreenShareUser(null)
     } else {
       const result = await startScreenShare()
-      if (!result.success) {
+      if (result.success) {
+        setScreenShareUser({ id: user?.id, name: user?.name })
+      } else {
         toast.error(result.message || 'Failed to share screen')
       }
     }
-  }, [isScreenSharing])
+  }, [isScreenSharing, user])
 
   // Recording toggle
   const handleRecording = useCallback(() => {
@@ -533,6 +537,7 @@ export default function Meeting() {
             localStream={localStream}
             localVideoRef={localVideoRef}
             remoteStreams={remoteStreams}
+            screenStream={screenStream}
             user={user}
             participants={participants}
             isMuted={isMuted}

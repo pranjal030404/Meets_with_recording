@@ -166,6 +166,8 @@ export const useMeetingStore = create((set, get) => ({
       return { success: true }
     } catch (error) {
       console.error('Mediasoup init error:', error)
+      mediasoupClient = null
+      set({ mediasoupReady: false })
       return { success: false, message: error.message }
     }
   },
