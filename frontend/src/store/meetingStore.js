@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import api from '../lib/api'
 import { getSocket } from '../lib/socket'
 import MediasoupClientService from '../lib/mediasoupClient'
+import toast from 'react-hot-toast'
 
 // Singleton mediasoup client
 let mediasoupClient = null
@@ -257,7 +258,8 @@ export const useMeetingStore = create((set, get) => ({
   setLocalStream: (stream) => set({ localStream: stream }),
 
   toggleMute: async () => {
-    const { localStream, isMuted, producers } = get()
+    const state = get()
+    const { localStream, isMuted, producers } = state
     const socket = getSocket()
 
     if (isMuted) {
@@ -273,16 +275,28 @@ export const useMeetingStore = create((set, get) => ({
           audioConstraints.deviceId = { exact: selectedAudioDevice }
         }
         const constraints = { audio: audioConstraints }
-        const newStream = await navigator.mediaDevices.getUserMedia(constraints)
-        const newAudioTrack = newStream.getAudioTracks()[0]
-        if (localStream) {
-          localStream.getAudioTracks().forEach(t => localStream.removeTrack(t))
-          localStream.addTrack(newAudioTrack)
+        const gumStream = await navigator.mediaDevices.getUserMedia(constraints)
+        const newAudioTrack = gumStream.getAudioTracks()[0]
+
+        let targetStream = localStream
+        if (!targetStream) {
+          targetStream = new MediaStream()
+          set({ localStream: targetStream })
         }
+
+        targetStream.getAudioTracks().forEach(t => { t.stop(); targetStream.removeTrack(t) })
+        targetStream.addTrack(newAudioTrack)
+
+        // Stop the gum stream since tracks are now owned by targetStream
+        gumStream.getTracks().forEach(t => { if (t !== newAudioTrack) t.stop() })
+
         if (mediasoupClient) await get().produceAudio(newAudioTrack)
         set({ isMuted: false })
         if (socket) socket.emit('media:toggle-mute', { isMuted: false })
-      } catch (error) { console.error('Failed to unmute:', error) }
+      } catch (error) {
+        console.error('Failed to unmute:', error)
+        toast.error('Failed to access microphone. Please check your permissions.')
+      }
     } else {
       // Mute: stop audio track fully (release mic permission)
       if (localStream) {
@@ -316,8 +330,9 @@ export const useMeetingStore = create((set, get) => ({
         if (selectedVideoDevice) {
           videoConstraints.deviceId = { exact: selectedVideoDevice }
         }
-        const newStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints })
-        const newVideoTrack = newStream.getVideoTracks()[0]
+        const gumStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints })
+        const newVideoTrack = gumStream.getVideoTracks()[0]
+        gumStream.getTracks().forEach(t => { if (t !== newVideoTrack) t.stop() })
         if (localStream) {
           localStream.getVideoTracks().forEach(t => { t.stop(); localStream.removeTrack(t) })
           localStream.addTrack(newVideoTrack)
@@ -328,7 +343,10 @@ export const useMeetingStore = create((set, get) => ({
         if (mediasoupClient) await get().produceVideo(newVideoTrack)
         set({ isVideoOff: false })
         if (socket) socket.emit('media:toggle-video', { isVideoOff: false })
-      } catch (error) { console.error('Failed to enable video:', error) }
+      } catch (error) {
+        console.error('Failed to enable video:', error)
+        toast.error('Failed to access camera')
+      }
     } else {
       if (localStream) {
         const videoTrack = localStream.getVideoTracks()[0]
@@ -632,14 +650,22 @@ export const useMeetingStore = create((set, get) => ({
     set({ selectedAudioDevice: deviceId })
     if (isMuted) return
     try {
-      const ns = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } })
-      const newTrack = ns.getAudioTracks()[0]
+      const gumStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } })
+      const newTrack = gumStream.getAudioTracks()[0]
+      // Stop extra tracks from gumStream (only newTrack is needed)
+      gumStream.getTracks().forEach(t => { if (t !== newTrack) t.stop() })
       if (localStream) {
         localStream.getAudioTracks().forEach(t => { t.stop(); localStream.removeTrack(t) })
         localStream.addTrack(newTrack)
+      } else {
+        const newLocalStream = new MediaStream([newTrack])
+        set({ localStream: newLocalStream })
       }
       if (mediasoupClient && producers.audio) await producers.audio.replaceTrack({ track: newTrack })
-    } catch (e) { console.error('Switch audio error:', e) }
+    } catch (e) {
+      console.error('Switch audio error:', e)
+      toast.error('Failed to switch microphone device')
+    }
   },
 
   switchVideoDevice: async (deviceId) => {
@@ -647,11 +673,15 @@ export const useMeetingStore = create((set, get) => ({
     set({ selectedVideoDevice: deviceId })
     if (isVideoOff) return
     try {
-      const ns = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId }, width: 640, height: 480 } })
-      const newTrack = ns.getVideoTracks()[0]
+      const gumStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId }, width: 640, height: 480 } })
+      const newTrack = gumStream.getVideoTracks()[0]
+      gumStream.getTracks().forEach(t => { if (t !== newTrack) t.stop() })
       if (localStream) {
         localStream.getVideoTracks().forEach(t => { t.stop(); localStream.removeTrack(t) })
         localStream.addTrack(newTrack)
+      } else {
+        const newLocalStream = new MediaStream([newTrack])
+        set({ localStream: newLocalStream })
       }
       if (mediasoupClient && producers.video) await producers.video.replaceTrack({ track: newTrack })
     } catch (e) { console.error('Switch video error:', e) }

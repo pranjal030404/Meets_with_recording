@@ -90,7 +90,17 @@ export default function JoinMeeting() {
 
   const startAudioLevelMonitoring = useCallback((stream) => {
     try {
+      // Clean up previous monitoring resources
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+        audioContextRef.current = null
+      }
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current)
+      }
+
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      audioCtx.resume()
       audioContextRef.current = audioCtx
       const analyser = audioCtx.createAnalyser()
       analyser.fftSize = 256
@@ -163,6 +173,8 @@ export default function JoinMeeting() {
     const result = await joinMeeting(meeting.roomId)
     
     if (result.success) {
+      // Prevent cleanup from stopping tracks — Meeting page will manage them
+      streamRef.current = null
       navigate(`/meeting/${meeting.roomId}`)
     } else {
       toast.error(result.message)

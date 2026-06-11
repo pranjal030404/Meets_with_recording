@@ -59,6 +59,7 @@ export default function Meeting() {
   const localVideoRef = useRef(null)
   const socketRef = useRef(null)
   const producerMapRef = useRef(new Map()) // Map<producerId, { peerId, mediaType }>
+  const initCancelledRef = useRef(false)
 
   // =============================================
   // KEYBOARD SHORTCUTS
@@ -79,6 +80,15 @@ export default function Meeting() {
   }, [isScreenSharing])
 
   // =============================================
+  // SET LOCAL VIDEO REF WHEN STREAM IS AVAILABLE
+  // =============================================
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream])
+
+  // =============================================
   // ACTIVE SPEAKER DETECTION
   // =============================================
   useEffect(() => {
@@ -87,6 +97,7 @@ export default function Meeting() {
     if (audioTracks.length === 0) return
 
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+    audioCtx.resume()
     const analyser = audioCtx.createAnalyser()
     analyser.fftSize = 512
     const source = audioCtx.createMediaStreamSource(localStream)
@@ -108,6 +119,9 @@ export default function Meeting() {
   // INITIALIZE SOCKET + MEDIASOUP + JOIN ROOM
   // =============================================
   useEffect(() => {
+    initCancelledRef.current = false
+    const currentUserId = user?.id || user?._id
+
     const initialize = async () => {
       try {
         const socket = initSocket(token)
@@ -120,40 +134,59 @@ export default function Meeting() {
           console.warn('Socket connection timed out, continuing with REST API only:', socketError.message)
         }
 
-        // Get local media stream if not already obtained (from pre-join)
-        let stream = localStream
-        if (!stream) {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            }
-          })
-          setLocalStream(stream)
-        }
+        if (initCancelledRef.current) return
 
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream
+        // Get local media stream if not already obtained (from pre-join)
+        let stream = useMeetingStore.getState().localStream
+
+        // Check if stream needs to be refreshed
+        const hasLiveAudio = stream?.getAudioTracks().some(t => t.readyState === 'live')
+        const hasLiveVideo = stream?.getVideoTracks().some(t => t.readyState === 'live')
+        const needsAudio = !hasLiveAudio && !useMeetingStore.getState().isMuted
+        const needsVideo = !hasLiveVideo && !useMeetingStore.getState().isVideoOff
+
+        if (!stream || needsAudio || needsVideo) {
+          const audioConstraint = needsAudio ? {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          } : false
+          const videoConstraint = needsVideo ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false
+
+          const constraints = {}
+          if (audioConstraint) constraints.audio = audioConstraint
+          if (videoConstraint) constraints.video = videoConstraint
+
+          if (Object.keys(constraints).length > 0) {
+            stream = await navigator.mediaDevices.getUserMedia(constraints)
+            if (initCancelledRef.current) {
+              stream.getTracks().forEach(t => t.stop())
+              return
+            }
+            setLocalStream(stream)
+          }
         }
 
         // Join meeting via API
-        const result = await joinMeeting(roomId)
-        if (!result.success) {
-          toast.error(result.message || 'Failed to join meeting')
+        const joinResult = await joinMeeting(roomId)
+        if (!joinResult.success) {
+          toast.error(joinResult.message || 'Failed to join meeting')
           navigate('/')
           return
         }
 
-        const meeting = result.meeting
+        if (initCancelledRef.current) return
+
+        const meeting = joinResult.meeting
         const hostId = meeting.host?.id || meeting.hostId
-        const currentUserId = user?.id || user?._id
         setIsHost(hostId === currentUserId)
+
+        // Re-read stream from store (may have been updated)
+        stream = useMeetingStore.getState().localStream
 
         // Check muteOnEntry setting
         if (meeting.settings?.muteOnEntry && hostId !== currentUserId) {
-          const audioTrack = stream.getAudioTracks()[0]
+          const audioTrack = stream?.getAudioTracks()[0]
           if (audioTrack) { audioTrack.stop(); stream.removeTrack(audioTrack) }
           useMeetingStore.setState({ isMuted: true })
           toast('You have been muted on entry by the host', { icon: '🔇' })
@@ -166,18 +199,25 @@ export default function Meeting() {
             console.error('SFU init failed, falling back to audio/video only')
           }
 
+          if (initCancelledRef.current) return
+
+          // Re-read stream again (mediasoup init is async)
+          stream = useMeetingStore.getState().localStream
+
           // Produce local tracks to SFU
-          const audioTrack = stream.getAudioTracks()[0]
-          const videoTrack = stream.getVideoTracks()[0]
-          if (audioTrack && !useMeetingStore.getState().isMuted) {
+          const audioTrack = stream?.getAudioTracks()[0]
+          const videoTrack = stream?.getVideoTracks()[0]
+          if (audioTrack && audioTrack.readyState === 'live' && !useMeetingStore.getState().isMuted) {
             await produceAudio(audioTrack)
           }
-          if (videoTrack) {
+          if (videoTrack && videoTrack.readyState === 'live') {
             await produceVideo(videoTrack)
           }
         } else {
           console.warn('Socket not connected, skipping SFU initialization')
         }
+
+        if (initCancelledRef.current) return
 
         // Load chat messages & enumerate devices
         loadMessages(roomId)
@@ -189,6 +229,7 @@ export default function Meeting() {
         }
         setIsJoining(false)
       } catch (error) {
+        if (initCancelledRef.current) return
         console.error('Failed to initialize meeting:', error)
         toast.error('Failed to access camera/microphone')
         navigate('/')
@@ -196,7 +237,7 @@ export default function Meeting() {
     }
 
     initialize()
-    return () => { handleCleanup() }
+    return () => { initCancelledRef.current = true; handleCleanup() }
   }, [roomId])
 
   // =============================================
