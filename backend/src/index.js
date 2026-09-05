@@ -40,15 +40,19 @@ let io;
   if (REDIS_URL) {
     try {
       const { createAdapter } = await import('@socket.io/redis-adapter');
-      const { createClient } = await import('ioredis');
-      const pubClient = createClient(REDIS_URL);
-      const subClient = createClient(REDIS_URL);
+      const { default: Redis } = await import('ioredis');
+      const pubClient = new Redis(REDIS_URL, { lazyConnect: true, retryStrategy: null });
+      const subClient = new Redis(REDIS_URL, { lazyConnect: true, retryStrategy: null });
+      pubClient.on('error', () => {});
+      subClient.on('error', () => {});
       await Promise.all([pubClient.connect(), subClient.connect()]);
       if (io) {
         io.adapter(createAdapter(pubClient, subClient));
         console.log('Redis adapter connected for Socket.IO scaling');
       }
     } catch (e) {
+      try { pubClient?.disconnect(); } catch {}
+      try { subClient?.disconnect(); } catch {}
       console.warn('Redis adapter unavailable, running single-instance:', e.message);
     }
   }
