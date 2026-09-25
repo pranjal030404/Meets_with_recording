@@ -6,23 +6,33 @@ export default function LoadingSpinner({
   const sizes = {
     sm: 'h-4 w-4 border-2',
     md: 'h-8 w-8 border-2',
-    lg: 'h-12 w-12 border-3',
+    lg: 'h-12 w-12 border-[3px]',
     xl: 'h-16 w-16 border-4'
   }
 
   return (
-    <div className={`flex flex-col items-center justify-center gap-3 ${className}`}>
-      <div
-        className={`
-          ${sizes[size]}
-          rounded-full
-          border-primary-500
-          border-t-transparent
-          animate-spin
-        `}
-      />
+    <div className={`flex flex-col items-center justify-center gap-4 ${className}`}>
+      <div className="relative">
+        <div
+          className={`
+            ${sizes[size]}
+            rounded-full
+            border-primary-500
+            border-t-transparent
+            animate-spin
+          `}
+        />
+        <div
+          className={`
+            ${sizes[size]}
+            rounded-full absolute inset-0
+            border-accent-500/30 border-b-transparent
+            animate-spin [animation-duration:1.6s]
+          `}
+        />
+      </div>
       {text && (
-        <p className="text-gray-400 text-sm">{text}</p>
+        <p className="text-gray-400 text-sm font-medium animate-pulse">{text}</p>
       )}
     </div>
   )
@@ -30,7 +40,8 @@ export default function LoadingSpinner({
 
 export function PageLoader({ text = 'Loading...' }) {
   return (
-    <div className="min-h-screen bg-dark-100 flex items-center justify-center">
+    <div className="min-h-screen bg-dark-100 flex items-center justify-center aurora-bg">
+      <div className="blob w-96 h-96 bg-primary-600/20 animate-aurora -top-20" />
       <LoadingSpinner size="lg" text={text} />
     </div>
   )

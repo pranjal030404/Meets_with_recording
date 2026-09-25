@@ -5,6 +5,7 @@ const Card = forwardRef(({
   className = '',
   hover = false,
   padding = 'md',
+  gradient = false,
   ...props
 }, ref) => {
   const paddings = {
@@ -18,8 +19,10 @@ const Card = forwardRef(({
     <div
       ref={ref}
       className={`
-        bg-dark-200 rounded-2xl border border-dark-400
-        ${hover ? 'hover:border-primary-500 hover:shadow-lg hover:shadow-primary-500/10 transition-all duration-200' : ''}
+        relative rounded-2xl
+        ${gradient ? 'gradient-border' : 'bg-dark-200/80 backdrop-blur-sm border border-white/[0.06]'}
+        shadow-card
+        ${hover ? 'card-hover cursor-pointer' : ''}
         ${paddings[padding]}
         ${className}
       `}
@@ -42,7 +45,7 @@ export function CardHeader({ children, className = '' }) {
 
 export function CardTitle({ children, className = '' }) {
   return (
-    <h3 className={`text-xl font-semibold text-white ${className}`}>
+    <h3 className={`text-xl font-semibold text-white font-display ${className}`}>
       {children}
     </h3>
   )
@@ -50,7 +53,7 @@ export function CardTitle({ children, className = '' }) {
 
 export function CardDescription({ children, className = '' }) {
   return (
-    <p className={`text-gray-400 text-sm mt-1 ${className}`}>
+    <p className={`text-gray-400 text-sm mt-1.5 leading-relaxed ${className}`}>
       {children}
     </p>
   )
@@ -66,7 +69,7 @@ export function CardContent({ children, className = '' }) {
 
 export function CardFooter({ children, className = '' }) {
   return (
-    <div className={`mt-4 pt-4 border-t border-dark-400 ${className}`}>
+    <div className={`mt-4 pt-4 border-t border-white/[0.06] ${className}`}>
       {children}
     </div>
   )

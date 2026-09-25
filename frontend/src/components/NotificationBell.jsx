@@ -138,11 +138,11 @@ const NotificationBell = () => {
       {/* Bell Icon */}
       <button
         onClick={() => setShowDropdown(!showDropdown)}
-        className="relative p-2 hover:bg-dark-400 rounded-lg transition"
+        className="relative p-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-dark-400/70 border border-transparent hover:border-white/[0.06] transition-all duration-300"
       >
-        <Bell className="w-6 h-6 text-gray-300" />
+        <Bell className={`w-[18px] h-[18px] transition-transform duration-300 ${showDropdown ? 'rotate-[15deg] scale-110 text-primary-300' : ''}`} />
         {unreadCount > 0 && (
-          <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">
+          <span className="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold leading-none text-white bg-gradient-to-br from-red-500 to-red-600 rounded-full shadow-lg shadow-red-500/30 animate-pop">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
@@ -150,22 +150,22 @@ const NotificationBell = () => {
 
       {/* Dropdown */}
       {showDropdown && (
-        <div className="absolute right-0 mt-2 w-96 bg-dark-200 rounded-xl shadow-2xl border border-dark-400 z-50 max-h-[600px] flex flex-col">
+        <div className="absolute right-0 mt-3 w-[22rem] sm:w-96 glass-strong rounded-2xl shadow-float z-50 max-h-[600px] flex flex-col animate-slide-down overflow-hidden">
           {/* Header */}
-          <div className="p-4 border-b border-dark-400 flex items-center justify-between">
-            <h3 className="font-semibold text-white">Notifications</h3>
+          <div className="p-4 border-b border-white/[0.06] flex items-center justify-between">
+            <h3 className="font-semibold font-display text-white">Notifications</h3>
             <div className="flex items-center gap-2">
               {unreadCount > 0 && (
                 <button
                   onClick={markAllAsRead}
-                  className="text-xs text-primary-400 hover:text-primary-300 font-medium transition"
+                  className="text-xs text-primary-400 hover:text-primary-300 font-semibold transition"
                 >
                   Mark all read
                 </button>
               )}
               <button
                 onClick={() => setShowDropdown(false)}
-                className="p-1 hover:bg-dark-400 rounded transition"
+                className="p-1.5 hover:bg-dark-400/70 rounded-lg transition-all duration-200 hover:rotate-90"
               >
                 <X className="w-4 h-4 text-gray-400" />
               </button>
@@ -175,22 +175,25 @@ const NotificationBell = () => {
           {/* Notifications List */}
           <div className="overflow-y-auto flex-1">
             {notifications.length === 0 ? (
-              <div className="p-8 text-center">
-                <Bell className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+              <div className="p-10 text-center">
+                <div className="inline-flex w-14 h-14 rounded-2xl bg-dark-300/70 border border-white/[0.05] items-center justify-center mb-3 animate-float">
+                  <Bell className="w-6 h-6 text-gray-600" />
+                </div>
                 <p className="text-gray-500">No notifications</p>
               </div>
             ) : (
-              <div className="divide-y divide-dark-400">
-                {notifications.map(notification => (
+              <div className="divide-y divide-white/[0.04]">
+                {notifications.map((notification, i) => (
                   <div
                     key={notification._id}
                     onClick={() => handleNotificationClick(notification)}
-                    className={`p-4 hover:bg-dark-300 cursor-pointer transition ${
-                      !notification.isRead ? 'bg-primary-600/10' : ''
+                    className={`p-4 hover:bg-primary-500/[0.07] cursor-pointer transition-all duration-200 group ${
+                      !notification.isRead ? 'bg-primary-600/[0.08]' : ''
                     } ${getPriorityColor(notification.priority)}`}
+                    style={{ animation: `fadeInUp 0.35s ease-out ${Math.min(i * 0.05, 0.3)}s both` }}
                   >
                     <div className="flex gap-3">
-                      <div className="flex-shrink-0 mt-1">
+                      <div className="flex-shrink-0 mt-0.5 transition-transform duration-200 group-hover:scale-110">
                         {getNotificationIcon(notification.type)}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -199,7 +202,7 @@ const NotificationBell = () => {
                             {notification.title}
                           </p>
                           {!notification.isRead && (
-                            <span className="flex-shrink-0 w-2 h-2 bg-primary-500 rounded-full mt-1"></span>
+                            <span className="flex-shrink-0 w-2 h-2 bg-primary-500 rounded-full mt-1 animate-pulse"></span>
                           )}
                         </div>
                         <p className="text-sm text-gray-400 mt-1 line-clamp-2">
@@ -214,7 +217,7 @@ const NotificationBell = () => {
                               e.stopPropagation();
                               deleteNotification(notification._id);
                             }}
-                            className="p-1 hover:bg-dark-400 rounded text-gray-500 hover:text-red-400 transition"
+                            className="p-1.5 hover:bg-red-500/15 rounded-lg text-gray-500 hover:text-red-400 transition-all duration-200 opacity-0 group-hover:opacity-100"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -229,13 +232,13 @@ const NotificationBell = () => {
 
           {/* Footer */}
           {notifications.length > 0 && (
-            <div className="p-3 border-t border-dark-400 text-center">
+            <div className="p-3 border-t border-white/[0.06] text-center bg-dark-300/40">
               <button
                 onClick={() => {
                   navigate('/notifications');
                   setShowDropdown(false);
                 }}
-                className="text-sm text-primary-400 hover:text-primary-300 font-medium transition"
+                className="text-sm text-primary-400 hover:text-primary-300 font-semibold transition"
               >
                 View all notifications
               </button>

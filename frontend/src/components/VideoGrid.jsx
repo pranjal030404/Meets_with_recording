@@ -183,13 +183,13 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
 
   return (
     <div
-      className={`${tileClasses} ${isHovered ? 'ring-2 ring-primary-500 ring-offset-2 ring-offset-dark-100' : ''} ${isActiveSpeaker && !small ? 'ring-2 ring-green-500 ring-offset-2 ring-offset-dark-100' : ''}`}
+      className={`${tileClasses} animate-scale-in ${isHovered ? 'ring-2 ring-primary-500/80 ring-offset-2 ring-offset-dark-100' : ''} ${isActiveSpeaker && !small ? 'ring-2 ring-emerald-400/80 ring-offset-2 ring-offset-dark-100 speaking-border' : ''}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       {isVideoOff ? (
-        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-dark-300 to-dark-400">
-          <div className={`${small ? 'w-14 h-14' : 'w-24 h-24'} bg-gradient-to-br from-primary-500 to-primary-700 rounded-full flex items-center justify-center shadow-lg shadow-primary-500/20`}>
+        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-dark-300 to-dark-400/60">
+          <div className={`${small ? 'w-14 h-14' : 'w-24 h-24'} bg-gradient-to-br from-primary-500 to-accent-600 rounded-full flex items-center justify-center shadow-glow`}>
             <span className={`${small ? 'text-xl' : 'text-3xl'} font-semibold text-white`}>
               {user?.name?.charAt(0).toUpperCase() || <User className={small ? 'w-6 h-6' : 'w-10 h-10'} />}
             </span>

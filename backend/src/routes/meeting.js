@@ -10,6 +10,8 @@ import Team from '../models/Team.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
+import { enforceMeetingQuota, enforceRecordingLimit } from '../middleware/subscription.js';
+import { recordUsage } from '../services/subscriptionService.js';
 import { saveMeetingRecording } from '../services/recordingService.js';
 
 const router = express.Router();
@@ -51,7 +53,7 @@ const includeTeam = () => ({
   attributes: ['id', 'name', 'description']
 });
 
-router.post('/', protect, async (req, res) => {
+router.post('/', protect, enforceMeetingQuota, async (req, res) => {
   try {
     const { title, description, scheduledAt, settings, teamId, invitees, reminders, recurrence } = req.body;
 
@@ -99,6 +101,7 @@ router.post('/', protect, async (req, res) => {
     };
 
     const meeting = await Meeting.create(meetingData);
+    await recordUsage(req.user.id, 'meeting_created', 1, meeting.id, { title: meeting.title });
     meeting.meetingLink = `${req.protocol}://${req.get('host')}/meeting/${meeting.roomId}`;
 
     if (invitees && Array.isArray(invitees)) {
@@ -486,8 +489,19 @@ router.post('/:roomId/end', protect, async (req, res) => {
       });
     }
 
+    const firstEnd = meeting.status !== 'ended';
+
     meeting.status = 'ended';
     meeting.endedAt = new Date();
+
+    // Bill the meeting's duration against the host's plan (once per meeting)
+    if (firstEnd) {
+      const startedAt = meeting.startedAt || meeting.createdAt;
+      const minutes = Math.max(0, (meeting.endedAt - new Date(startedAt)) / 60000);
+      await recordUsage(meeting.hostId, 'meeting_minutes', minutes, meeting.id, {
+        title: meeting.title
+      });
+    }
 
     const participants = (meeting.participants || []).map(p => ({
       ...p,
@@ -517,7 +531,7 @@ router.post('/:roomId/end', protect, async (req, res) => {
   }
 });
 
-router.post('/:roomId/recordings', protect, recordingUpload.single('recording'), async (req, res) => {
+router.post('/:roomId/recordings', protect, enforceRecordingLimit, recordingUpload.single('recording'), async (req, res) => {
   try {
     const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
@@ -564,6 +578,12 @@ router.post('/:roomId/recordings', protect, recordingUpload.single('recording'),
     recordings.push(result.recording);
     meeting.recordings = recordings;
     await meeting.save();
+
+    const recordingMinutes = Number.isFinite(duration) ? duration / 60 : 0;
+    await recordUsage(meeting.hostId, 'recording_minutes', recordingMinutes, meeting.id, {
+      recordingId: result.recording.id,
+      size: req.file.size
+    });
 
     res.status(201).json({
       success: true,

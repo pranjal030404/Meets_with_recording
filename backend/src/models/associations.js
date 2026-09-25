@@ -6,6 +6,25 @@ import Notification from './Notification.js';
 import Question from './Question.js';
 import Poll from './Poll.js';
 import BreakoutRoom from './BreakoutRoom.js';
+import SubscriptionPlan from './SubscriptionPlan.js';
+import Subscription from './Subscription.js';
+import Payment from './Payment.js';
+import UsageLog from './UsageLog.js';
+
+User.hasOne(Subscription, { foreignKey: 'userId', as: 'subscription' });
+Subscription.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+SubscriptionPlan.hasMany(Subscription, { foreignKey: 'planId', as: 'subscriptions' });
+Subscription.belongsTo(SubscriptionPlan, { foreignKey: 'planId', as: 'plan' });
+
+User.hasMany(Payment, { foreignKey: 'userId', as: 'payments' });
+Payment.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Payment.belongsTo(SubscriptionPlan, { foreignKey: 'planId', as: 'plan' });
+Subscription.hasMany(Payment, { foreignKey: 'subscriptionId', as: 'invoices' });
+Payment.belongsTo(Subscription, { foreignKey: 'subscriptionId', as: 'subscription' });
+
+User.hasMany(UsageLog, { foreignKey: 'userId', as: 'usageLogs' });
+UsageLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
 User.hasMany(Meeting, { foreignKey: 'hostId', as: 'hostedMeetings' });
 Meeting.belongsTo(User, { foreignKey: 'hostId', as: 'host' });
@@ -39,4 +58,4 @@ Poll.belongsTo(Meeting, { foreignKey: 'meetingId', as: 'meeting' });
 Meeting.hasMany(BreakoutRoom, { foreignKey: 'parentMeetingId', as: 'breakoutRooms' });
 BreakoutRoom.belongsTo(Meeting, { foreignKey: 'parentMeetingId', as: 'parentMeeting' });
 
-export { User, Meeting, Team, Message, Notification, Question, Poll, BreakoutRoom };
+export { User, Meeting, Team, Message, Notification, Question, Poll, BreakoutRoom, SubscriptionPlan, Subscription, Payment, UsageLog };

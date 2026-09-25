@@ -2,6 +2,7 @@ import express from 'express';
 import { Op } from 'sequelize';
 import User from '../models/User.js';
 import { protect, generateToken } from '../middleware/auth.js';
+import { ensureSubscription, getSubscriptionDetails } from '../services/subscriptionService.js';
 
 const router = express.Router();
 
@@ -30,6 +31,9 @@ router.post('/signup', async (req, res) => {
       password
     });
 
+    // Every new user starts on the Free plan
+    const { subscription } = await getSubscriptionDetails(user.id);
+
     const token = generateToken(user.id);
 
     res.status(201).json({
@@ -37,6 +41,7 @@ router.post('/signup', async (req, res) => {
       message: 'Account created successfully',
       data: {
         user: user.toJSON(),
+        subscription,
         token
       }
     });
@@ -108,10 +113,11 @@ router.post('/login', async (req, res) => {
 router.get('/me', protect, async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
+    const { subscription, usage } = await getSubscriptionDetails(req.user.id);
 
     res.json({
       success: true,
-      data: { user: user.toJSON() }
+      data: { user: user.toJSON(), subscription, usage }
     });
   } catch (error) {
     console.error('Get me error:', error);

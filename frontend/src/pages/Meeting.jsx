@@ -176,7 +176,7 @@ export default function Meeting() {
         const joinResult = await joinMeeting(roomId)
         if (!joinResult.success) {
           toast.error(joinResult.message || 'Failed to join meeting')
-          navigate('/')
+          navigate('/app')
           return
         }
 
@@ -242,7 +242,7 @@ export default function Meeting() {
         if (initCancelledRef.current) return
         console.error('Failed to initialize meeting:', error)
         toast.error('Failed to access camera/microphone')
-        navigate('/')
+        navigate('/app')
       }
     }
 
@@ -400,7 +400,7 @@ export default function Meeting() {
 
     socket.on('room:denied', () => {
       toast.error('Your request to join was denied')
-      navigate('/')
+      navigate('/app')
     })
 
     // Chat
@@ -489,7 +489,7 @@ export default function Meeting() {
   // Leave meeting
   const handleLeave = useCallback(async () => {
     await leaveMeeting()
-    navigate('/')
+    navigate('/app')
   }, [])
 
   // End meeting for all (host only)
@@ -500,7 +500,7 @@ export default function Meeting() {
       socket.emit('host:end-meeting', { roomId: currentMeeting.roomId })
     }
     await leaveMeeting()
-    navigate('/')
+    navigate('/app')
   }, [])
 
   // Screen share toggle
@@ -549,10 +549,17 @@ export default function Meeting() {
   // Loading state
   if (isJoining) {
     return (
-      <div className="min-h-screen bg-dark-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary-500 mx-auto mb-4" />
-          <p className="text-gray-400">Joining meeting...</p>
+      <div className="relative min-h-screen bg-dark-100 flex items-center justify-center aurora-bg">
+        <div className="blob -top-32 left-1/3 h-96 w-96 bg-primary-600/20 animate-aurora" />
+        <div className="blob bottom-0 right-1/4 h-80 w-80 bg-accent-600/15 animate-aurora-slow" />
+        <div className="relative text-center">
+          <div className="relative w-16 h-16 mx-auto mb-5">
+            <div className="absolute inset-0 rounded-full border-[3px] border-primary-500/20" />
+            <div className="absolute inset-0 rounded-full border-[3px] border-primary-500 border-t-transparent animate-spin" />
+            <div className="absolute inset-2 rounded-full border-2 border-accent-500/30 border-b-transparent animate-spin [animation-duration:1.6s]" />
+          </div>
+          <p className="text-gray-300 font-medium animate-pulse">Joining meeting...</p>
+          <p className="text-gray-500 text-sm mt-1">Connecting to the room</p>
         </div>
       </div>
     )
@@ -562,7 +569,7 @@ export default function Meeting() {
     <div className="h-screen bg-dark-100 flex flex-col overflow-hidden">
       {/* Recording banner */}
       {isBeingRecorded && (
-        <div className="bg-red-600/90 text-white text-center py-1 text-sm flex items-center justify-center gap-2">
+        <div className="bg-gradient-to-r from-red-600 via-red-500 to-red-600 text-white text-center py-1.5 text-sm font-medium flex items-center justify-center gap-2 animate-slide-down shadow-lg shadow-red-500/20">
           <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
           This meeting is being recorded{recordingUser ? ` by ${recordingUser}` : ''}
         </div>
@@ -655,14 +662,19 @@ export default function Meeting() {
       {showLeaveDialog && (
         <div className="modal-backdrop" onClick={() => setShowLeaveDialog(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold mb-4">Leave Meeting</h3>
+            <h3 className="text-xl font-bold font-display mb-2">Leave Meeting</h3>
+            <p className="text-gray-400 text-sm mb-6">Are you sure you want to leave? You can rejoin anytime with the same link.</p>
             <div className="space-y-3">
-              <button onClick={() => { setShowLeaveDialog(false); handleLeave() }}
-                className="btn btn-secondary w-full">Leave Meeting</button>
               {isHost && (
                 <button onClick={() => { setShowLeaveDialog(false); handleEndForAll() }}
-                  className="btn btn-danger w-full">End Meeting for All</button>
+                  className="btn btn-danger w-full py-3">
+                  End Meeting for All
+                </button>
               )}
+              <button onClick={() => { setShowLeaveDialog(false); handleLeave() }}
+                className="btn btn-secondary w-full py-3">
+                Leave Meeting
+              </button>
               <button onClick={() => setShowLeaveDialog(false)}
                 className="btn btn-ghost w-full">Cancel</button>
             </div>

@@ -14,6 +14,7 @@ import notificationRoutes from './routes/notification.js';
 import pollRoutes from './routes/poll.js';
 import breakoutRoutes from './routes/breakout.js';
 import qaRoutes from './routes/qa.js';
+import subscriptionRoutes from './routes/subscription.js';
 
 import { initializeSocketHandlers } from './sockets/index.js';
 
@@ -22,6 +23,7 @@ import mediasoupService from './lib/mediasoup.js';
 
 import { connectDB, sequelize } from './database/index.js';
 import './models/associations.js';
+import { processExpiries } from './services/subscriptionService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -134,6 +136,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/polls', pollRoutes);
 app.use('/api/breakout', breakoutRoutes);
 app.use('/api/qa', qaRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -160,6 +163,12 @@ const startServer = async () => {
     await connectDB();
     await sequelize.sync({ alter: false });
     console.log('Database tables synchronized');
+
+    // Downgrade lapsed paid subscriptions to Free now and every hour
+    setInterval(() => {
+      processExpiries().catch((e) => console.warn('Subscription expiry check failed:', e.message));
+    }, 60 * 60 * 1000);
+    processExpiries().catch((e) => console.warn('Subscription expiry check failed:', e.message));
 
     try {
       await mediasoupService.init();

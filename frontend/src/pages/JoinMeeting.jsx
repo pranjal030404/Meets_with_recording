@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { 
-  Video, 
-  VideoOff, 
-  Mic, 
-  MicOff, 
+import {
+  Video,
+  VideoOff,
+  Mic,
+  MicOff,
   ArrowLeft,
-  Settings,
-  ChevronDown
+  ChevronDown,
+  Link2,
+  Radio,
+  Sparkles,
+  LogIn
 } from 'lucide-react'
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
@@ -18,7 +21,7 @@ export default function JoinMeeting() {
   const { roomId: paramRoomId } = useParams()
   const { user } = useAuthStore()
   const { joinMeeting, getMeeting, setLocalStream, isLoading } = useMeetingStore()
-  
+
   const [roomId, setRoomId] = useState(paramRoomId || '')
   const [meeting, setMeeting] = useState(null)
   const [localStream, setLocalStreamState] = useState(null)
@@ -171,7 +174,7 @@ export default function JoinMeeting() {
     if (isVideoOff) useMeetingStore.setState({ isVideoOff: true })
 
     const result = await joinMeeting(meeting.roomId)
-    
+
     if (result.success) {
       // Prevent cleanup from stopping tracks — Meeting page will manage them
       streamRef.current = null
@@ -275,24 +278,28 @@ export default function JoinMeeting() {
   }
 
   return (
-    <div className="min-h-screen bg-dark-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl">
+    <div className="relative min-h-screen bg-dark-100 flex items-center justify-center p-4 aurora-bg noise">
+      {/* Animated aurora blobs */}
+      <div className="blob -top-32 left-1/4 h-96 w-96 bg-primary-600/20 animate-aurora" />
+      <div className="blob bottom-0 -right-24 h-80 w-80 bg-accent-600/15 animate-aurora-slow" />
+
+      <div className="relative w-full max-w-5xl">
         {/* Back button */}
         <button
-          onClick={() => navigate('/')}
-          className="flex items-center gap-2 text-gray-400 hover:text-white mb-8 transition-colors"
+          onClick={() => navigate('/app')}
+          className="group flex items-center gap-2 text-gray-400 hover:text-white mb-8 transition-colors animate-fade-in-down"
         >
-          <ArrowLeft className="w-5 h-5" />
+          <ArrowLeft className="w-5 h-5 transition-transform duration-300 group-hover:-translate-x-1" />
           Back to home
         </button>
 
-        <div className="grid lg:grid-cols-2 gap-8">
+        <div className="grid lg:grid-cols-2 gap-8 items-stretch">
           {/* Video Preview */}
-          <div className="bg-dark-200 rounded-2xl overflow-hidden">
+          <div className="glass rounded-3xl overflow-hidden shadow-float animate-fade-in-up stagger-1 flex flex-col">
             <div className="aspect-video relative">
               {isVideoOff ? (
-                <div className="w-full h-full flex items-center justify-center bg-dark-300">
-                  <div className="w-24 h-24 bg-primary-600 rounded-full flex items-center justify-center">
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-dark-300 to-dark-400/50">
+                  <div className="w-24 h-24 bg-gradient-to-br from-primary-500 to-primary-700 rounded-full flex items-center justify-center shadow-glow animate-pop">
                     <span className="text-3xl font-semibold">
                       {user?.name?.charAt(0).toUpperCase()}
                     </span>
@@ -310,39 +317,53 @@ export default function JoinMeeting() {
               )}
 
               {/* Name badge */}
-              <div className="absolute bottom-4 left-4 bg-black/60 px-3 py-1 rounded-lg text-sm">
-                {user?.name} (You)
+              <div className="absolute bottom-4 left-4 glass-strong px-3.5 py-1.5 rounded-xl text-sm font-medium shadow-lg">
+                {user?.name} <span className="text-primary-300">(You)</span>
               </div>
 
               {/* Mute on entry notice */}
               {meeting?.settings?.muteOnEntry && (
-                <div className="absolute top-4 left-4 bg-yellow-600/80 px-3 py-1 rounded-lg text-xs">
+                <div className="absolute top-4 left-4 glass-strong bg-yellow-500/20 border-yellow-400/30 px-3 py-1.5 rounded-xl text-xs font-medium text-yellow-200 animate-slide-down">
                   🔇 You'll be muted when you join
                 </div>
               )}
             </div>
 
             {/* Controls + Audio Level */}
-            <div className="p-4">
+            <div className="p-5 border-t border-white/5">
               {/* Audio level meter */}
               {!isMuted && (
-                <div className="mb-3 flex items-center gap-2">
-                  <Mic className="w-4 h-4 text-gray-400" />
-                  <div className="flex-1 h-2 bg-dark-400 rounded-full overflow-hidden">
+                <div className="mb-4 flex items-center gap-2.5">
+                  <Mic className="w-4 h-4 text-primary-400" />
+                  <div className="flex-1 h-2 bg-dark-400/80 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-green-500 rounded-full transition-all duration-75"
-                      style={{ width: `${audioLevel * 100}%` }}
+                      className="h-full rounded-full bg-gradient-to-r from-primary-500 via-primary-400 to-emerald-400 transition-all duration-100"
+                      style={{ width: `${Math.max(audioLevel * 100, 4)}%` }}
                     />
+                  </div>
+                  {/* Equalizer bars */}
+                  <div className="flex items-end gap-[3px] h-4 text-primary-400">
+                    {[0, 1, 2, 3].map(i => (
+                      <span
+                        key={i}
+                        className="eq-bar"
+                        style={{
+                          height: `${6 + audioLevel * 10}px`,
+                          animationDelay: `${i * 0.12}s`,
+                          opacity: 0.4 + audioLevel * 0.6,
+                        }}
+                      />
+                    ))}
                   </div>
                 </div>
               )}
 
               <div className="flex justify-center gap-3">
                 {/* Mic button + device selector */}
-                <div className="flex items-center">
+                <div className="flex items-center animate-scale-in stagger-1">
                   <button
                     onClick={toggleMute}
-                    className={`control-btn ${isMuted ? 'inactive' : 'active'}`}
+                    className={`control-btn ${isMuted ? 'inactive' : 'active'} rounded-l-full rounded-r-none`}
                     title={isMuted ? 'Unmute' : 'Mute'}
                   >
                     {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
@@ -350,16 +371,16 @@ export default function JoinMeeting() {
                   {devices.audioinput.length > 1 && (
                     <div className="relative">
                       <button onClick={() => setShowDeviceDropdown(showDeviceDropdown === 'audio' ? null : 'audio')}
-                        className="p-1 ml-0.5 bg-dark-400 hover:bg-dark-500 rounded-r-full transition-colors">
-                        <ChevronDown className="w-3 h-3" />
+                        className="h-12 px-1.5 bg-dark-400 hover:bg-dark-500 border-l border-black/20 rounded-r-full transition-colors text-gray-300">
+                        <ChevronDown className="w-3.5 h-3.5" />
                       </button>
                       {showDeviceDropdown === 'audio' && (
-                        <div className="absolute bottom-full mb-2 left-0 bg-dark-300 rounded-lg shadow-xl py-1 min-w-[250px] z-20">
-                          <p className="px-3 py-1 text-xs text-gray-400 font-semibold">Microphone</p>
+                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl shadow-2xl py-1.5 min-w-[250px] z-20 animate-slide-up border-white/10">
+                          <p className="px-3.5 py-1.5 text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Microphone</p>
                           {devices.audioinput.map(d => (
                             <button key={d.deviceId} onClick={() => switchDevice('audioinput', d.deviceId)}
-                              className={`w-full px-3 py-2 text-left text-sm hover:bg-dark-400 transition-colors truncate ${
-                                d.deviceId === selectedAudioDevice ? 'text-primary-400' : ''
+                              className={`w-full px-3.5 py-2 text-left text-sm hover:bg-primary-500/10 transition-colors truncate ${
+                                d.deviceId === selectedAudioDevice ? 'text-primary-300' : 'text-gray-300'
                               }`}>
                               {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
                             </button>
@@ -371,10 +392,10 @@ export default function JoinMeeting() {
                 </div>
 
                 {/* Video button + device selector */}
-                <div className="flex items-center">
+                <div className="flex items-center animate-scale-in stagger-2">
                   <button
                     onClick={toggleVideo}
-                    className={`control-btn ${isVideoOff ? 'inactive' : 'active'}`}
+                    className={`control-btn ${isVideoOff ? 'inactive' : 'active'} rounded-l-full rounded-r-none`}
                     title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
                   >
                     {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
@@ -382,16 +403,16 @@ export default function JoinMeeting() {
                   {devices.videoinput.length > 1 && (
                     <div className="relative">
                       <button onClick={() => setShowDeviceDropdown(showDeviceDropdown === 'video' ? null : 'video')}
-                        className="p-1 ml-0.5 bg-dark-400 hover:bg-dark-500 rounded-r-full transition-colors">
-                        <ChevronDown className="w-3 h-3" />
+                        className="h-12 px-1.5 bg-dark-400 hover:bg-dark-500 border-l border-black/20 rounded-r-full transition-colors text-gray-300">
+                        <ChevronDown className="w-3.5 h-3.5" />
                       </button>
                       {showDeviceDropdown === 'video' && (
-                        <div className="absolute bottom-full mb-2 left-0 bg-dark-300 rounded-lg shadow-xl py-1 min-w-[250px] z-20">
-                          <p className="px-3 py-1 text-xs text-gray-400 font-semibold">Camera</p>
+                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl shadow-2xl py-1.5 min-w-[250px] z-20 animate-slide-up">
+                          <p className="px-3.5 py-1.5 text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Camera</p>
                           {devices.videoinput.map(d => (
                             <button key={d.deviceId} onClick={() => switchDevice('videoinput', d.deviceId)}
-                              className={`w-full px-3 py-2 text-left text-sm hover:bg-dark-400 transition-colors truncate ${
-                                d.deviceId === selectedVideoDevice ? 'text-primary-400' : ''
+                              className={`w-full px-3.5 py-2 text-left text-sm hover:bg-primary-500/10 transition-colors truncate ${
+                                d.deviceId === selectedVideoDevice ? 'text-primary-300' : 'text-gray-300'
                               }`}>
                               {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
                             </button>
@@ -406,30 +427,47 @@ export default function JoinMeeting() {
           </div>
 
           {/* Join Form */}
-          <div className="flex flex-col justify-center">
-            <h1 className="text-2xl font-bold mb-2">Ready to join?</h1>
-            <p className="text-gray-400 mb-6">
-              {meeting 
+          <div className="flex flex-col justify-center animate-fade-in-up stagger-2">
+            <div className="inline-flex items-center gap-2 self-start rounded-full border border-primary-400/25 bg-primary-500/10 px-3.5 py-1.5 text-xs font-semibold text-primary-200 mb-5">
+              <Sparkles className="h-3.5 w-3.5" />
+              Pre-join check
+            </div>
+
+            <h1 className="text-3xl sm:text-4xl font-bold font-display tracking-tight mb-3">
+              Ready to <span className="gradient-text">join?</span>
+            </h1>
+            <p className="text-gray-400 mb-8">
+              {meeting
                 ? `You're about to join: ${meeting.title}`
                 : 'Enter a meeting code to join'
               }
             </p>
 
             {!meeting && (
-              <form onSubmit={handleCheckMeeting} className="mb-6">
-                <input
-                  type="text"
-                  value={roomId}
-                  onChange={(e) => setRoomId(e.target.value)}
-                  className="input mb-4"
-                  placeholder="Enter meeting code or link"
-                />
+              <form onSubmit={handleCheckMeeting} className="mb-6 group">
+                <div className="relative mb-4">
+                  <Link2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 transition-colors group-focus-within:text-primary-400" />
+                  <input
+                    type="text"
+                    value={roomId}
+                    onChange={(e) => setRoomId(e.target.value)}
+                    className="input pl-11 py-3.5"
+                    placeholder="Enter meeting code or link"
+                  />
+                </div>
                 <button
                   type="submit"
                   disabled={isCheckingMeeting}
-                  className="btn btn-secondary w-full"
+                  className="btn btn-secondary w-full py-3.5"
                 >
-                  {isCheckingMeeting ? 'Checking...' : 'Find Meeting'}
+                  {isCheckingMeeting ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Checking...
+                    </span>
+                  ) : (
+                    'Find Meeting'
+                  )}
                 </button>
               </form>
             )}
@@ -437,24 +475,29 @@ export default function JoinMeeting() {
             {meeting && (
               <div className="space-y-4">
                 {/* Meeting Info */}
-                <div className="bg-dark-300 rounded-xl p-4">
-                  <h3 className="font-semibold mb-2">{meeting.title}</h3>
-                  <p className="text-sm text-gray-400">
-                    Hosted by {meeting.host?.name}
-                  </p>
-                  <div className="flex items-center gap-2 mt-2 text-sm text-gray-400">
-                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <div className="gradient-border rounded-2xl p-5 animate-scale-in">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold font-display text-lg mb-1">{meeting.title}</h3>
+                      <p className="text-sm text-gray-400">
+                        Hosted by <span className="text-gray-200 font-medium">{meeting.host?.name}</span>
+                      </p>
+                    </div>
+                    <Radio className="w-5 h-5 text-primary-400 shrink-0 mt-1" />
+                  </div>
+                  <div className="flex items-center gap-2 mt-3 text-sm text-gray-400">
+                    <span className="live-dot text-emerald-400" />
                     {meeting.status === 'active' ? 'Meeting in progress' : 'Ready to start'}
                   </div>
                   {meeting.settings?.muteOnEntry && (
-                    <p className="text-xs text-yellow-400 mt-2">🔇 Participants are muted on entry</p>
+                    <p className="text-xs text-yellow-400/90 mt-2.5 bg-yellow-500/10 border border-yellow-400/20 rounded-lg px-3 py-1.5 inline-block">🔇 Participants are muted on entry</p>
                   )}
                 </div>
 
                 <button
                   onClick={handleJoinMeeting}
                   disabled={isLoading}
-                  className="btn btn-primary w-full py-3 text-lg"
+                  className="btn btn-primary w-full py-4 text-base animate-fade-in-up stagger-2"
                 >
                   {isLoading ? (
                     <span className="flex items-center gap-2">
@@ -462,13 +505,16 @@ export default function JoinMeeting() {
                       Joining...
                     </span>
                   ) : (
-                    'Join Now'
+                    <span className="flex items-center gap-2">
+                      <LogIn className="w-5 h-5" />
+                      Join Now
+                    </span>
                   )}
                 </button>
 
                 <button
                   onClick={() => setMeeting(null)}
-                  className="text-gray-400 hover:text-white text-sm w-full"
+                  className="text-gray-400 hover:text-white text-sm w-full transition-colors hover:underline underline-offset-4"
                 >
                   Join a different meeting
                 </button>

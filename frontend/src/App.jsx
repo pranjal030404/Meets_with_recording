@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
 
 // Pages
+import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Home from './pages/Home'
@@ -11,6 +12,8 @@ import MeetingHistory from './pages/MeetingHistory'
 import Teams from './pages/Teams'
 import TeamDetail from './pages/TeamDetail'
 import Calendar from './pages/Calendar'
+import Pricing from './pages/Pricing'
+import Billing from './pages/Billing'
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
@@ -19,7 +22,11 @@ function ProtectedRoute({ children }) {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-dark-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div>
+        <div className="relative w-14 h-14">
+          <div className="absolute inset-0 rounded-full border-2 border-primary-500/20" />
+          <div className="absolute inset-0 rounded-full border-2 border-primary-500 border-t-transparent animate-spin" />
+          <div className="absolute inset-2.5 rounded-full border-2 border-accent-500/30 border-b-transparent animate-spin [animation-duration:1.6s]" />
+        </div>
       </div>
     )
   }
@@ -31,12 +38,12 @@ function ProtectedRoute({ children }) {
   return children
 }
 
-// Public Route (redirect to home if authenticated)
+// Public Route (redirect to app if authenticated)
 function PublicRoute({ children }) {
   const { isAuthenticated } = useAuthStore()
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/app" replace />
   }
 
   return children
@@ -45,6 +52,12 @@ function PublicRoute({ children }) {
 export default function App() {
   return (
     <Routes>
+      {/* Landing page */}
+      <Route path="/" element={<Landing />} />
+
+      {/* Pricing (public, also viewable when logged in) */}
+      <Route path="/pricing" element={<Pricing />} />
+
       {/* Public Routes */}
       <Route path="/login" element={
         <PublicRoute>
@@ -58,7 +71,7 @@ export default function App() {
       } />
 
       {/* Protected Routes */}
-      <Route path="/" element={
+      <Route path="/app" element={
         <ProtectedRoute>
           <Home />
         </ProtectedRoute>
@@ -96,6 +109,11 @@ export default function App() {
       <Route path="/calendar" element={
         <ProtectedRoute>
           <Calendar />
+        </ProtectedRoute>
+      } />
+      <Route path="/billing" element={
+        <ProtectedRoute>
+          <Billing />
         </ProtectedRoute>
       } />
 
