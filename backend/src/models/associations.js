@@ -10,6 +10,12 @@ import SubscriptionPlan from './SubscriptionPlan.js';
 import Subscription from './Subscription.js';
 import Payment from './Payment.js';
 import UsageLog from './UsageLog.js';
+import Conversation from './Conversation.js';
+import ConversationMember from './ConversationMember.js';
+import Task from './Task.js';
+import FileEntry from './FileEntry.js';
+import SavedMessage from './SavedMessage.js';
+import AuditLog from './AuditLog.js';
 
 User.hasOne(Subscription, { foreignKey: 'userId', as: 'subscription' });
 Subscription.belongsTo(User, { foreignKey: 'userId', as: 'user' });
@@ -58,4 +64,41 @@ Poll.belongsTo(Meeting, { foreignKey: 'meetingId', as: 'meeting' });
 Meeting.hasMany(BreakoutRoom, { foreignKey: 'parentMeetingId', as: 'breakoutRooms' });
 BreakoutRoom.belongsTo(Meeting, { foreignKey: 'parentMeetingId', as: 'parentMeeting' });
 
-export { User, Meeting, Team, Message, Notification, Question, Poll, BreakoutRoom, SubscriptionPlan, Subscription, Payment, UsageLog };
+// Conversations (DMs & group chats)
+User.hasMany(Conversation, { foreignKey: 'createdById', as: 'createdConversations' });
+Conversation.belongsTo(User, { foreignKey: 'createdById', as: 'creator' });
+Conversation.hasMany(ConversationMember, { foreignKey: 'conversationId', as: 'members' });
+ConversationMember.belongsTo(Conversation, { foreignKey: 'conversationId', as: 'conversation' });
+ConversationMember.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(ConversationMember, { foreignKey: 'userId', as: 'conversationMemberships' });
+Conversation.hasMany(Message, { foreignKey: 'conversationId', as: 'messages' });
+Message.belongsTo(Conversation, { foreignKey: 'conversationId', as: 'conversation' });
+
+// Tasks
+Task.belongsTo(User, { foreignKey: 'assigneeId', as: 'assignee' });
+Task.belongsTo(User, { foreignKey: 'createdById', as: 'creator' });
+Task.belongsTo(Team, { foreignKey: 'teamId', as: 'team' });
+Task.belongsTo(Meeting, { foreignKey: 'meetingId', as: 'meeting' });
+Task.belongsTo(Message, { foreignKey: 'messageId', as: 'sourceMessage' });
+Task.belongsTo(Task, { foreignKey: 'parentId', as: 'parent' });
+User.hasMany(Task, { foreignKey: 'assigneeId', as: 'assignedTasks' });
+
+// Files
+FileEntry.belongsTo(User, { foreignKey: 'ownerId', as: 'owner' });
+FileEntry.belongsTo(Team, { foreignKey: 'teamId', as: 'team' });
+User.hasMany(FileEntry, { foreignKey: 'ownerId', as: 'files' });
+
+// Saved (bookmarked) messages
+SavedMessage.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+SavedMessage.belongsTo(Message, { foreignKey: 'messageId', as: 'message' });
+User.hasMany(SavedMessage, { foreignKey: 'userId', as: 'savedMessages' });
+
+// Audit logs
+User.hasMany(AuditLog, { foreignKey: 'actorId', as: 'auditLogs' });
+AuditLog.belongsTo(User, { foreignKey: 'actorId', as: 'actor' });
+
+export {
+  User, Meeting, Team, Message, Notification, Question, Poll, BreakoutRoom,
+  SubscriptionPlan, Subscription, Payment, UsageLog,
+  Conversation, ConversationMember, Task, FileEntry, SavedMessage
+};

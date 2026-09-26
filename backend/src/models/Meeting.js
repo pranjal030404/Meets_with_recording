@@ -96,6 +96,12 @@ const Meeting = sequelize.define('Meeting', {
       reminder1day: false,
       started: false
     }
+  },
+  aiSummary: {
+    type: DataTypes.JSON
+  },
+  summaryGeneratedAt: {
+    type: DataTypes.DATE
   }
 }, {
   tableName: 'Meetings'

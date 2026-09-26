@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { useMeetingStore } from '../store/meetingStore';
 import useTeamStore from '../store/teamStore';
 import { useAuthStore } from '../store/authStore';
+import AppShell from '../components/AppShell';
 
 const Calendar = () => {
   const navigate = useNavigate();
@@ -138,11 +139,8 @@ const Calendar = () => {
   const monthName = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   return (
-    <div className="min-h-screen bg-dark-100 px-4 sm:px-6 py-8 aurora-bg noise">
-      {/* Animated background */}
-      <div className="blob -top-40 right-1/3 h-96 w-96 bg-primary-600/15 animate-aurora" />
-      <div className="blob bottom-0 -left-24 h-80 w-80 bg-accent-600/10 animate-aurora-slow" />
-
+    <AppShell wide>
+      <div className="px-4 sm:px-6 py-8">
       <div className="relative max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-wrap justify-between items-end gap-6 mb-10 animate-fade-in-up">
@@ -362,7 +360,8 @@ const Calendar = () => {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </AppShell>
   );
 };
 

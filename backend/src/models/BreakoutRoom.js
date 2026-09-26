@@ -33,6 +33,11 @@ const BreakoutRoom = sequelize.define('BreakoutRoom', {
   createdById: {
     type: DataTypes.UUID,
     allowNull: false
+  },
+  // JSON column written by breakout routes — declared so Sequelize tracks changes
+  assignedParticipants: {
+    type: DataTypes.JSON,
+    defaultValue: []
   }
 }, {
   tableName: 'BreakoutRooms'

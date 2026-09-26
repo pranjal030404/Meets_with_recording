@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useSubscriptionStore } from '../store/subscriptionStore'
+import AppShell from '../components/AppShell'
 
 const formatDate = (value) =>
   value
@@ -104,28 +105,19 @@ export default function Billing() {
   const amount = Number(subscription?.amount || 0)
 
   return (
-    <div className="min-h-screen bg-dark-100 aurora-bg noise text-white">
-      <div className="blob -top-40 left-1/4 h-[30rem] w-[30rem] bg-primary-600/20 animate-aurora" />
-      <div className="blob top-1/3 -right-32 h-96 w-96 bg-accent-600/15 animate-aurora-slow" />
-
-      {/* Header */}
-      <header className="sticky top-0 z-40 glass-strong">
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary-400/30 to-transparent" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
-          <Link to="/app" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center shadow-lg shadow-primary-500/30 transition-all duration-300 group-hover:scale-105">
-              <Video className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold font-display tracking-tight">MeetClone</span>
-          </Link>
+    <AppShell wide>
+      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-10 lg:py-14 space-y-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold font-display tracking-tight">Billing</h1>
+            <p className="text-gray-500 mt-1">Your subscription, usage and payment history.</p>
+          </div>
           <Link to="/pricing" className="btn btn-primary">
             Change plan
             <ArrowUpRight className="w-4 h-4" />
           </Link>
         </div>
-      </header>
 
-      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-10 space-y-8">
         {/* Current plan */}
         <section className="gradient-border rounded-3xl p-6 sm:p-8 relative overflow-hidden">
           <div className="blob -top-24 -right-24 h-72 w-72 bg-primary-600/15 animate-aurora" />
@@ -260,6 +252,6 @@ export default function Billing() {
           )}
         </section>
       </main>
-    </div>
+    </AppShell>
   )
 }

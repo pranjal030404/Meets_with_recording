@@ -4,17 +4,23 @@ import {
   Video,
   Clock,
   Users,
-  ArrowLeft,
   Calendar,
   ExternalLink,
   Download,
   FileText,
   FileJson,
   Subtitles,
-  CircleDot
+  CircleDot,
+  Sparkles,
+  Loader2,
+  CheckSquare
 } from 'lucide-react'
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
+import { useTaskStore } from '../store/taskStore'
+import AppShell from '../components/AppShell'
+import api from '../lib/api'
+import toast from 'react-hot-toast'
 
 export default function MeetingHistory() {
   const navigate = useNavigate()
@@ -52,34 +58,13 @@ export default function MeetingHistory() {
   }
 
   return (
-    <div className="min-h-screen bg-dark-100 aurora-bg noise">
-      {/* Animated background */}
-      <div className="blob -top-40 right-1/4 h-96 w-96 bg-primary-600/15 animate-aurora" />
-      <div className="blob bottom-0 -left-24 h-80 w-80 bg-accent-600/10 animate-aurora-slow" />
-
-      {/* Header */}
-      <header className="sticky top-0 z-40 glass-strong">
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary-400/30 to-transparent" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-4 animate-fade-in-down">
-            <Link to="/app" className="group p-2.5 rounded-xl bg-dark-300/80 border border-white/[0.06] text-gray-400 hover:text-white hover:border-primary-500/30 transition-all duration-300 hover:-translate-x-0.5" title="Back to home">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/25">
-                <Video className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <span className="text-lg font-bold font-display block leading-tight">Meeting History</span>
-                <span className="text-xs text-gray-500">Your past & scheduled meetings</span>
-              </div>
-            </div>
-          </div>
+    <AppShell wide>
+      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-10 lg:py-14">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold font-display tracking-tight">Meetings</h1>
+          <p className="text-gray-500 mt-1">Your past &amp; scheduled meetings, recordings, transcripts and AI summaries.</p>
         </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-10">
         {/* Filters */}
         <div className="flex flex-wrap gap-2 mb-8 animate-fade-in-up stagger-1">
           {['all', 'active', 'ended', 'scheduled'].map((status, i) => (
@@ -132,7 +117,7 @@ export default function MeetingHistory() {
           </div>
         )}
       </main>
-    </div>
+    </AppShell>
   )
 }
 
@@ -322,6 +307,133 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
           </div>
         )}
       </div>
+
+      {/* AI Summary */}
+      <AiSummaryPanel meeting={meeting} navigate={navigate} />
+    </div>
+  )
+}
+
+function AiSummaryPanel({ meeting, navigate }) {
+  const [summary, setSummary] = useState(meeting.aiSummary || null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [createdTasks, setCreatedTasks] = useState([])
+
+  const generate = async (regenerate = false) => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const res = await api.post(`/ai/meetings/${meeting.roomId}/summary`, { regenerate })
+      setSummary(res.data.data.summary)
+      if (regenerate) toast.success('Summary regenerated')
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to generate summary')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const createTaskFromItem = async (item) => {
+    const res = await useTaskStore.getState().createTask({
+      title: item.title,
+      meetingId: meeting._id,
+      description: 'Action item from AI meeting summary'
+    })
+    if (res.success) {
+      setCreatedTasks(list => [...list, item.title])
+      toast.success('Task created')
+    } else {
+      toast.error(res.message)
+    }
+  }
+
+  if (!summary) {
+    return (
+      <div className="mt-5 border-t border-white/[0.06] pt-4">
+        <button
+          onClick={() => generate(false)}
+          disabled={isLoading}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-fuchsia-500/15 to-primary-500/15 border border-fuchsia-400/30 text-sm font-medium text-fuchsia-200 hover:from-fuchsia-500/25 hover:to-primary-500/25 transition-all disabled:opacity-50"
+        >
+          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+          {isLoading ? 'Analyzing transcript...' : 'Generate AI Summary'}
+        </button>
+        {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-5 border-t border-white/[0.06] pt-4">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-fuchsia-300" />
+          AI Summary
+          {summary.model && <span className="text-[10px] font-normal text-gray-600">({summary.model})</span>}
+        </h4>
+        <button onClick={() => generate(true)} disabled={isLoading} className="text-xs text-gray-500 hover:text-fuchsia-300 transition-colors disabled:opacity-50">
+          {isLoading ? 'Regenerating...' : 'Regenerate'}
+        </button>
+      </div>
+
+      <p className="text-sm text-gray-300 leading-relaxed mb-3">{summary.summary}</p>
+
+      {summary.keyPoints?.length > 0 && (
+        <div className="mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Key points</p>
+          <ul className="space-y-1">
+            {summary.keyPoints.map((point, i) => (
+              <li key={i} className="text-sm text-gray-400 flex gap-2">
+                <span className="text-primary-400 mt-0.5">•</span> {point}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {summary.decisions?.length > 0 && (
+        <div className="mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Decisions</p>
+          <ul className="space-y-1">
+            {summary.decisions.map((d, i) => (
+              <li key={i} className="text-sm text-emerald-300/90 flex gap-2">
+                <CheckSquare className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {d}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {summary.actionItems?.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Action items</p>
+          <div className="space-y-1.5">
+            {summary.actionItems.map((item, i) => {
+              const done = createdTasks.includes(item.title)
+              return (
+                <div key={i} className="flex items-center justify-between gap-3 rounded-xl bg-dark-300/50 border border-white/[0.05] px-3.5 py-2">
+                  <span className="text-sm text-gray-300">
+                    {item.title}
+                    {item.assigneeHint && <span className="text-gray-600"> · {item.assigneeHint}</span>}
+                  </span>
+                  <button
+                    onClick={() => createTaskFromItem(item)}
+                    disabled={done}
+                    className={`text-xs px-3 py-1 rounded-lg border transition-all shrink-0 ${
+                      done
+                        ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10'
+                        : 'border-primary-500/30 text-primary-300 hover:bg-primary-500/15'
+                    }`}
+                  >
+                    {done ? 'Task created' : 'Create task'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

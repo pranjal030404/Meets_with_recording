@@ -27,6 +27,15 @@ const Team = sequelize.define('Team', {
     unique: true,
     defaultValue: () => uuidv4().split('-')[0]
   },
+  // JSON columns written by team routes — declared so Sequelize tracks changes
+  members: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
+  channels: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
   settings: {
     type: DataTypes.JSON,
     defaultValue: {

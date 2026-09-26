@@ -13,6 +13,19 @@ const Message = sequelize.define('Message', {
   teamId: {
     type: DataTypes.UUID
   },
+  conversationId: {
+    type: DataTypes.UUID
+  },
+  threadRootId: {
+    type: DataTypes.UUID
+  },
+  replyToId: {
+    type: DataTypes.UUID
+  },
+  replyCount: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
   channelType: {
     type: DataTypes.ENUM('general', 'meetings', 'announcements', 'custom'),
     defaultValue: 'general'
@@ -53,6 +66,26 @@ const Message = sequelize.define('Message', {
   },
   fileType: {
     type: DataTypes.STRING(100)
+  },
+  fileSize: {
+    type: DataTypes.BIGINT
+  },
+  reactions: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
+  editedAt: {
+    type: DataTypes.DATE
+  },
+  isPinned: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  pinnedBy: {
+    type: DataTypes.UUID
+  },
+  forwardedFromId: {
+    type: DataTypes.UUID
   },
   isDeleted: {
     type: DataTypes.BOOLEAN,

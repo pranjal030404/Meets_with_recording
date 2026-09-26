@@ -37,6 +37,11 @@ const Poll = sequelize.define('Poll', {
   totalVotes: {
     type: DataTypes.INTEGER,
     defaultValue: 0
+  },
+  // JSON column written by poll routes — declared so Sequelize tracks changes
+  options: {
+    type: DataTypes.JSON,
+    defaultValue: []
   }
 }, {
   tableName: 'Polls'

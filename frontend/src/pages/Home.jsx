@@ -5,11 +5,9 @@ import {
   Plus,
   Calendar,
   Link2,
-  LogOut,
   User,
   Clock,
   Users,
-  CreditCard,
   Keyboard,
   ShieldCheck,
   MonitorPlay,
@@ -20,12 +18,12 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useMeetingStore } from '../store/meetingStore'
-import NotificationBell from '../components/NotificationBell'
+import AppShell from '../components/AppShell'
 import toast from 'react-hot-toast'
 
 export default function Home() {
   const navigate = useNavigate()
-  const { user, logout } = useAuthStore()
+  const { user } = useAuthStore()
   const { createMeeting, isLoading } = useMeetingStore()
   const [joinCode, setJoinCode] = useState('')
 
@@ -56,78 +54,8 @@ export default function Home() {
     navigate(`/join/${roomId}`)
   }
 
-  const handleLogout = async () => {
-    await logout()
-    toast.success('Logged out successfully')
-    navigate('/')
-  }
-
   return (
-    <div className="min-h-screen bg-dark-100 aurora-bg noise">
-      {/* Animated aurora background */}
-      <div className="blob -top-40 left-1/4 h-[30rem] w-[30rem] bg-primary-600/20 animate-aurora" />
-      <div className="blob top-1/3 -right-32 h-96 w-96 bg-accent-600/15 animate-aurora-slow" />
-      <div className="blob bottom-0 -left-24 h-80 w-80 bg-cyan-500/10 animate-aurora" />
-
-      {/* Header */}
-      <header className="sticky top-0 z-40 glass-strong">
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary-400/30 to-transparent" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
-          <Link to="/app" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center shadow-lg shadow-primary-500/30 transition-all duration-300 group-hover:scale-105 group-hover:shadow-glow">
-              <Video className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold font-display tracking-tight">MeetClone</span>
-          </Link>
-
-          <div className="flex items-center gap-1 sm:gap-2">
-            <Link to="/teams" className="nav-link">
-              <Users className="w-[18px] h-[18px]" />
-              <span className="hidden md:inline">Teams</span>
-            </Link>
-
-            <Link to="/calendar" className="nav-link">
-              <Calendar className="w-[18px] h-[18px]" />
-              <span className="hidden md:inline">Calendar</span>
-            </Link>
-
-            <Link to="/history" className="nav-link">
-              <Clock className="w-[18px] h-[18px]" />
-              <span className="hidden md:inline">History</span>
-            </Link>
-
-            <Link to="/billing" className="nav-link">
-              <CreditCard className="w-[18px] h-[18px]" />
-              <span className="hidden md:inline">Billing</span>
-            </Link>
-
-            <NotificationBell />
-
-            <div className="flex items-center gap-3 pl-2 sm:pl-3 ml-1 border-l border-white/10">
-              <div className="flex items-center gap-2.5">
-                <div className="relative">
-                  <img
-                    src={user?.avatar}
-                    alt={user?.name}
-                    className="w-9 h-9 rounded-full ring-2 ring-primary-500/30 transition-all duration-300 hover:ring-primary-400/60"
-                  />
-                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-dark-200 live-dot text-green-400" />
-                </div>
-                <span className="hidden lg:inline text-sm font-medium text-gray-200">{user?.name}</span>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="p-2 rounded-xl text-gray-400 transition-all duration-300 hover:bg-red-500/10 hover:text-red-400 hover:scale-110 tooltip-host"
-                data-tooltip="Logout"
-                title="Logout"
-              >
-                <LogOut className="w-[18px] h-[18px]" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
+    <AppShell wide>
       {/* Main Content */}
       <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-14 lg:py-20">
         <div className="grid lg:grid-cols-2 gap-14 items-center">
@@ -305,7 +233,7 @@ export default function Home() {
           </div>
         </div>
       </main>
-    </div>
+    </AppShell>
   )
 }
 

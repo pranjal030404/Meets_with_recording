@@ -131,11 +131,14 @@ router.get('/me', protect, async (req, res) => {
 
 router.put('/profile', protect, async (req, res) => {
   try {
-    const { name, avatar } = req.body;
+    const { name, avatar, timezone, title, department } = req.body;
 
     const updateData = {};
     if (name) updateData.name = name;
     if (avatar) updateData.avatar = avatar;
+    if (timezone !== undefined) updateData.timezone = timezone;
+    if (title !== undefined) updateData.title = title;
+    if (department !== undefined) updateData.department = department;
 
     await User.update(updateData, { where: { id: req.user.id } });
 
@@ -151,6 +154,36 @@ router.put('/profile', protect, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error updating profile',
+      error: error.message
+    });
+  }
+});
+
+// Presence: custom status with optional expiry
+router.put('/status', protect, async (req, res) => {
+  try {
+    const { customStatus, statusEmoji, statusExpiresAt } = req.body;
+
+    const updateData = {
+      customStatus: customStatus ? String(customStatus).slice(0, 100) : null,
+      statusEmoji: statusEmoji ? String(statusEmoji).slice(0, 10) : null,
+      statusExpiresAt: statusExpiresAt ? new Date(statusExpiresAt) : null
+    };
+
+    await User.update(updateData, { where: { id: req.user.id } });
+
+    const user = await User.findByPk(req.user.id);
+
+    res.json({
+      success: true,
+      message: 'Status updated',
+      data: { user: user.toJSON() }
+    });
+  } catch (error) {
+    console.error('Update status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating status',
       error: error.message
     });
   }

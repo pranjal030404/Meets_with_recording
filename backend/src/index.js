@@ -15,6 +15,13 @@ import pollRoutes from './routes/poll.js';
 import breakoutRoutes from './routes/breakout.js';
 import qaRoutes from './routes/qa.js';
 import subscriptionRoutes from './routes/subscription.js';
+import conversationRoutes from './routes/conversation.js';
+import messageRoutes from './routes/message.js';
+import taskRoutes from './routes/task.js';
+import fileRoutes from './routes/file.js';
+import searchRoutes from './routes/search.js';
+import adminRoutes from './routes/admin.js';
+import aiRoutes from './routes/ai.js';
 
 import { initializeSocketHandlers } from './sockets/index.js';
 
@@ -137,6 +144,13 @@ app.use('/api/polls', pollRoutes);
 app.use('/api/breakout', breakoutRoutes);
 app.use('/api/qa', qaRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/conversations', conversationRoutes);
+app.use('/api/messages', messageRoutes);
+app.use('/api/tasks', taskRoutes);
+app.use('/api/files', fileRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({

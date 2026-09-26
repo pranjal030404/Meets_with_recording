@@ -14,6 +14,11 @@ import TeamDetail from './pages/TeamDetail'
 import Calendar from './pages/Calendar'
 import Pricing from './pages/Pricing'
 import Billing from './pages/Billing'
+import Chat from './pages/Chat'
+import Tasks from './pages/Tasks'
+import Files from './pages/Files'
+import Search from './pages/Search'
+import Admin from './pages/Admin'
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
@@ -114,6 +119,36 @@ export default function App() {
       <Route path="/billing" element={
         <ProtectedRoute>
           <Billing />
+        </ProtectedRoute>
+      } />
+      <Route path="/chat" element={
+        <ProtectedRoute>
+          <Chat />
+        </ProtectedRoute>
+      } />
+      <Route path="/chat/:conversationId" element={
+        <ProtectedRoute>
+          <Chat />
+        </ProtectedRoute>
+      } />
+      <Route path="/tasks" element={
+        <ProtectedRoute>
+          <Tasks />
+        </ProtectedRoute>
+      } />
+      <Route path="/files" element={
+        <ProtectedRoute>
+          <Files />
+        </ProtectedRoute>
+      } />
+      <Route path="/search" element={
+        <ProtectedRoute>
+          <Search />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin" element={
+        <ProtectedRoute>
+          <Admin />
         </ProtectedRoute>
       } />
 

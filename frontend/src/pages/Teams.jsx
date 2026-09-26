@@ -4,6 +4,7 @@ import { Plus, Users, LogOut, Sparkles, ArrowRight, LogIn } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useTeamStore from '../store/teamStore';
 import { useAuthStore } from '../store/authStore';
+import AppShell from '../components/AppShell';
 
 const AVATAR_GRADIENTS = [
   'from-primary-400 via-primary-600 to-accent-600',
@@ -80,11 +81,8 @@ const Teams = () => {
   }
 
   return (
-    <div className="min-h-screen bg-dark-100 px-4 sm:px-6 py-8 aurora-bg noise">
-      {/* Animated background */}
-      <div className="blob -top-40 left-1/4 h-96 w-96 bg-primary-600/15 animate-aurora" />
-      <div className="blob bottom-0 -right-24 h-80 w-80 bg-accent-600/10 animate-aurora-slow" />
-
+    <AppShell wide>
+      <div className="px-4 sm:px-6 py-8">
       <div className="relative max-w-7xl mx-auto">
         <div className="flex flex-wrap justify-between items-end gap-6 mb-10 animate-fade-in-up">
           <div>
@@ -278,7 +276,8 @@ const Teams = () => {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </AppShell>
   );
 };
 

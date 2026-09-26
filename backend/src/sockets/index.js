@@ -3,6 +3,7 @@ import Meeting from '../models/Meeting.js';
 import Message from '../models/Message.js';
 import Team from '../models/Team.js';
 import User from '../models/User.js';
+import ConversationMember from '../models/ConversationMember.js';
 import mediasoupService from '../lib/mediasoup.js';
 
 const connectedUsers = new Map();
@@ -38,6 +39,9 @@ export const initializeSocketHandlers = (io) => {
     });
 
     socket.join(`user:${socket.user.id}`);
+
+    // Mark user online for the workspace
+    User.update({ isOnline: true }, { where: { id: socket.user.id } }).catch(() => {});
 
     socket.on('room:join', async ({ roomId }) => {
       try {
@@ -653,6 +657,17 @@ export const initializeSocketHandlers = (io) => {
 
         console.log(`${socket.user.name} joined team: ${team.name}`);
 
+        // Share presence with the team
+        const onlineIds = [...connectedUsers.keys()];
+        const teamMemberIds = (team.members || []).map(m => m.userId || m.id).filter(Boolean);
+        const onlineMembers = teamMemberIds.filter(id => onlineIds.includes(id));
+
+        socket.to(`team:${teamId}`).emit('presence:online', {
+          userId: socket.user.id,
+          name: socket.user.name
+        });
+        socket.emit('presence:list', { teamId, onlineUserIds: onlineMembers });
+
         socket.emit('team:joined', {
           teamId,
           teamName: team.name
@@ -677,6 +692,70 @@ export const initializeSocketHandlers = (io) => {
       });
     });
 
+    // =============================================
+    // WORKSPACE CHAT (DMs & group conversations)
+    // =============================================
+
+    socket.on('conversation:join', async ({ conversationId }, callback) => {
+      try {
+        const membership = await ConversationMember.findOne({
+          where: { conversationId, userId: socket.user.id }
+        });
+        if (!membership) {
+          callback?.({ success: false, error: 'Not a member of this conversation' });
+          return;
+        }
+        await socket.join(`conversation:${conversationId}`);
+        callback?.({ success: true });
+      } catch (error) {
+        console.error('Conversation join error:', error);
+        callback?.({ success: false, error: 'Error joining conversation' });
+      }
+    });
+
+    socket.on('conversation:leave', ({ conversationId }) => {
+      socket.leave(`conversation:${conversationId}`);
+    });
+
+    socket.on('conversation:typing', ({ conversationId, isTyping }) => {
+      socket.to(`conversation:${conversationId}`).emit('conversation:user-typing', {
+        userId: socket.user.id,
+        userName: socket.user.name,
+        isTyping
+      });
+    });
+
+    // =============================================
+    // PRESENCE & CUSTOM STATUS
+    // =============================================
+
+    socket.on('presence:status-update', async ({ customStatus, statusEmoji, statusExpiresAt }) => {
+      try {
+        await User.update(
+          {
+            customStatus: customStatus || null,
+            statusEmoji: statusEmoji || null,
+            statusExpiresAt: statusExpiresAt ? new Date(statusExpiresAt) : null
+          },
+          { where: { id: socket.user.id } }
+        );
+
+        const payload = {
+          userId: socket.user.id,
+          customStatus: customStatus || null,
+          statusEmoji: statusEmoji || null,
+          statusExpiresAt: statusExpiresAt || null
+        };
+        for (const room of socket.rooms) {
+          if (room !== socket.id && room !== `user:${socket.user.id}`) {
+            io.to(room).emit('presence:status', payload);
+          }
+        }
+      } catch (error) {
+        console.error('Presence status update error:', error);
+      }
+    });
+
     socket.on('disconnect', () => {
       console.log(`User disconnected: ${socket.user.name} (${socket.id})`);
 
@@ -696,7 +775,24 @@ export const initializeSocketHandlers = (io) => {
       }
 
       handleRoomLeave(socket, io);
-      connectedUsers.delete(socket.user.id);
+
+      // Only flip the user offline when their last socket closes
+      const stillConnected = Array.from(io.sockets.sockets.values())
+        .some(s => s !== socket && s.user && s.user.id === socket.user.id);
+
+      if (!stillConnected) {
+        connectedUsers.delete(socket.user.id);
+        User.update(
+          { isOnline: false, lastSeen: new Date() },
+          { where: { id: socket.user.id } }
+        ).catch(() => {});
+
+        for (const room of socket.rooms) {
+          if (room !== socket.id && room !== `user:${socket.user.id}`) {
+            io.to(room).emit('presence:offline', { userId: socket.user.id, name: socket.user.name });
+          }
+        }
+      }
     });
   });
 };

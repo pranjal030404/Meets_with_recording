@@ -17,10 +17,17 @@ const Notification = sequelize.define('Notification', {
       'meeting_reminder',
       'meeting_started',
       'meeting_cancelled',
+      'meeting_summary',
       'team_invite',
       'team_member_added',
       'mention',
-      'chat_message'
+      'chat_message',
+      'dm_message',
+      'group_added',
+      'task_assigned',
+      'task_due',
+      'announcement',
+      'file_shared'
     ),
     allowNull: false
   },

@@ -41,6 +41,24 @@ const User = sequelize.define('User', {
   role: {
     type: DataTypes.ENUM('user', 'admin', 'superadmin'),
     defaultValue: 'user'
+  },
+  customStatus: {
+    type: DataTypes.STRING(100)
+  },
+  statusEmoji: {
+    type: DataTypes.STRING(10)
+  },
+  statusExpiresAt: {
+    type: DataTypes.DATE
+  },
+  timezone: {
+    type: DataTypes.STRING(50)
+  },
+  title: {
+    type: DataTypes.STRING(100)
+  },
+  department: {
+    type: DataTypes.STRING(100)
   }
 }, {
   tableName: 'Users',
