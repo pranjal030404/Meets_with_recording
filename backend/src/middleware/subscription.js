@@ -28,13 +28,13 @@ export const enforceMeetingQuota = async (req, res, next) => {
   }
 };
 
-// Blocks recording uploads when the plan doesn't include recording or the
-// monthly recording minutes are exhausted. `durationMinutes` comes from the
-// upload's duration field when available.
-export const enforceRecordingLimit = async (req, res, next) => {
+// Cheap pre-upload gate: rejects users whose plan doesn't include recording
+// at all, before any bytes are received. The per-period minutes check needs
+// the multipart-parsed duration, so it runs later in the recordings route
+// (see assertCanRecord there).
+export const enforceRecordingAllowed = async (req, res, next) => {
   try {
-    const duration = Number(req.body?.duration) || 0;
-    const result = await assertCanRecord(req.user.id, duration);
+    const result = await assertCanRecord(req.user.id, 0);
 
     if (!result.allowed) {
       return res.status(403).json({

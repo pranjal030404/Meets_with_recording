@@ -10,8 +10,8 @@ import Team from '../models/Team.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
-import { enforceMeetingQuota, enforceRecordingLimit } from '../middleware/subscription.js';
-import { recordUsage } from '../services/subscriptionService.js';
+import { enforceMeetingQuota, enforceRecordingAllowed } from '../middleware/subscription.js';
+import { recordUsage, assertCanRecord } from '../services/subscriptionService.js';
 import { saveMeetingRecording } from '../services/recordingService.js';
 
 const router = express.Router();
@@ -531,7 +531,7 @@ router.post('/:roomId/end', protect, async (req, res) => {
   }
 });
 
-router.post('/:roomId/recordings', protect, enforceRecordingLimit, recordingUpload.single('recording'), async (req, res) => {
+router.post('/:roomId/recordings', protect, enforceRecordingAllowed, recordingUpload.single('recording'), async (req, res) => {
   try {
     const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
@@ -562,6 +562,19 @@ router.post('/:roomId/recordings', protect, enforceRecordingLimit, recordingUplo
 
     const duration = Number(req.body.duration);
     const language = req.body.language || process.env.TRANSCRIPTION_LANGUAGE || 'en';
+
+    // Minutes check needs the multipart-parsed duration, so it happens here —
+    // after upload, before the recording is persisted. Temp file is removed on reject.
+    const minutesCheck = await assertCanRecord(req.user.id, Number.isFinite(duration) ? duration / 60 : 0);
+    if (!minutesCheck.allowed) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(403).json({
+        success: false,
+        message: minutesCheck.reason,
+        code: 'PLAN_LIMIT_REACHED',
+        data: { plan: minutesCheck.subscription.plan, limits: minutesCheck.limits }
+      });
+    }
 
     const result = await saveMeetingRecording({
       roomId: meeting.roomId,

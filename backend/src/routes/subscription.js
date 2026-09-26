@@ -92,12 +92,13 @@ router.post('/subscribe', protect, async (req, res) => {
     );
 
     const details = await getSubscriptionDetails(req.user.id);
+    const planName = details.subscription.plan?.name || planSlug;
 
     res.json({
       success: true,
       message: payment
-        ? `Subscribed to the ${subscription.plan.name} plan successfully`
-        : `Switched to the ${subscription.plan.name} plan`,
+        ? `Subscribed to the ${planName} plan successfully`
+        : `Switched to the ${planName} plan`,
       data: {
         subscription: details.subscription,
         plan: details.subscription.plan,
