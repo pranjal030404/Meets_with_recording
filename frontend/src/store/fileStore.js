@@ -40,13 +40,14 @@ export const useFileStore = create((set, get) => ({
     } catch { /* non-fatal */ }
   },
 
-  upload: async (file, { teamId, conversationId } = {}) => {
+  upload: async (file, { teamId, conversationId, roomId } = {}) => {
     set({ isUploading: true });
     try {
       const formData = new FormData();
       formData.append('file', file);
       if (teamId) formData.append('teamId', teamId);
       if (conversationId) formData.append('conversationId', conversationId);
+      if (roomId) formData.append('roomId', roomId);
 
       const res = await api.post('/files/upload', formData);
       const entry = res.data.data.file;

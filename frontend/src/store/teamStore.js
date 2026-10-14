@@ -188,13 +188,14 @@ const useTeamStore = create((set, get) => ({
   },
 
   // Send team message
-  sendTeamMessage: async (teamId, channelType, content, type = 'text', meetingId = null) => {
+  sendTeamMessage: async (teamId, channelType, content, type = 'text', meetingId = null, attachment = null) => {
     try {
       const response = await api.post(`/chat/team/${teamId}/messages`, {
         content,
         channelType,
         type,
-        meetingId
+        meetingId,
+        attachment: attachment && attachment.fileId ? attachment : undefined
       });
       
       const message = response.data.data.message;

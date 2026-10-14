@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { User, Mail, Lock, Eye, EyeOff, Video, ShieldCheck, Sparkles, Radio, Globe, ArrowRight, Check } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
+import branding from '../config/branding'
+import BrandMark from '../components/BrandMark'
 import toast from 'react-hot-toast'
 
 const PERKS = [
@@ -59,7 +61,7 @@ export default function Signup() {
           <section className="hidden lg:flex flex-col justify-center animate-fade-in-up stagger-1">
             <div className="inline-flex items-center gap-2 self-start rounded-full border border-primary-400/30 bg-primary-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary-200 animate-fade-in stagger-2">
               <Sparkles className="h-4 w-4" />
-              Join MeetClone
+              Join {branding.appName}
             </div>
 
             <h1 className="mt-6 text-4xl font-bold leading-tight text-white font-display animate-fade-in-up stagger-2 xl:text-5xl">
@@ -103,9 +105,7 @@ export default function Signup() {
             <div className="pointer-events-none absolute -right-16 -top-16 h-52 w-52 rounded-full bg-primary-600/10 blur-3xl" />
 
             <div className="mb-8 text-center lg:text-left">
-              <div className="mx-auto lg:mx-0 mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 shadow-lg shadow-primary-500/30 group">
-                <Video className="h-7 w-7 text-white transition-transform duration-300 group-hover:scale-110" />
-              </div>
+              <BrandMark size="lg" className="mx-auto lg:mx-0 mb-4 group" />
               <h2 className="text-2xl font-bold text-white font-display">Create your account</h2>
               <p className="text-sm text-slate-400 mt-1">Free forever for personal meetings</p>
             </div>

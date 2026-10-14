@@ -5,6 +5,8 @@ import {
   Clock, CreditCard, Shield, LogOut, Menu, X, Search, ChevronDown, SmilePlus, Check
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
+import branding from '../config/branding'
+import BrandMark from './BrandMark'
 import { useConversationStore, bindConversationSocket } from '../store/conversationStore'
 import { usePresenceStore, bindPresenceSocket } from '../store/presenceStore'
 import NotificationBell from './NotificationBell'
@@ -97,10 +99,8 @@ export default function AppShell({ children, wide = false }) {
     <div className="flex flex-col h-full">
       {/* Brand */}
       <Link to="/app" className="flex items-center gap-3 px-5 py-5 group" onClick={() => setSidebarOpen(false)}>
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center shadow-lg shadow-primary-500/30 transition-transform duration-300 group-hover:scale-105">
-          <Video className="w-5 h-5 text-white" />
-        </div>
-        <span className="text-lg font-bold font-display tracking-tight">MeetClone</span>
+        <BrandMark />
+        <span className="text-lg font-bold font-display tracking-tight">{branding.appName}</span>
       </Link>
 
       {/* Search shortcut */}
@@ -260,10 +260,8 @@ export default function AppShell({ children, wide = false }) {
           <Menu className="w-6 h-6" />
         </button>
         <Link to="/app" className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center">
-            <Video className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-bold font-display">MeetClone</span>
+          <BrandMark size="sm" />
+          <span className="font-bold font-display">{branding.appName}</span>
         </Link>
         <NotificationBell />
       </div>

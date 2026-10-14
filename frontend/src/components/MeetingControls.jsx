@@ -27,6 +27,8 @@ export default function MeetingControls({
   isScreenSharing,
   isRecording,
   isHost,
+  isCoHost,
+  canManage,
   isHandRaised,
   showChat,
   showParticipants,
@@ -44,6 +46,7 @@ export default function MeetingControls({
   onLeave,
   onOpenSettings,
   onOpenMeetingSettings,
+  onOpenMeetingDetails,
   onTogglePiP,
   onOpenWhiteboard,
   isPiP,
@@ -208,8 +211,14 @@ export default function MeetingControls({
                 label="Whiteboard"
                 onClick={() => { onOpenWhiteboard(); setShowMore(false) }}
               />
-              {/* Meeting Settings (host only) */}
-              {isHost && (
+              {/* Meeting Details */}
+              <MoreMenuItem
+                icon={<Shield className="w-4 h-4" />}
+                label="Meeting details"
+                onClick={() => { onOpenMeetingDetails && onOpenMeetingDetails(); setShowMore(false) }}
+              />
+              {/* Meeting Settings */}
+              {((canManage) || (isHost || isCoHost)) && (
                 <MoreMenuItem
                   icon={<Shield className="w-4 h-4" />}
                   label="Meeting settings"

@@ -7,11 +7,12 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useConversationStore } from '../store/conversationStore'
-import { useFileStore } from '../store/fileStore'
 import { useTaskStore } from '../store/taskStore'
 import { useMeetingStore } from '../store/meetingStore'
 import { usePresenceStore } from '../store/presenceStore'
 import AppShell from '../components/AppShell'
+import FileAttachment from '../components/FileAttachment'
+import useChatUpload from '../hooks/useChatUpload'
 import toast from 'react-hot-toast'
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '👀', '✅']
@@ -279,13 +280,15 @@ function ConversationView({
   const [editDraft, setEditDraft] = useState('')
   const [reactionFor, setReactionFor] = useState(null)
   const [menuFor, setMenuFor] = useState(null)
-  const [file, setFile] = useState(null)
   const scrollRef = useRef(null)
-  const fileInputRef = useRef(null)
   const typingTimeoutRef = useRef(null)
   const { statuses } = usePresenceStore()
 
-  const uploadFile = useFileStore(s => s.upload)
+  // File attachment support (uploads scoped to this conversation)
+  const {
+    fileInputRef, pendingFile, isUploading, progress,
+    pick, clearPending, onFileChange, sendAttachment,
+  } = useChatUpload(() => ({ conversationId: conversation.id }))
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -316,22 +319,20 @@ function ConversationView({
   }
 
   const handleSendFile = async () => {
-    if (!file) return
-    const res = await uploadFile(file, { conversationId: conversation.id })
-    if (res.success) {
-      await onSend({
-        content: file.name,
-        type: 'file',
-        fileUrl: res.file.url,
-        fileName: res.file.originalName,
-        fileType: res.file.mimeType,
-        fileSize: Number(res.file.size)
-      })
-      setFile(null)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    } else {
-      toast.error(res.message)
+    const file = await sendAttachment()
+    if (!file) {
+      toast.error('File upload failed')
+      return
     }
+    await onSend({
+      content: file.originalName,
+      type: 'file',
+      fileUrl: file.url,
+      fileName: file.originalName,
+      fileType: file.mimeType,
+      fileSize: Number(file.size)
+    })
+    clearPending()
   }
 
   const startEdit = (m) => {
@@ -455,12 +456,18 @@ function ConversationView({
 
       {/* Composer */}
       <div className="shrink-0 border-t border-white/[0.06] bg-dark-200/40 backdrop-blur-sm p-4">
-        {file && (
+        {pendingFile && (
           <div className="flex items-center gap-2 mb-2 rounded-xl bg-dark-300/60 border border-white/[0.06] px-3 py-2 max-w-sm">
             <Paperclip className="w-4 h-4 text-primary-300" />
-            <span className="text-sm text-gray-300 truncate flex-1">{file.name}</span>
-            <button onClick={() => setFile(null)} className="text-gray-500 hover:text-red-400"><X className="w-4 h-4" /></button>
-            <button onClick={handleSendFile} className="btn btn-primary !px-3 !py-1.5 text-xs">Send file</button>
+            <span className="text-sm text-gray-300 truncate flex-1">{pendingFile.name}</span>
+            {isUploading ? (
+              <span className="text-xs text-primary-300 flex items-center gap-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</span>
+            ) : (
+              <>
+                <button onClick={clearPending} className="text-gray-500 hover:text-red-400"><X className="w-4 h-4" /></button>
+                <button onClick={handleSendFile} className="btn btn-primary !px-3 !py-1.5 text-xs">Send file</button>
+              </>
+            )}
           </div>
         )}
         <div className="flex items-end gap-2">
@@ -468,11 +475,12 @@ function ConversationView({
             ref={fileInputRef}
             type="file"
             className="hidden"
-            onChange={(e) => setFile(e.target.files[0] || null)}
+            onChange={onFileChange}
           />
           <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-all"
+            onClick={pick}
+            disabled={isUploading}
+            className="p-2.5 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-all disabled:opacity-50"
             title="Attach a file"
           >
             <Paperclip className="w-5 h-5" />
@@ -557,15 +565,12 @@ function MessageRow({
         ) : m.type === 'meeting_link' && m.meetingData ? (
           <MeetingCard data={m.meetingData} />
         ) : m.type === 'file' && m.fileUrl ? (
-          <a
-            href={`${import.meta.env.DEV ? 'http://localhost:5000' : ''}${m.fileUrl}`}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-1 inline-flex items-center gap-2.5 rounded-xl bg-dark-300/60 border border-white/[0.08] px-4 py-2.5 hover:border-primary-500/40 transition-colors"
-          >
-            <Paperclip className="w-4 h-4 text-primary-300" />
-            <span className="text-sm text-gray-200">{m.fileName}</span>
-          </a>
+          <FileAttachment
+            fileUrl={m.fileUrl}
+            fileName={m.fileName}
+            fileType={m.fileType}
+            fileSize={m.fileSize}
+          />
         ) : (
           <p className={`text-sm mt-0.5 whitespace-pre-wrap break-words ${m.isDeleted ? 'text-gray-600 italic' : 'text-gray-300'}`}>
             {m.content}

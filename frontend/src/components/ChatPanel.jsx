@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Send, Smile, Paperclip, Reply } from 'lucide-react'
+import { X, Send, Smile, Paperclip, Reply, Loader2 } from 'lucide-react'
 import { useChatStore } from '../store/chatStore'
 import { useAuthStore } from '../store/authStore'
 import { getSocket } from '../lib/socket'
+import FileAttachment from './FileAttachment'
+import useChatUpload from '../hooks/useChatUpload'
+import toast from 'react-hot-toast'
 
 const CHAT_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🔥', '👏', '🤔', '💯']
 
@@ -16,6 +19,12 @@ export default function ChatPanel({ roomId, onClose }) {
   const messagesEndRef = useRef(null)
   const typingTimeoutRef = useRef(null)
   const emojiPickerRef = useRef(null)
+
+  // File attachment support (uploads scoped to this meeting via roomId)
+  const {
+    fileInputRef, pendingFile, setPendingFile, isUploading,
+    pick, clearPending, onFileChange, sendAttachment,
+  } = useChatUpload(() => ({ roomId }))
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -38,7 +47,37 @@ export default function ChatPanel({ roomId, onClose }) {
 
   const handleSendMessage = async (e) => {
     e.preventDefault()
-    
+
+    // Attachment-only or attachment+text send
+    if (pendingFile) {
+      const socket = getSocket()
+      const file = await sendAttachment()
+      if (!file) {
+        toast.error('File upload failed')
+        return
+      }
+      if (socket) {
+        const payload = {
+          roomId,
+          content: newMessage.trim(),
+          attachment: {
+            fileId: file.id,
+            url: file.url,
+            name: file.originalName,
+            mimeType: file.mimeType,
+            size: Number(file.size),
+          },
+        }
+        if (replyingTo) payload.replyTo = replyingTo._id
+        socket.emit('chat:send', payload)
+      }
+      clearPending()
+      setNewMessage('')
+      setReplyingTo(null)
+      handleStopTyping()
+      return
+    }
+
     if (!newMessage.trim()) return
 
     const socket = getSocket()
@@ -122,13 +161,22 @@ export default function ChatPanel({ roomId, onClose }) {
 
                   <div className="relative">
                     <div className={`chat-message ${isOwn ? 'own' : 'other'}`}>
-                      <p className="text-sm break-words">
-                        {message.isDeleted ? (
-                          <span className="italic text-gray-400">{message.content}</span>
-                        ) : (
-                          message.content
-                        )}
-                      </p>
+                      {message.type === 'file' && message.fileUrl ? (
+                        <FileAttachment
+                          fileUrl={message.fileUrl}
+                          fileName={message.fileName}
+                          fileType={message.fileType}
+                          fileSize={message.fileSize}
+                        />
+                      ) : (
+                        <p className="text-sm break-words">
+                          {message.isDeleted ? (
+                            <span className="italic text-gray-400">{message.content}</span>
+                          ) : (
+                            message.content
+                          )}
+                        </p>
+                      )}
                       <span className="text-xs text-gray-400 mt-1 block">{formatTime(message.createdAt)}</span>
                     </div>
 
@@ -170,6 +218,21 @@ export default function ChatPanel({ roomId, onClose }) {
         </div>
       )}
 
+      {/* Pending attachment preview bar */}
+      {pendingFile && (
+        <div className="px-4 py-2 bg-dark-300 border-t border-dark-400 flex items-center gap-2">
+          <Paperclip className="w-4 h-4 text-primary-400 flex-shrink-0" />
+          <span className="flex-1 min-w-0 text-xs text-gray-300 truncate">{pendingFile.name}</span>
+          {isUploading ? (
+            <Loader2 className="w-4 h-4 text-primary-300 animate-spin" />
+          ) : (
+            <button onClick={clearPending} className="p-0.5 hover:bg-dark-400 rounded">
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Input */}
       <form onSubmit={handleSendMessage} className="p-3 border-t border-dark-400">
         <div className="flex gap-2 items-end">
@@ -190,13 +253,28 @@ export default function ChatPanel({ roomId, onClose }) {
             )}
           </div>
           <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={onFileChange}
+          />
+          <button
+            type="button"
+            onClick={pick}
+            disabled={isUploading}
+            className="p-2 hover:bg-dark-400 rounded-lg transition-colors disabled:opacity-50"
+            title="Attach a file"
+          >
+            <Paperclip className="w-5 h-5 text-gray-400" />
+          </button>
+          <input
             type="text"
             value={newMessage}
             onChange={(e) => { setNewMessage(e.target.value); handleTyping() }}
             placeholder="Type a message..."
             className="flex-1 bg-dark-300 border border-dark-400 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary-500"
           />
-          <button type="submit" disabled={!newMessage.trim()}
+          <button type="submit" disabled={!newMessage.trim() && !pendingFile}
             className="p-2 bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
             <Send className="w-5 h-5" />
           </button>

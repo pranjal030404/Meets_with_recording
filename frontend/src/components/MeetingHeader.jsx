@@ -1,4 +1,4 @@
-import { Clock, Copy, Users, Grid3X3, Presentation, LayoutPanelLeft, Hand, Circle, Video } from 'lucide-react'
+import { Clock, Copy, Users, Grid3X3, Presentation, LayoutPanelLeft, Hand, Circle, Video, Info } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 const LAYOUTS = [
@@ -15,7 +15,8 @@ export default function MeetingHeader({
   isBeingRecorded,
   layout,
   onLayoutChange,
-  handRaisedCount
+  handRaisedCount,
+  onOpenDetails
 }) {
   const [elapsedTime, setElapsedTime] = useState(0)
   const [copied, setCopied] = useState(false)
@@ -110,6 +111,15 @@ export default function MeetingHeader({
           <Copy className={`w-4 h-4 transition-all duration-300 ${copied ? 'text-green-400 scale-110' : 'text-gray-400 group-hover:text-primary-300'}`} />
           <span className="hidden md:inline font-mono text-xs text-gray-300">{roomId}</span>
         </button>
+        {onOpenDetails && (
+          <button
+            onClick={onOpenDetails}
+            className="p-2 bg-dark-300/80 border border-white/[0.06] hover:border-primary-500/40 hover:bg-dark-400 rounded-xl text-sm transition-all duration-300 hover:shadow-glow"
+            title="Meeting details"
+          >
+            <Info className="w-4 h-4 text-gray-400 group-hover:text-primary-300" />
+          </button>
+        )}
       </div>
     </header>
   )

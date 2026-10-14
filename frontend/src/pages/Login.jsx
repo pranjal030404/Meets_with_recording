@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Video, ShieldCheck, Radio, Sparkles, Users, Globe, ArrowRight } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
+import branding from '../config/branding'
+import BrandMark from '../components/BrandMark'
 import toast from 'react-hot-toast'
 
 export default function Login() {
@@ -46,7 +48,7 @@ export default function Login() {
             </div>
 
             <h1 className="text-4xl font-bold leading-tight text-white font-display animate-fade-in-up stagger-2 sm:text-5xl">
-              MeetClone
+              {branding.appName}
               <span className="block mt-2 gradient-text">
                 Built for focused conversations
               </span>
@@ -80,9 +82,7 @@ export default function Login() {
             <div className="pointer-events-none absolute -left-16 bottom-0 h-52 w-52 rounded-full bg-primary-600/10 blur-3xl" />
 
             <div className="mb-8 flex items-center gap-4">
-              <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 shadow-lg shadow-primary-500/30 group">
-                <Video className="h-7 w-7 text-white transition-transform duration-300 group-hover:scale-110" />
-              </div>
+              <BrandMark size="lg" className="group" />
               <div>
                 <h2 className="text-2xl font-bold text-white font-display">Welcome Back</h2>
                 <p className="text-sm text-slate-400">Sign in to continue your meeting flow</p>

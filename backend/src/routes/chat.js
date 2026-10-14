@@ -5,6 +5,7 @@ import Meeting from '../models/Meeting.js';
 import Team from '../models/Team.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
+import FileEntry from '../models/FileEntry.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -73,9 +74,29 @@ router.get('/:roomId/messages', protect, async (req, res) => {
 
 router.post('/:roomId/messages', protect, async (req, res) => {
   try {
-    const { content, recipientId, type = 'text' } = req.body;
+    const { content, recipientId, type = 'text', attachment } = req.body;
 
-    if (!content || content.trim() === '') {
+    // Optional file attachment — must reference a file this user uploaded
+    // to this meeting (avoids forging attachments to arbitrary files).
+    let file = null;
+    if (attachment && attachment.fileId) {
+      const meetingForFile = await Meeting.findOne({ where: { roomId: req.params.roomId } });
+      file = meetingForFile
+        ? await FileEntry.findOne({
+            where: {
+              id: attachment.fileId,
+              ownerId: req.user.id,
+              meetingId: meetingForFile.id,
+              isDeleted: false
+            }
+          })
+        : null;
+      if (!file) {
+        return res.status(403).json({ success: false, message: 'Attachment not found or not yours' });
+      }
+    }
+
+    if ((!content || content.trim() === '') && !file) {
       return res.status(400).json({
         success: false,
         message: 'Message content is required'
@@ -101,10 +122,17 @@ router.post('/:roomId/messages', protect, async (req, res) => {
     const messageData = {
       meetingId: meeting.id,
       senderId: req.user.id,
-      content: content.trim(),
-      type,
+      content: (content || '').trim() || (file ? file.originalName : ''),
+      type: file ? 'file' : type,
       isPrivate: !!recipientId
     };
+
+    if (file) {
+      messageData.fileUrl = file.url;
+      messageData.fileName = file.originalName;
+      messageData.fileType = file.mimeType;
+      messageData.fileSize = file.size;
+    }
 
     if (recipientId) {
       messageData.recipientId = recipientId;
@@ -291,9 +319,26 @@ router.get('/team/:teamId/messages', protect, async (req, res) => {
 
 router.post('/team/:teamId/messages', protect, async (req, res) => {
   try {
-    const { content, channelType = 'general', type = 'text', meetingId } = req.body;
+    const { content, channelType = 'general', type = 'text', meetingId, attachment } = req.body;
 
-    if (!content || content.trim() === '') {
+    // Optional file attachment — must reference a file this user uploaded
+    // to this team (avoids forging attachments to arbitrary files).
+    let file = null;
+    if (attachment && attachment.fileId) {
+      file = await FileEntry.findOne({
+        where: {
+          id: attachment.fileId,
+          ownerId: req.user.id,
+          teamId: req.params.teamId,
+          isDeleted: false
+        }
+      });
+      if (!file) {
+        return res.status(403).json({ success: false, message: 'Attachment not found or not yours' });
+      }
+    }
+
+    if ((!content || content.trim() === '') && !file) {
       return res.status(400).json({
         success: false,
         message: 'Message content is required'
@@ -322,10 +367,17 @@ router.post('/team/:teamId/messages', protect, async (req, res) => {
       teamId: team.id,
       channelType,
       senderId: req.user.id,
-      content: content.trim(),
-      type,
+      content: (content || '').trim() || (file ? file.originalName : ''),
+      type: file ? 'file' : type,
       mentions
     };
+
+    if (file) {
+      messageData.fileUrl = file.url;
+      messageData.fileName = file.originalName;
+      messageData.fileType = file.mimeType;
+      messageData.fileSize = file.size;
+    }
 
     if (type === 'meeting_link' && meetingId) {
       const meeting = await Meeting.findByPk(meetingId);

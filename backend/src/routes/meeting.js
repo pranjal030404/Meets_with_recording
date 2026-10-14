@@ -13,6 +13,7 @@ import { protect } from '../middleware/auth.js';
 import { enforceMeetingQuota, enforceRecordingAllowed } from '../middleware/subscription.js';
 import { recordUsage, assertCanRecord } from '../services/subscriptionService.js';
 import { saveMeetingRecording } from '../services/recordingService.js';
+import { canManageMeeting } from '../lib/meetingPermissions.js';
 
 const router = express.Router();
 
@@ -348,13 +349,16 @@ router.post('/:roomId/join', protect, async (req, res) => {
     );
 
     if (!existingParticipant) {
+      const previousEntry = participants.find(
+        p => p.userId === req.user.id && p.role === 'co-host'
+      );
       meeting.participants = [
         ...participants,
         {
           id: uuidv4(),
           userId: req.user.id,
           user: { id: req.user.id, name: req.user.name, email: req.user.email, avatar: req.user.avatar },
-          role: 'participant',
+          role: previousEntry ? 'co-host' : 'participant',
           joinedAt: new Date().toISOString(),
           isMuted: meeting.settings && meeting.settings.muteOnEntry
         }
@@ -440,10 +444,10 @@ router.put('/:roomId/settings', protect, async (req, res) => {
       });
     }
 
-    if (meeting.hostId !== req.user.id) {
+    if (!canManageMeeting(meeting, req.user.id)) {
       return res.status(403).json({
         success: false,
-        message: 'Only the host can update meeting settings'
+        message: 'Only the host or a co-host can update meeting settings'
       });
     }
 
@@ -482,10 +486,10 @@ router.post('/:roomId/end', protect, async (req, res) => {
       });
     }
 
-    if (meeting.hostId !== req.user.id) {
+    if (!canManageMeeting(meeting, req.user.id)) {
       return res.status(403).json({
         success: false,
-        message: 'Only the host can end the meeting'
+        message: 'Only the host or a co-host can end the meeting'
       });
     }
 
@@ -628,10 +632,10 @@ router.post('/:roomId/invite', protect, async (req, res) => {
       });
     }
 
-    if (meeting.hostId !== req.user.id) {
+    if (!canManageMeeting(meeting, req.user.id)) {
       return res.status(403).json({
         success: false,
-        message: 'Only the host can invite participants'
+        message: 'Only the host or a co-host can invite participants'
       });
     }
 
@@ -765,10 +769,10 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
       });
     }
 
-    if (meeting.hostId !== req.user.id) {
+    if (!canManageMeeting(meeting, req.user.id)) {
       return res.status(403).json({
         success: false,
-        message: 'Only the host can cancel the meeting'
+        message: 'Only the host or a co-host can cancel the meeting'
       });
     }
 

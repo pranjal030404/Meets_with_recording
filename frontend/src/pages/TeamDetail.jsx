@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Users, Hash, Copy, Check, UserPlus, ArrowLeft,
-  Shield, Trash2, MessageSquare, Video, Send, Sparkles
+  Shield, Trash2, MessageSquare, Video, Send, Sparkles,
+  Paperclip, X, Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useTeamStore from '../store/teamStore';
 import { useAuthStore } from '../store/authStore';
 import { getSocket } from '../lib/socket';
+import FileAttachment from '../components/FileAttachment';
+import useChatUpload from '../hooks/useChatUpload';
 
 const TeamDetail = () => {
   const { teamId } = useParams();
@@ -36,6 +39,12 @@ const TeamDetail = () => {
   const [showMembers, setShowMembers] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
   const [teamFetched, setTeamFetched] = useState(false);
+
+  // File attachment support (uploads scoped to this team)
+  const {
+    fileInputRef, pendingFile, isUploading,
+    pick, clearPending, onFileChange, sendAttachment,
+  } = useChatUpload(() => ({ teamId }));
 
   // Fetch team data only when teamId changes
   useEffect(() => {
@@ -134,6 +143,28 @@ const TeamDetail = () => {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
+
+    if (pendingFile) {
+      const file = await sendAttachment();
+      if (!file) {
+        toast.error('File upload failed');
+        return;
+      }
+      try {
+        await sendTeamMessage(teamId, activeChannel, '', 'file', null, {
+          fileId: file.id,
+          url: file.url,
+          name: file.originalName,
+          mimeType: file.mimeType,
+          size: Number(file.size),
+        });
+        clearPending();
+      } catch {
+        toast.error('Failed to send file');
+      }
+      return;
+    }
+
     if (!messageInput.trim()) return;
 
     try {
@@ -320,7 +351,16 @@ const TeamDetail = () => {
                         {new Date(msg.createdAt).toLocaleTimeString()}
                       </span>
                     </div>
-                    <p className="text-gray-300 mt-1 leading-relaxed">{msg.content}</p>
+                    {msg.type === 'file' && msg.fileUrl ? (
+                      <FileAttachment
+                        fileUrl={msg.fileUrl}
+                        fileName={msg.fileName}
+                        fileType={msg.fileType}
+                        fileSize={msg.fileSize}
+                      />
+                    ) : (
+                      <p className="text-gray-300 mt-1 leading-relaxed">{msg.content}</p>
+                    )}
                     {msg.type === 'meeting_link' && msg.meetingData && (
                       <div className="mt-2.5 p-4 gradient-border rounded-xl max-w-md">
                         <div className="flex items-center gap-2 mb-1.5">
@@ -348,8 +388,37 @@ const TeamDetail = () => {
 
           {/* Message Input */}
           <div className="border-t border-white/[0.05] p-4 bg-dark-200/60">
+            {pendingFile && (
+              <div className="flex items-center gap-2 mb-2 rounded-xl bg-dark-300/60 border border-white/[0.06] px-3 py-2 max-w-sm">
+                <Paperclip className="w-4 h-4 text-primary-300" />
+                <span className="text-sm text-gray-300 truncate flex-1">{pendingFile.name}</span>
+                {isUploading ? (
+                  <span className="text-xs text-primary-300 flex items-center gap-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</span>
+                ) : (
+                  <>
+                    <button type="button" onClick={clearPending} className="text-gray-500 hover:text-red-400"><X className="w-4 h-4" /></button>
+                    <button type="button" onClick={handleSendMessage} className="btn btn-primary !px-3 !py-1.5 text-xs">Send file</button>
+                  </>
+                )}
+              </div>
+            )}
             <form onSubmit={handleSendMessage}>
               <div className="flex gap-2.5 group">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={onFileChange}
+                />
+                <button
+                  type="button"
+                  onClick={pick}
+                  disabled={isUploading}
+                  className="p-2.5 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-all disabled:opacity-50"
+                  title="Attach a file"
+                >
+                  <Paperclip className="w-5 h-5" />
+                </button>
                 <input
                   type="text"
                   value={messageInput}
@@ -360,7 +429,7 @@ const TeamDetail = () => {
                 <button
                   type="submit"
                   className="btn btn-primary !px-4"
-                  disabled={!messageInput.trim()}
+                  disabled={!messageInput.trim() && !pendingFile}
                   title="Send message"
                 >
                   <Send className="w-4 h-4" />

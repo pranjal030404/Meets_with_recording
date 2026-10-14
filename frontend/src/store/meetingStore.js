@@ -13,6 +13,8 @@ export const useMeetingStore = create((set, get) => ({
   meetings: [],
   participants: [],
   isHost: false,
+  isCoHost: false,
+  myRole: 'participant',
   isLoading: false,
   error: null,
 
@@ -73,7 +75,7 @@ export const useMeetingStore = create((set, get) => ({
     try {
       const response = await api.post('/meetings', data)
       const { meeting } = response.data.data
-      set({ currentMeeting: meeting, isHost: true, isLoading: false })
+      set({ currentMeeting: meeting, isHost: true, isCoHost: false, myRole: 'host', isLoading: false })
       return { success: true, meeting }
     } catch (error) {
       const message = error.response?.data?.message || 'Failed to create meeting'
@@ -135,7 +137,7 @@ export const useMeetingStore = create((set, get) => ({
     if (mediasoupClient) { mediasoupClient.closeAll(); mediasoupClient = null }
 
     set({
-      currentMeeting: null, participants: [], isHost: false,
+      currentMeeting: null, participants: [], isHost: false, isCoHost: false, myRole: 'participant',
       localStream: null, screenStream: null,
       isMuted: false, isVideoOff: false, isScreenSharing: false,
       isRecording: false, mediasoupReady: false,
@@ -759,6 +761,8 @@ export const useMeetingStore = create((set, get) => ({
 
   setParticipants: (participants) => set({ participants }),
   setIsHost: (isHost) => set({ isHost }),
+  setIsCoHost: (isCoHost) => set({ isCoHost }),
+  setMyRole: (myRole) => set({ myRole }),
 
   addParticipant: (participant) => {
     const { participants } = get()

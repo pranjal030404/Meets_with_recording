@@ -4,7 +4,8 @@ import { getSocket } from '../lib/socket'
 import { useMeetingStore } from '../store/meetingStore'
 import toast from 'react-hot-toast'
 
-export default function MeetingSettingsPanel({ meeting, isHost, isMeetingLocked, onClose }) {
+export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canManage, isMeetingLocked, onClose }) {
+  const manage = canManage !== undefined ? canManage : (isHost || isCoHost)
   const { toggleMeetingLock, lowerAllHands } = useMeetingStore()
   const [settings, setSettings] = useState({
     waitingRoom: meeting?.settings?.waitingRoom || false,
@@ -52,7 +53,7 @@ export default function MeetingSettingsPanel({ meeting, isHost, isMeetingLocked,
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {isHost ? (
+        {manage ? (
           <>
             {/* Host Actions */}
             <div className="space-y-2">
@@ -103,7 +104,7 @@ export default function MeetingSettingsPanel({ meeting, isHost, isMeetingLocked,
         ) : (
           <div className="text-center text-gray-400 py-8">
             <Shield className="w-10 h-10 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">Only the host can manage meeting settings</p>
+            <p className="text-sm">Only the host or a co-host can manage meeting settings</p>
           </div>
         )}
       </div>

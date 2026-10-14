@@ -21,6 +21,8 @@ import {
   LogIn,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
+import branding, { pageTitle, copyrightHolder } from '../config/branding'
+import BrandMark from '../components/BrandMark'
 
 const FEATURES = [
   {
@@ -121,10 +123,8 @@ export default function Landing() {
         <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary-400/30 to-transparent" />
         <nav className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center shadow-lg shadow-primary-500/30 transition-transform duration-300 group-hover:scale-105">
-              <Video className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold font-display tracking-tight">MeetClone</span>
+            <BrandMark />
+            <span className="text-xl font-bold font-display tracking-tight">{branding.appName}</span>
           </Link>
 
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-gray-400">
@@ -169,7 +169,7 @@ export default function Landing() {
         </h1>
 
         <p className="mt-7 text-lg text-gray-400 max-w-2xl mx-auto leading-relaxed animate-fade-in-up stagger-2">
-          MeetClone gives your team everything a modern meeting app should have — video calls, screen sharing, recordings with AI transcripts, live chat, whiteboards, and scheduling. Free to start.
+          {branding.appName} gives your team everything a modern meeting app should have — video calls, screen sharing, recordings with AI transcripts, live chat, whiteboards, and scheduling. Free to start.
         </p>
 
         <div className="mt-10 flex flex-wrap items-center justify-center gap-4 animate-fade-in-up stagger-3">
@@ -269,7 +269,7 @@ export default function Landing() {
             One app for <span className="gradient-text">every meeting need</span>
           </h2>
           <p className="text-gray-400 mt-5 max-w-2xl mx-auto leading-relaxed">
-            From quick standups to full lectures — MeetClone ships with the tools other apps make you pay for.
+            From quick standups to full lectures — {branding.appName} ships with the tools other apps make you pay for.
           </p>
         </div>
 
@@ -410,7 +410,7 @@ export default function Landing() {
             <div className="flex flex-wrap justify-center gap-4">
               {isAuthenticated ? (
                 <Link to="/app" className="btn btn-primary px-8 py-4 text-base">
-                  Open MeetClone
+                  Open {branding.appName}
                   <ArrowRight className="w-5 h-5" />
                 </Link>
               ) : (
@@ -433,17 +433,15 @@ export default function Landing() {
       <footer className="relative border-t border-white/[0.06] mt-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center shadow-lg shadow-primary-500/25">
-              <Video className="w-4.5 h-4.5 text-white" />
-            </div>
+            <BrandMark size="sm" />
             <div>
-              <p className="font-semibold font-display">MeetClone</p>
-              <p className="text-xs text-gray-500">Professional video meetings for everyone</p>
+              <p className="font-semibold font-display">{branding.appName}</p>
+              <p className="text-xs text-gray-500">{branding.tagline} for everyone</p>
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <Clock className="w-4 h-4 text-primary-400/70" />
-            © {new Date().getFullYear()} MeetClone · Built for teams, classes, and everyone in between
+            © {new Date().getFullYear()} {copyrightHolder} · Built for teams, classes, and everyone in between
           </div>
         </div>
       </footer>

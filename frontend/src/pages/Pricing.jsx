@@ -4,6 +4,8 @@ import { Video, Check, Sparkles, ArrowRight, ShieldCheck, Loader2 } from 'lucide
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../store/authStore'
 import { useSubscriptionStore } from '../store/subscriptionStore'
+import branding from '../config/branding'
+import BrandMark from '../components/BrandMark'
 
 export default function Pricing() {
   const navigate = useNavigate()
@@ -59,10 +61,8 @@ export default function Pricing() {
         <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary-400/30 to-transparent" />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center shadow-lg shadow-primary-500/30 transition-all duration-300 group-hover:scale-105">
-              <Video className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold font-display tracking-tight">MeetClone</span>
+            <BrandMark />
+            <span className="text-xl font-bold font-display tracking-tight">{branding.appName}</span>
           </Link>
           <div className="flex items-center gap-2">
             {isAuthenticated ? (

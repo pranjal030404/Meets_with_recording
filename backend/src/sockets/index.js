@@ -4,7 +4,9 @@ import Message from '../models/Message.js';
 import Team from '../models/Team.js';
 import User from '../models/User.js';
 import ConversationMember from '../models/ConversationMember.js';
+import FileEntry from '../models/FileEntry.js';
 import mediasoupService from '../lib/mediasoup.js';
+import { canManageMeeting, isMeetingHost, getMeetingRole } from '../lib/meetingPermissions.js';
 
 const connectedUsers = new Map();
 const roomParticipants = new Map();
@@ -60,6 +62,7 @@ export const initializeSocketHandlers = (io) => {
         }
 
         const roomUsers = roomParticipants.get(roomId);
+        const role = getMeetingRole(meeting, socket.user.id);
         roomUsers.set(socket.user.id, {
           socketId: socket.id,
           user: {
@@ -68,6 +71,7 @@ export const initializeSocketHandlers = (io) => {
             email: socket.user.email,
             avatar: socket.user.avatar
           },
+          role,
           isMuted: meeting.settings ? meeting.settings.muteOnEntry : false,
           isVideoOff: false,
           isScreenSharing: false
@@ -79,7 +83,9 @@ export const initializeSocketHandlers = (io) => {
 
         socket.emit('room:participants', {
           participants,
-          isHost: meeting.hostId === socket.user.id
+          isHost: role === 'host',
+          isCoHost: role === 'co-host',
+          role
         });
 
         const existingProducers = [];
@@ -112,6 +118,7 @@ export const initializeSocketHandlers = (io) => {
             email: socket.user.email,
             avatar: socket.user.avatar
           },
+          role,
           socketId: socket.id
         });
 
@@ -348,7 +355,7 @@ export const initializeSocketHandlers = (io) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
 
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           io.to(targetSocketId).emit('host:force-mute');
           io.to(roomId).emit('host:user-muted', { targetSocketId });
         }
@@ -361,20 +368,32 @@ export const initializeSocketHandlers = (io) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
 
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+          const targetSocket = io.sockets.sockets.get(targetSocketId);
+          const targetUserId = targetSocket?.user?.id;
+          const callerIsHost = isMeetingHost(meeting, socket.user.id);
+
+          // Co-hosts cannot remove the host or other co-hosts
+          if (targetUserId) {
+            const targetIsHost = isMeetingHost(meeting, targetUserId);
+            const targetIsCoHost = getMeetingRole(meeting, targetUserId) === 'co-host';
+            if (targetIsHost || (targetIsCoHost && !callerIsHost)) {
+              return;
+            }
+          }
+
           io.to(targetSocketId).emit('host:removed');
 
-          const targetSocket = io.sockets.sockets.get(targetSocketId);
           if (targetSocket) {
             targetSocket.leave(roomId);
 
             const roomUsers = roomParticipants.get(roomId);
-            if (roomUsers && targetSocket.user) {
-              roomUsers.delete(targetSocket.user.id);
+            if (roomUsers && targetUserId) {
+              roomUsers.delete(targetUserId);
             }
           }
 
-          io.to(roomId).emit('room:user-left', { socketId: targetSocketId });
+          io.to(roomId).emit('room:user-left', { socketId: targetSocketId, userId: targetUserId });
         }
       } catch (error) {
         console.error('Host remove error:', error);
@@ -385,7 +404,7 @@ export const initializeSocketHandlers = (io) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
 
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           io.to(roomId).emit('meeting:ended', {
             roomId,
             endedBy: socket.user.id
@@ -402,7 +421,7 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('chat:send', async ({ roomId, content, recipientId }) => {
+    socket.on('chat:send', async ({ roomId, content, recipientId, attachment }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
 
@@ -416,13 +435,44 @@ export const initializeSocketHandlers = (io) => {
           return;
         }
 
+        // Optional file attachment — must reference a file this user uploaded
+        // to this meeting (avoids forging attachments to arbitrary files).
+        let file = null;
+        if (attachment && attachment.fileId) {
+          file = await FileEntry.findOne({
+            where: {
+              id: attachment.fileId,
+              ownerId: socket.user.id,
+              meetingId: meeting.id,
+              isDeleted: false
+            }
+          });
+          if (!file) {
+            socket.emit('error', { message: 'Attachment not found or not yours' });
+            return;
+          }
+        }
+
+        const text = (content || '').trim();
+        if (!text && !file) {
+          socket.emit('error', { message: 'Message content is required' });
+          return;
+        }
+
         const messageData = {
           meetingId: meeting.id,
           senderId: socket.user.id,
-          content: content.trim(),
-          type: 'text',
+          content: text || (file ? file.originalName : ''),
+          type: file ? 'file' : 'text',
           isPrivate: !!recipientId
         };
+
+        if (file) {
+          messageData.fileUrl = file.url;
+          messageData.fileName = file.originalName;
+          messageData.fileType = file.mimeType;
+          messageData.fileSize = file.size;
+        }
 
         if (recipientId) {
           messageData.recipientId = recipientId;
@@ -495,7 +545,7 @@ export const initializeSocketHandlers = (io) => {
     socket.on('host:force-video-off', async ({ targetSocketId, roomId }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           io.to(targetSocketId).emit('host:force-video-off');
         }
       } catch (error) {
@@ -506,7 +556,7 @@ export const initializeSocketHandlers = (io) => {
     socket.on('host:request-unmute', async ({ targetSocketId, roomId }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           io.to(targetSocketId).emit('host:request-unmute');
         }
       } catch (error) {
@@ -517,7 +567,7 @@ export const initializeSocketHandlers = (io) => {
     socket.on('host:mute-all', async ({ roomId }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           socket.to(roomId).emit('host:force-mute');
         }
       } catch (error) {
@@ -528,7 +578,7 @@ export const initializeSocketHandlers = (io) => {
     socket.on('host:disable-all-video', async ({ roomId }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           socket.to(roomId).emit('host:force-video-off');
         }
       } catch (error) {
@@ -539,7 +589,7 @@ export const initializeSocketHandlers = (io) => {
     socket.on('host:lock-meeting', async ({ roomId, isLocked }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           meeting.settings = { ...(meeting.settings || {}), isLocked };
           await meeting.save();
           io.to(roomId).emit('host:meeting-locked', { isLocked });
@@ -552,7 +602,7 @@ export const initializeSocketHandlers = (io) => {
     socket.on('host:admit-user', async ({ roomId, targetSocketId }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           io.to(targetSocketId).emit('room:admitted');
         }
       } catch (error) {
@@ -563,7 +613,7 @@ export const initializeSocketHandlers = (io) => {
     socket.on('host:deny-user', async ({ roomId, targetSocketId }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           io.to(targetSocketId).emit('room:denied');
         }
       } catch (error) {
@@ -574,7 +624,7 @@ export const initializeSocketHandlers = (io) => {
     socket.on('host:spotlight', async ({ roomId, userId }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           io.to(roomId).emit('host:spotlight', { userId });
         }
       } catch (error) {
@@ -586,9 +636,13 @@ export const initializeSocketHandlers = (io) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
 
-        if (meeting && meeting.hostId === socket.user.id) {
+        // Only the actual host can promote co-hosts
+        if (meeting && isMeetingHost(meeting, socket.user.id)) {
           const targetSocket = io.sockets.sockets.get(targetSocketId);
           if (targetSocket && targetSocket.user) {
+            // Never promote the host itself
+            if (isMeetingHost(meeting, targetSocket.user.id)) return;
+
             const participants = meeting.participants || [];
             const participant = participants.find(
               p => p.userId === targetSocket.user.id
@@ -597,6 +651,12 @@ export const initializeSocketHandlers = (io) => {
               participant.role = 'co-host';
               meeting.participants = participants;
               await meeting.save();
+
+              const roomUsers = roomParticipants.get(roomId);
+              if (roomUsers && roomUsers.has(targetSocket.user.id)) {
+                roomUsers.get(targetSocket.user.id).role = 'co-host';
+              }
+
               io.to(targetSocketId).emit('host:promoted', { role: 'co-host' });
               io.to(roomId).emit('room:role-changed', {
                 userId: targetSocket.user.id,
@@ -610,10 +670,47 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
+    socket.on('host:remove-cohost', async ({ targetSocketId, roomId }) => {
+      try {
+        const meeting = await Meeting.findOne({ where: { roomId } });
+
+        // Only the actual host can demote co-hosts
+        if (meeting && isMeetingHost(meeting, socket.user.id)) {
+          const targetSocket = io.sockets.sockets.get(targetSocketId);
+          if (targetSocket && targetSocket.user) {
+            if (isMeetingHost(meeting, targetSocket.user.id)) return;
+
+            const participants = meeting.participants || [];
+            const participant = participants.find(
+              p => p.userId === targetSocket.user.id
+            );
+            if (participant && participant.role === 'co-host') {
+              participant.role = 'participant';
+              meeting.participants = participants;
+              await meeting.save();
+
+              const roomUsers = roomParticipants.get(roomId);
+              if (roomUsers && roomUsers.has(targetSocket.user.id)) {
+                roomUsers.get(targetSocket.user.id).role = 'participant';
+              }
+
+              io.to(targetSocketId).emit('host:demoted', { role: 'participant' });
+              io.to(roomId).emit('room:role-changed', {
+                userId: targetSocket.user.id,
+                role: 'participant'
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Host remove cohost error:', error);
+      }
+    });
+
     socket.on('host:update-settings', async ({ roomId, settings }) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && meeting.hostId === socket.user.id) {
+        if (meeting && canManageMeeting(meeting, socket.user.id)) {
           Object.assign(meeting.settings || {}, settings);
           await meeting.save();
           io.to(roomId).emit('meeting:settings-updated', { settings });

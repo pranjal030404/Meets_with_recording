@@ -45,7 +45,7 @@ router.post('/upload', protect, upload.single('file'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const { teamId, conversationId, meetingId } = req.body;
+    const { teamId, conversationId, meetingId, roomId } = req.body;
 
     if (teamId) {
       const team = await Team.findByPk(teamId);
@@ -63,6 +63,23 @@ router.post('/upload', protect, upload.single('file'), async (req, res) => {
         return res.status(403).json({ success: false, message: 'Not a member of this conversation' });
       }
     }
+    if (meetingId || roomId) {
+      const Meeting = (await import('../models/Meeting.js')).default;
+      const meeting = meetingId
+        ? await Meeting.findByPk(meetingId)
+        : await Meeting.findOne({ where: { roomId } });
+      req.meetingScope = meeting || null;
+      if (!meeting) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(403).json({ success: false, message: 'Meeting not found' });
+      }
+      const isHost = meeting.hostId === req.user.id;
+      const isParticipant = (meeting.participantIds || []).includes(req.user.id);
+      if (!isHost && !isParticipant) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(403).json({ success: false, message: 'Not a participant of this meeting' });
+      }
+    }
 
     const relativeUrl = `/uploads/files/${req.user.id}/${req.file.filename}`;
 
@@ -70,13 +87,13 @@ router.post('/upload', protect, upload.single('file'), async (req, res) => {
       ownerId: req.user.id,
       teamId: teamId || null,
       conversationId: conversationId || null,
-      meetingId: meetingId || null,
+      meetingId: (meetingId || req.meetingScope?.id) || null,
       originalName: req.file.originalname,
       fileName: req.file.filename,
       mimeType: req.file.mimetype,
       size: req.file.size,
       url: relativeUrl,
-      category: teamId ? 'team' : conversationId ? 'shared' : 'personal'
+      category: teamId ? 'team' : conversationId ? 'shared' : meetingId ? 'meeting' : 'personal'
     });
 
     logAudit({

@@ -4,6 +4,15 @@ import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import App from './App'
 import './index.css'
+import branding, { pageTitle } from './config/branding'
+
+// White-label runtime branding: set the document title and favicon from
+// the same config the app components use (src/config/branding.js).
+document.title = pageTitle
+if (branding.iconUrl) {
+  const link = document.querySelector('link[rel="icon"]')
+  if (link) link.href = branding.iconUrl
+}
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

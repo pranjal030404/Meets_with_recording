@@ -7,6 +7,7 @@ export default function ParticipantsList({
   participants,
   user,
   isHost,
+  isCoHost,
   roomId,
   handRaisedUsers = [],
   waitingRoomUsers = [],
@@ -15,6 +16,7 @@ export default function ParticipantsList({
   onDeny
 }) {
   const [tab, setTab] = useState('participants') // 'participants' | 'waiting'
+  const canManage = isHost || isCoHost
 
   const isHandRaised = (userId) => handRaisedUsers.some(h => h.userId === userId)
 
@@ -29,7 +31,7 @@ export default function ParticipantsList({
       </div>
 
       {/* Tabs (show waiting room tab for host if there are waiting users) */}
-      {isHost && waitingRoomUsers.length > 0 && (
+      {canManage && waitingRoomUsers.length > 0 && (
         <div className="flex border-b border-dark-400">
           <button
             onClick={() => setTab('participants')}
@@ -75,7 +77,8 @@ export default function ParticipantsList({
                 participant={participant}
                 isCurrentUser={false}
                 isHost={isHost}
-                canControl={isHost}
+                isCoHost={isCoHost}
+                canControl={canManage && !isHost}
                 isHandRaised={isHandRaised(participant.user?.id || participant.user?._id)}
                 roomId={roomId}
               />
@@ -117,10 +120,20 @@ export default function ParticipantsList({
   )
 }
 
-function ParticipantItem({ participant, isCurrentUser, isHost, canControl, isHandRaised, roomId }) {
+function ParticipantItem({ participant, isCurrentUser, isHost, isCoHost, canControl, isHandRaised, roomId }) {
   const [showMenu, setShowMenu] = useState(false)
   const menuRef = useRef(null)
   const { user, isMuted, isVideoOff, role, socketId } = participant
+  const myRole = role === 'host' ? 'host' : role === 'co-host' ? 'co-host' : 'participant'
+  const targetIsHost = role === 'host'
+  const targetIsCoHost = role === 'co-host'
+  const viewerIsHost = isHost
+  const canControlTarget = canControl && !isCurrentUser && !targetIsHost && !targetIsCoHost && (viewerIsHost || (isCoHost && !targetIsCoHost))
+  // More granular: host can control everyone except self; co-host can only control participants (not host, not other co-host)
+  let menuAllowed = false
+  if (viewerIsHost && !isCurrentUser && !targetIsHost) menuAllowed = true
+  if (isCoHost && !isCurrentUser && !targetIsHost && !targetIsCoHost) menuAllowed = true
+  const finalCanControl = menuAllowed
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -175,6 +188,15 @@ function ParticipantItem({ participant, isCurrentUser, isHost, canControl, isHan
     setShowMenu(false)
   }
 
+  const handleRemoveCoHost = () => {
+    const socket = getSocket()
+    if (socket && socketId) {
+      socket.emit('host:remove-cohost', { targetSocketId: socketId, roomId })
+      toast.success(`Removed ${user.name} as co-host`)
+    }
+    setShowMenu(false)
+  }
+
   return (
     <div className="flex items-center gap-3 p-3 hover:bg-dark-300 rounded-lg transition-colors">
       {/* Avatar */}
@@ -220,7 +242,7 @@ function ParticipantItem({ participant, isCurrentUser, isHost, canControl, isHan
       </div>
 
       {/* Host controls */}
-      {canControl && !isCurrentUser && (
+      {finalCanControl && !isCurrentUser && (
         <div className="relative" ref={menuRef}>
           <button onClick={() => setShowMenu(!showMenu)}
             className="p-1 hover:bg-dark-400 rounded transition-colors">
@@ -243,10 +265,18 @@ function ParticipantItem({ participant, isCurrentUser, isHost, canControl, isHan
                   <Mic className="w-4 h-4" /> Ask to unmute
                 </button>
               )}
-              <button onClick={handleMakeCoHost}
-                className="w-full px-3 py-2 flex items-center gap-2 hover:bg-dark-400 transition-colors text-left text-sm">
-                <Shield className="w-4 h-4" /> Make co-host
-              </button>
+              {viewerIsHost && !targetIsCoHost && (
+                <button onClick={handleMakeCoHost}
+                  className="w-full px-3 py-2 flex items-center gap-2 hover:bg-dark-400 transition-colors text-left text-sm">
+                  <Shield className="w-4 h-4" /> Make co-host
+                </button>
+              )}
+              {viewerIsHost && targetIsCoHost && (
+                <button onClick={handleRemoveCoHost}
+                  className="w-full px-3 py-2 flex items-center gap-2 hover:bg-dark-400 transition-colors text-left text-sm">
+                  <Shield className="w-4 h-4" /> Remove co-host
+                </button>
+              )}
               <hr className="my-1 border-dark-400" />
               <button onClick={handleRemoveUser}
                 className="w-full px-3 py-2 flex items-center gap-2 hover:bg-dark-400 transition-colors text-left text-sm text-red-400">

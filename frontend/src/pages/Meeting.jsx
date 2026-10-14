@@ -17,14 +17,15 @@ import CaptionsOverlay from '../components/CaptionsOverlay'
 import WaitingRoom from '../components/WaitingRoom'
 import DeviceSettings from '../components/DeviceSettings'
 import MeetingSettingsPanel from '../components/MeetingSettingsPanel'
-import Whiteboard from '../components/Whiteboard'
+import MeetingDetailsPanel from '../components/MeetingDetailsPanel'
 
 export default function Meeting() {
   const navigate = useNavigate()
   const { roomId } = useParams()
   const { user, token } = useAuthStore()
   const {
-    currentMeeting, participants, localStream, isHost,
+    currentMeeting, participants, localStream, isHost, isCoHost,
+    setIsCoHost, setMyRole,
     isMuted, isVideoOff, isScreenSharing, isRecording,
     remoteStreams, mediasoupReady, activeReactions,
     handRaisedUsers, isHandRaised, layout, pinnedUserId,
@@ -52,6 +53,7 @@ export default function Meeting() {
   const [showDeviceSettings, setShowDeviceSettings] = useState(false)
   const [showMeetingSettings, setShowMeetingSettings] = useState(false)
   const [showWhiteboard, setShowWhiteboard] = useState(false)
+  const [showMeetingDetails, setShowMeetingDetails] = useState(false)
   const [isJoining, setIsJoining] = useState(true)
   const [screenShareUser, setScreenShareUser] = useState(null)
   const [showLeaveDialog, setShowLeaveDialog] = useState(false)
@@ -185,6 +187,17 @@ export default function Meeting() {
         const meeting = joinResult.meeting
         const hostId = meeting.host?.id || meeting.hostId
         setIsHost(hostId === currentUserId)
+        const me = meeting.participants?.find(p => (p.userId === currentUserId || p.user?.id === currentUserId))
+        if (me?.role === 'co-host') {
+          setIsCoHost(true)
+          setMyRole('co-host')
+        } else if (hostId === currentUserId) {
+          setIsCoHost(false)
+          setMyRole('host')
+        } else {
+          setIsCoHost(false)
+          setMyRole(me?.role || 'participant')
+        }
 
         // Re-read stream from store (may have been updated)
         stream = useMeetingStore.getState().localStream
@@ -266,9 +279,11 @@ export default function Meeting() {
     socket.on('connect', onReconnect)
 
     // Room participants (on join)
-    socket.on('room:participants', ({ participants: existingParticipants, isHost: hostStatus }) => {
+    socket.on('room:participants', ({ participants: existingParticipants, isHost: hostStatus, isCoHost: coHostStatus, role }) => {
       setParticipants(existingParticipants)
       setIsHost(hostStatus)
+      if (coHostStatus !== undefined) setIsCoHost(coHostStatus)
+      if (role) setMyRole(role)
     })
 
     // Existing mediasoup producers — consume them
@@ -379,8 +394,20 @@ export default function Meeting() {
       handleLeave()
     })
 
-    socket.on('host:spotlight', ({ userId }) => {
-      useMeetingStore.setState({ spotlightUserId: userId })
+    socket.on('host:promoted', ({ role }) => {
+      setIsCoHost(true)
+      setMyRole(role || 'co-host')
+      toast('You are now a co-host', { icon: '👑' })
+    })
+
+    socket.on('host:demoted', ({ role }) => {
+      setIsCoHost(false)
+      setMyRole(role || 'participant')
+      toast('Your co-host role was removed')
+    })
+
+    socket.on('room:role-changed', ({ userId, role }) => {
+      updateParticipant(userId, { role })
     })
 
     socket.on('host:meeting-locked', ({ isLocked }) => {
@@ -468,6 +495,7 @@ export default function Meeting() {
         'media:user-muted', 'media:user-video', 'media:screen-share',
         'host:force-mute', 'host:force-video-off', 'host:request-unmute',
         'host:removed', 'meeting:ended', 'host:spotlight', 'host:meeting-locked',
+        'host:promoted', 'host:demoted', 'room:role-changed',
         'room:waiting', 'room:admitted', 'room:denied',
         'chat:message', 'chat:user-typing',
         'recording:started', 'recording:stopped',
@@ -585,6 +613,7 @@ export default function Meeting() {
         layout={layout}
         onLayoutChange={setLayout}
         handRaisedCount={handRaisedUsers.length}
+        onOpenDetails={() => setShowMeetingDetails(true)}
       />
 
       {/* Main Content */}
@@ -607,7 +636,7 @@ export default function Meeting() {
             activeSpeakerId={activeSpeakerId}
             handRaisedUsers={handRaisedUsers}
             isHandRaised={isHandRaised}
-            isHost={isHost}
+            isHost={(isHost || isCoHost)}
             onPinUser={pinUser}
             onSpotlightUser={spotlightUser}
           />
@@ -629,6 +658,7 @@ export default function Meeting() {
             participants={participants}
             user={user}
             isHost={isHost}
+            isCoHost={isCoHost}
             roomId={roomId}
             handRaisedUsers={handRaisedUsers}
             waitingRoomUsers={waitingRoomUsers}
@@ -638,12 +668,16 @@ export default function Meeting() {
           />
         )}
 
-        {showMeetingSettings && (
-          <MeetingSettingsPanel
+        {showMeetingDetails && (
+          <MeetingDetailsPanel
             meeting={currentMeeting}
+            user={user}
+            participants={participants}
+            roomId={roomId}
             isHost={isHost}
-            isMeetingLocked={isMeetingLocked}
-            onClose={() => setShowMeetingSettings(false)}
+            isCoHost={isCoHost}
+            onClose={() => setShowMeetingDetails(false)}
+            onOpenSettings={() => { setShowMeetingDetails(false); setShowMeetingSettings(true); }}
           />
         )}
       </div>
@@ -665,7 +699,7 @@ export default function Meeting() {
             <h3 className="text-xl font-bold font-display mb-2">Leave Meeting</h3>
             <p className="text-gray-400 text-sm mb-6">Are you sure you want to leave? You can rejoin anytime with the same link.</p>
             <div className="space-y-3">
-              {isHost && (
+              {(isHost || isCoHost) && (
                 <button onClick={() => { setShowLeaveDialog(false); handleEndForAll() }}
                   className="btn btn-danger w-full py-3">
                   End Meeting for All
@@ -689,6 +723,8 @@ export default function Meeting() {
         isScreenSharing={isScreenSharing}
         isRecording={isRecording}
         isHost={isHost}
+        isCoHost={isCoHost}
+        canManage={(isHost || isCoHost)}
         isHandRaised={isHandRaised}
         showChat={showChat}
         showParticipants={showParticipants}
@@ -709,6 +745,7 @@ export default function Meeting() {
         onLeave={() => setShowLeaveDialog(true)}
         onOpenSettings={() => setShowDeviceSettings(true)}
         onOpenMeetingSettings={() => setShowMeetingSettings(true)}
+        onOpenMeetingDetails={() => setShowMeetingDetails(true)}
         chatUnread={useChatStore.getState().unreadCount}
       />
     </div>
