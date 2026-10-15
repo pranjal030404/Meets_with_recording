@@ -76,6 +76,15 @@ export async function up(queryInterface, Sequelize) {
     notificationsSent: {
       type: Sequelize.JSON
     },
+    aiSummary: {
+      type: Sequelize.JSON
+    },
+    summaryGeneratedAt: {
+      type: Sequelize.DATE
+    },
+    completeTranscript: {
+      type: Sequelize.JSON
+    },
     createdAt: {
       type: Sequelize.DATE,
       allowNull: false

@@ -162,3 +162,89 @@ export const generateTranscriptionArtifacts = async ({
     error: transcript.error || null
   };
 };
+
+export const buildCompleteTranscriptArtifacts = async ({
+  recordings = [],
+  transcriptsDir,
+  transcriptBaseName = 'complete'
+}) => {
+  if (!transcriptsDir) throw new Error('transcriptsDir is required');
+  await fsPromises.mkdir(transcriptsDir, { recursive: true });
+
+  const mergedSegments = [];
+  let offset = 0;
+  let globalIndex = 1;
+  const sources = recordings
+    .filter(r => r && r.transcription)
+    .filter(r => !['none', 'error'].includes(r.transcription.provider))
+    .map(r => {
+      const t = r.transcription || {};
+      const segments = Array.isArray(t.segments) ? t.segments : [];
+      const text = t.text || segments.map(x => x.text).join(' ');
+      const generatedAt = t.generatedAt || r.createdAt || null;
+      return { segments, text, generatedAt, duration: t.duration || r.duration || 0 };
+    })
+    .filter(src => src.segments.length > 0 || src.text);
+
+  for (let i = 0; i < sources.length; i++) {
+    const src = sources[i];
+    const rawSegments = (Array.isArray(src.segments) && src.segments.length > 0)
+      ? src.segments
+      : (src.text ? [{ start: 0, end: Math.max(toNumber(src.duration), 1), text: src.text }] : []);
+    const segs = normalizeSegments(rawSegments, src.duration || 0);
+    for (let j = 0; j < segs.length; j++) {
+      const seg = segs[j];
+      mergedSegments.push({
+        id: globalIndex++,
+        start: toNumber(seg.start) + offset,
+        end: toNumber(seg.end) + offset,
+        text: seg.text
+      });
+    }
+    offset += toNumber(src.duration || 0);
+  }
+
+  const transcriptText = mergedSegments.length > 0
+    ? mergedSegments.map(s => s.text).join(' ')
+    : sources.map(s => s.text).filter(Boolean).join('\n\n');
+
+  const jsonPayload = {
+    language: null,
+    provider: 'merged',
+    model: null,
+    text: transcriptText,
+    duration: offset,
+    generatedAt: new Date().toISOString(),
+    segments: mergedSegments,
+    sources: sources.length
+  };
+
+  const jsonPath = path.join(transcriptsDir, `${transcriptBaseName}.json`);
+  const txtPath = path.join(transcriptsDir, `${transcriptBaseName}.txt`);
+  const srtPath = path.join(transcriptsDir, `${transcriptBaseName}.srt`);
+  const vttPath = path.join(transcriptsDir, `${transcriptBaseName}.vtt`);
+
+  await Promise.all([
+    fsPromises.writeFile(jsonPath, JSON.stringify(jsonPayload, null, 2), 'utf8'),
+    fsPromises.writeFile(txtPath, transcriptText || '', 'utf8'),
+    fsPromises.writeFile(srtPath, buildSrt(mergedSegments), 'utf8'),
+    fsPromises.writeFile(vttPath, buildVtt(mergedSegments), 'utf8')
+  ]);
+
+  return {
+    provider: 'merged',
+    model: null,
+    language: null,
+    text: transcriptText,
+    segments: mergedSegments,
+    generatedAt: jsonPayload.generatedAt,
+    duration: offset,
+    files: {
+      json: jsonPath,
+      txt: txtPath,
+      srt: srtPath,
+      vtt: vttPath
+    },
+    error: null
+  };
+};

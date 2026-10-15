@@ -102,6 +102,9 @@ const Meeting = sequelize.define('Meeting', {
   },
   summaryGeneratedAt: {
     type: DataTypes.DATE
+  },
+  completeTranscript: {
+    type: DataTypes.JSON
   }
 }, {
   tableName: 'Meetings'

@@ -25,7 +25,7 @@ const PLANS = [
       storageGB: 1,
       maxTeams: 1,
       canRecord: false,
-      canTranscribe: false,
+      canTranscribe: true,
       canBreakout: false,
       canPoll: true
     }

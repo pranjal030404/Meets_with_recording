@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import Meeting from '../models/Meeting.js';
 import { protect } from '../middleware/auth.js';
+import { enforceTranscriptionAllowed } from '../middleware/subscription.js';
 import logAudit from '../services/auditService.js';
 
 const router = express.Router();
@@ -22,6 +23,12 @@ const getOpenAI = async () => {
 
 // Build transcript text from the meeting's recordings (segments or txt artifacts)
 const buildTranscript = async (meeting) => {
+  if (meeting.completeTranscript && meeting.completeTranscript.text) {
+    return meeting.completeTranscript.text;
+  }
+  if (meeting.completeTranscript && Array.isArray(meeting.completeTranscript.segments) && meeting.completeTranscript.segments.length > 0) {
+    return meeting.completeTranscript.segments.map(s => s.text || '').join(' ');
+  }
   const recordings = meeting.recordings || [];
   for (let i = recordings.length - 1; i >= 0; i--) {
     const rec = recordings[i];
@@ -32,6 +39,13 @@ const buildTranscript = async (meeting) => {
       return transcription.segments
         .map(s => `[${s.startTime ?? ''}] ${s.speaker ? s.speaker + ': ' : ''}${s.text}`)
         .join('\n');
+    }
+    if (transcription.files?.txt?.url) {
+      try {
+        const txtPath = path.join(UPLOAD_ROOT, transcription.files.txt.url.replace('/uploads/', ''));
+        const text = await fs.readFile(txtPath, 'utf8');
+        if (text.trim()) return text;
+      } catch {}
     }
     if (transcription.txtUrl) {
       try {
@@ -49,7 +63,7 @@ const buildTranscript = async (meeting) => {
 const SUMMARY_MODEL = process.env.OPENAI_SUMMARY_MODEL || 'gpt-4o-mini';
 
 // AI summary + action items for a meeting (from its transcript)
-router.post('/meetings/:roomId/summary', protect, async (req, res) => {
+router.post('/meetings/:roomId/summary', protect, enforceTranscriptionAllowed, async (req, res) => {
   try {
     const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
     if (!meeting) {

@@ -163,6 +163,23 @@ const assertCanRecord = async (userId, durationMinutes = 0) => {
 
   return { allowed: true, subscription, limits };
 };
+const assertCanTranscribe = async (userId) => {
+  const subscription = await ensureSubscription(userId);
+  const limits = subscription.plan?.limits || {};
+
+  // Transcription is free; only block if explicitly disabled
+  if (limits.canTranscribe === false) {
+    return {
+      allowed: false,
+      subscription,
+      limits,
+      reason: `Transcription is not available on the ${subscription.plan.name} plan.`
+    };
+  }
+
+  return { allowed: true, subscription, limits };
+};
+
 
 const recordUsage = async (userId, type, amount = 1, meetingId = null, metadata = {}) => {
   if (!['meeting_created', 'meeting_minutes', 'recording_minutes'].includes(type)) {
@@ -318,6 +335,7 @@ export {
   getUsageSummary,
   assertCanCreateMeeting,
   assertCanRecord,
+  assertCanTranscribe,
   recordUsage,
   subscribeToPlan,
   cancelSubscription,

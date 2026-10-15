@@ -10,9 +10,10 @@ import Team from '../models/Team.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
-import { enforceMeetingQuota, enforceRecordingAllowed } from '../middleware/subscription.js';
+import { enforceMeetingQuota, enforceRecordingAllowed, enforceTranscriptionAllowed } from '../middleware/subscription.js';
 import { recordUsage, assertCanRecord } from '../services/subscriptionService.js';
 import { saveMeetingRecording } from '../services/recordingService.js';
+import { buildCompleteTranscriptArtifacts } from '../services/transcriptionService.js';
 import { canManageMeeting } from '../lib/meetingPermissions.js';
 
 const router = express.Router();
@@ -820,4 +821,93 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
   }
 });
 
+
+
+// Generate/generate or get complete meeting transcript (merged from all recordings)
+router.post('/:roomId/complete-transcript', protect, enforceTranscriptionAllowed, async (req, res) => {
+  try {
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: 'Meeting not found' });
+    }
+
+    const isHost = meeting.hostId === req.user.id;
+    const isParticipant = (meeting.participantIds || []).includes(req.user.id);
+    const isInvitee = (meeting.inviteeIds || []).some(i => i.userId === req.user.id);
+    if (!isHost && !isParticipant && !isInvitee) {
+      return res.status(403).json({ success: false, message: 'No access to this meeting' });
+    }
+
+    if (meeting.completeTranscript && !req.body.regenerate) {
+      return res.json({ success: true, data: { completeTranscript: meeting.completeTranscript, cached: true } });
+    }
+
+    const recordings = Array.isArray(meeting.recordings) ? meeting.recordings : [];
+    if (recordings.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No recordings found for this meeting. Upload a recording first to generate transcripts.'
+      });
+    }
+
+    const hasTranscript = recordings.some(r => {
+      const t = r && r.transcription;
+      if (!t || ['none', 'error'].includes(t.provider)) return false;
+      return (Array.isArray(t.segments) && t.segments.length > 0) || Boolean(t.text);
+    });
+    if (!hasTranscript) {
+      return res.status(400).json({
+        success: false,
+        message: 'No transcript data available in recordings. Complete transcript requires recording transcripts (JSON/TXT/SRT/VTT artifacts present).'
+      });
+    }
+
+    const transcriptsDir = path.resolve(__dirname, '../../uploads/transcripts', meeting.roomId);
+    await fs.mkdir(transcriptsDir, { recursive: true });
+
+    const transcriptBaseName = 'complete-meeting';
+    const result = await buildCompleteTranscriptArtifacts({
+      recordings,
+      transcriptsDir,
+      transcriptBaseName
+    });
+
+    const toPublicUrl = (...segments) => '/' + path.posix.join(...segments);
+
+    const completeTranscript = {
+      status: result.error ? 'failed' : 'completed',
+      provider: result.provider,
+      text: result.text,
+      segments: result.segments,
+      duration: result.duration,
+      generatedAt: result.generatedAt,
+      sources: recordings.length,
+      files: {
+        json: {
+          path: result.files.json,
+          url: toPublicUrl('uploads', 'transcripts', meeting.roomId, `${transcriptBaseName}.json`)
+        },
+        txt: {
+          path: result.files.txt,
+          url: toPublicUrl('uploads', 'transcripts', meeting.roomId, `${transcriptBaseName}.txt`)
+        },
+        srt: {
+          path: result.files.srt,
+          url: toPublicUrl('uploads', 'transcripts', meeting.roomId, `${transcriptBaseName}.srt`)
+        },
+        vtt: {
+          path: result.files.vtt,
+          url: toPublicUrl('uploads', 'transcripts', meeting.roomId, `${transcriptBaseName}.vtt`)
+        }
+      }
+    };
+
+    await meeting.update({ completeTranscript });
+
+    res.json({ success: true, data: { completeTranscript, cached: false } });
+  } catch (error) {
+    console.error('Generate complete transcript error:', error);
+    res.status(500).json({ success: false, message: 'Error generating complete transcript', error: error.message });
+  }
+});
 export default router;

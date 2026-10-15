@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import {
@@ -308,8 +309,91 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
         )}
       </div>
 
+      {/* Complete Meeting Transcript */}
+      <CompleteTranscriptPanel meeting={meeting} navigate={navigate} />
+
       {/* AI Summary */}
       <AiSummaryPanel meeting={meeting} navigate={navigate} />
+    </div>
+  )
+}
+
+function CompleteTranscriptPanel({ meeting, navigate }) {
+  const [complete, setComplete] = useState(meeting.completeTranscript || null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const generate = async (regenerate = false) => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const res = await api.post(`/meetings/${meeting.roomId}/complete-transcript`, { regenerate })
+      setComplete(res.data.data.completeTranscript)
+      if (regenerate) toast.success('Complete transcript regenerated')
+      else toast.success('Complete transcript generated')
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to generate complete transcript')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  if (!complete) {
+    return (
+      <div className="mt-5 border-t border-white/[0.06] pt-4">
+        <button
+          onClick={() => generate(false)}
+          disabled={isLoading}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-primary-500/15 to-accent-500/15 border border-primary-400/30 text-sm font-medium text-primary-200 hover:from-primary-500/25 hover:to-accent-500/25 transition-all disabled:opacity-50"
+        >
+          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+          {isLoading ? 'Generating full transcript...' : 'Generate Complete Meeting Transcript'}
+        </button>
+        {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+      </div>
+    )
+  }
+
+  const links = [
+    { label: 'JSON', url: toAbsoluteUrl(complete.files?.json?.url), icon: FileJson },
+    { label: 'TXT', url: toAbsoluteUrl(complete.files?.txt?.url), icon: FileText },
+    { label: 'SRT', url: toAbsoluteUrl(complete.files?.srt?.url), icon: Subtitles },
+    { label: 'VTT', url: toAbsoluteUrl(complete.files?.vtt?.url), icon: CircleDot }
+  ].filter(f => f.url)
+
+  return (
+    <div className="mt-5 border-t border-white/[0.06] pt-4">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+          <FileText className="w-4 h-4 text-primary-300" />
+          Complete Meeting Transcript
+          {complete.sources && <span className="text-[10px] font-normal text-gray-500">({complete.sources} recording{complete.sources!==1?'s':''})</span>}
+        </h4>
+        <button onClick={() => generate(true)} disabled={isLoading} className="text-xs text-gray-500 hover:text-primary-300 transition-colors disabled:opacity-50">
+          {isLoading ? 'Regenerating...' : 'Regenerate'}
+        </button>
+      </div>
+
+      {links.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {links.map((file) => {
+            const Icon = file.icon
+            return (
+              <a
+                key={file.label}
+                href={file.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-400/70 border border-white/[0.06] hover:bg-primary-500/15 hover:border-primary-500/30 hover:-translate-y-0.5 text-gray-200 text-xs font-medium transition-all duration-200"
+              >
+                <Icon className="w-3.5 h-3.5 text-primary-300" />
+                {file.label}
+              </a>
+            )
+          })}
+        </div>
+      )}
+      {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
     </div>
   )
 }
