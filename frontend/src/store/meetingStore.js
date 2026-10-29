@@ -43,6 +43,9 @@ export const useMeetingStore = create((set, get) => ({
   spotlightUserId: null,
   activeSpeakerId: null,
   layout: 'grid',
+  mirrorSelf: true,
+  hideSelf: false,
+  audioProcessing: { noiseSuppression: true, echoCancellation: true, autoGainControl: true },
   isWaitingRoom: false,
   waitingRoomUsers: [],
   isMeetingLocked: false,
@@ -263,11 +266,9 @@ export const useMeetingStore = create((set, get) => ({
   setLocalStream: (stream) => set({ localStream: stream }),
 
   getAudioConstraints: () => {
-    const { selectedAudioDevice } = get()
+    const { selectedAudioDevice, audioProcessing } = get()
     const constraints = {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
+      ...audioProcessing,
       sampleRate: { ideal: 48000 },
       channelCount: { ideal: 1 },
     }
@@ -574,6 +575,21 @@ export const useMeetingStore = create((set, get) => ({
   // =============================================
 
   setLayout: (layout) => set({ layout }),
+  toggleMirrorSelf: () => set({ mirrorSelf: !get().mirrorSelf }),
+  toggleHideSelf: () => set({ hideSelf: !get().hideSelf }),
+
+  // Noise suppression / echo cancellation / auto gain: applied live to the mic track.
+  setAudioProcessing: async (key, value) => {
+    const audioProcessing = { ...get().audioProcessing, [key]: value }
+    set({ audioProcessing })
+    const track = get().localStream?.getAudioTracks()[0]
+    if (!track) return
+    try {
+      await track.applyConstraints({ [key]: value })
+    } catch (e) {
+      console.warn(`Could not apply ${key}:`, e.message)
+    }
+  },
 
   pinUser: (userId) => set({ pinnedUserId: get().pinnedUserId === userId ? null : userId }),
 

@@ -10,6 +10,7 @@ import { canManageMeeting, isMeetingHost, getMeetingRole } from '../lib/meetingP
 
 const connectedUsers = new Map();
 const roomParticipants = new Map();
+const meetingNotes = new Map(); // roomId -> shared notes text
 
 const userTransports = new Map();
 const userProducers = new Map();
@@ -415,6 +416,7 @@ export const initializeSocketHandlers = (io) => {
           await meeting.save();
 
           roomParticipants.delete(roomId);
+          meetingNotes.delete(roomId);
         }
       } catch (error) {
         console.error('Host end meeting error:', error);
@@ -720,6 +722,24 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
+    // Latency probe for the in-call network-quality indicator
+    socket.on('net:ping', (ack) => {
+      if (typeof ack === 'function') ack();
+    });
+
+    // Shared meeting notes (last-writer-wins; kept in memory for late joiners)
+    socket.on('notes:request', ({ roomId }) => {
+      if (!socket.rooms.has(roomId)) return;
+      socket.emit('notes:update', { text: meetingNotes.get(roomId) || '', userName: null });
+    });
+
+    socket.on('notes:update', ({ roomId, text }) => {
+      if (!socket.rooms.has(roomId) || typeof text !== 'string') return;
+      const clipped = text.slice(0, 20000);
+      meetingNotes.set(roomId, clipped);
+      socket.to(roomId).emit('notes:update', { text: clipped, userName: socket.user.name });
+    });
+
     socket.on('caption:text', ({ roomId, text }) => {
       socket.to(roomId).emit('caption:text', {
         userId: socket.user.id,
@@ -904,6 +924,7 @@ function handleRoomLeave(socket, io) {
 
       if (roomUsers.size === 0) {
         roomParticipants.delete(roomId);
+        meetingNotes.delete(roomId);
       }
     }
 

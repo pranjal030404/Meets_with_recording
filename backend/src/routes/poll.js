@@ -4,6 +4,43 @@ import { protect } from '../middleware/auth.js';
 import Poll from '../models/Poll.js';
 import Meeting from '../models/Meeting.js';
 
+// Never ship voter ids to clients: expose counts plus the caller's own votes.
+const present = (poll, userId) => {
+  const json = poll.toJSON();
+  const total = json.totalVotes || 0;
+  return {
+    id: json.id,
+    _id: json.id,
+    meetingId: json.meetingId,
+    createdById: json.createdById,
+    question: json.question,
+    allowMultiple: json.allowMultiple,
+    isAnonymous: json.isAnonymous,
+    status: json.status,
+    totalVotes: total,
+    createdAt: json.createdAt,
+    hasVoted: poll.hasUserVoted(userId),
+    options: (json.options || []).map(o => ({
+      id: o.id,
+      text: o.text,
+      votes: (o.votes || []).length,
+      percentage: total > 0 ? Math.round(((o.votes || []).length / total) * 100) : 0,
+      mine: (o.votes || []).some(v => String(v.user) === String(userId))
+    }))
+  };
+};
+
+// Tell everyone in the meeting room to refetch polls (each client gets its own view).
+const notify = async (req, meetingId) => {
+  try {
+    const meeting = await Meeting.findByPk(meetingId);
+    const io = req.app.get('io');
+    if (meeting && io) io.to(meeting.roomId).emit('poll:changed', { meetingId });
+  } catch (e) {
+    console.warn('Poll notify failed:', e.message);
+  }
+};
+
 const router = express.Router();
 
 router.post('/', protect, async (req, res) => {
@@ -39,9 +76,10 @@ router.post('/', protect, async (req, res) => {
       status: 'active'
     });
 
+    notify(req, meetingId);
     res.status(201).json({
       success: true,
-      data: { poll: poll.toJSON() }
+      data: { poll: present(poll, req.user.id) }
     });
   } catch (error) {
     console.error('Create poll error:', error);
@@ -91,12 +129,10 @@ router.post('/:pollId/vote', protect, async (req, res) => {
     poll.totalVotes = (poll.totalVotes || 0) + 1;
     await poll.save();
 
+    notify(req, poll.meetingId);
     res.json({
       success: true,
-      data: {
-        poll: poll.toJSON(),
-        results: poll.getResults()
-      }
+      data: { poll: present(poll, req.user.id) }
     });
   } catch (error) {
     console.error('Vote poll error:', error);
@@ -115,10 +151,7 @@ router.get('/:pollId/results', protect, async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        poll: poll.toJSON(),
-        results: poll.getResults()
-      }
+      data: { poll: present(poll, req.user.id) }
     });
   } catch (error) {
     console.error('Get poll results error:', error);
@@ -154,12 +187,10 @@ router.put('/:pollId/end', protect, async (req, res) => {
     poll.endsAt = new Date();
     await poll.save();
 
+    notify(req, poll.meetingId);
     res.json({
       success: true,
-      data: {
-        poll: poll.toJSON(),
-        results: poll.getResults()
-      }
+      data: { poll: present(poll, req.user.id) }
     });
   } catch (error) {
     console.error('End poll error:', error);
@@ -178,7 +209,7 @@ router.get('/meeting/:meetingId', protect, async (req, res) => {
 
     res.json({
       success: true,
-      data: { polls: polls.map(p => p.toJSON()) }
+      data: { polls: polls.map(p => present(p, req.user.id)) }
     });
   } catch (error) {
     console.error('Get meeting polls error:', error);

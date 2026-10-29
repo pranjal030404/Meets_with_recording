@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from 'react'
+import { useMeetingStore } from '../store/meetingStore'
 import { MicOff, VideoOff, Pin, PinOff, Hand, Maximize2, User, Star } from 'lucide-react'
 
 const getUserId = (u) => u?.id || u?._id
@@ -25,7 +26,8 @@ export default function VideoGrid({
 }) {
   // Build entries from remoteStreams Map
   const remoteEntries = Array.from((remoteStreams || new Map()).entries())
-  const participantCount = remoteEntries.length + 1
+  const hideSelf = useMeetingStore((s) => s.hideSelf)
+  const participantCount = Math.max(1, remoteEntries.length + (hideSelf ? 0 : 1))
 
   // Determine who should be "focused" (pinned > spotlight > active speaker)
   const focusedUserId = pinnedUserId || spotlightUserId || (layout === 'speaker' ? activeSpeakerId : null)
@@ -170,6 +172,8 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
   const internalVideoRef = useRef(null)
   const ref = videoRef || internalVideoRef
   const [isHovered, setIsHovered] = useState(false)
+  const mirrorSelf = useMeetingStore((s) => s.mirrorSelf)
+  const hideSelf = useMeetingStore((s) => s.hideSelf)
 
   useEffect(() => {
     if (ref.current && stream) {
@@ -180,6 +184,8 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
   const tileClasses = small
     ? 'min-w-40 lg:min-w-0 aspect-video bg-dark-300 rounded-xl relative overflow-hidden flex-shrink-0 transition-all duration-300'
     : 'video-container relative overflow-hidden transition-all duration-300'
+
+  if (isLocal && hideSelf && !isPinned) return null
 
   return (
     <div
@@ -203,7 +209,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
           muted={isLocal}
           data-local={isLocal ? 'true' : 'false'}
           className="w-full h-full object-contain bg-dark-300"
-          style={isLocal ? { transform: 'scaleX(-1)' } : {}}
+          style={isLocal && mirrorSelf ? { transform: 'scaleX(-1)' } : {}}
         />
       )}
 

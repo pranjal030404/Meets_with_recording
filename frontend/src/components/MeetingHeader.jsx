@@ -1,5 +1,6 @@
 import { Clock, Copy, Users, Grid3X3, Presentation, LayoutPanelLeft, Hand, Circle, Video, Info } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import NetworkIndicator from './NetworkIndicator'
 
 const LAYOUTS = [
   { id: 'grid', icon: Grid3X3, label: 'Grid view' },
@@ -64,6 +65,7 @@ export default function MeetingHeader({
           )}
           <Clock className="w-4 h-4 text-primary-400/80" />
           <span>{formatTime(elapsedTime)}</span>
+          <NetworkIndicator />
         </div>
       </div>
 

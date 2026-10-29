@@ -7,6 +7,23 @@ import UsageLog from '../models/UsageLog.js';
 
 const FREE_PLAN_SLUG = 'free';
 
+// Self-hosted mode: every account gets Enterprise-level limits without paying.
+// Applied in memory only (the stored plan/subscription rows are untouched), so
+// setting UNLOCK_ALL_FEATURES=false restores normal plan enforcement.
+const UNLOCK_ALL_FEATURES = process.env.UNLOCK_ALL_FEATURES !== 'false';
+const UNLIMITED_LIMITS = {
+  meetingsPerMonth: -1,
+  meetingDurationMinutes: -1,
+  participantsPerMeeting: -1,
+  recordingMinutesPerMonth: -1,
+  storageGB: -1,
+  maxTeams: -1,
+  canRecord: true,
+  canTranscribe: true,
+  canBreakout: true,
+  canPoll: true
+};
+
 class SubscriptionError extends Error {
   constructor(message, statusCode = 400, code = 'SUBSCRIPTION_ERROR') {
     super(message);
@@ -77,6 +94,10 @@ const ensureSubscription = async (userId) => {
 
   // afterFind hooks don't fire for eagerly included models, normalize manually
   if (subscription?.plan) normalizePlan(subscription.plan);
+
+  if (UNLOCK_ALL_FEATURES && subscription?.plan) {
+    subscription.plan.setDataValue('limits', { ...UNLIMITED_LIMITS });
+  }
 
   return subscription;
 };

@@ -4,6 +4,17 @@ import { v4 as uuidv4 } from 'uuid';
 import { protect } from '../middleware/auth.js';
 import Question from '../models/Question.js';
 import Meeting from '../models/Meeting.js';
+import User from '../models/User.js';
+
+const notify = async (req, meetingId) => {
+  try {
+    const meeting = await Meeting.findByPk(meetingId);
+    const io = req.app.get('io');
+    if (meeting && io) io.to(meeting.roomId).emit('qa:changed', { meetingId });
+  } catch (e) {
+    console.warn('Q&A notify failed:', e.message);
+  }
+};
 
 const router = express.Router();
 
@@ -23,6 +34,7 @@ router.post('/', protect, async (req, res) => {
       upvotes: []
     });
 
+    notify(req, meetingId);
     res.status(201).json({
       success: true,
       data: { question: newQuestion.toJSON() }
@@ -45,9 +57,23 @@ router.get('/meeting/:meetingId', protect, async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
+    const askers = await User.findAll({
+      where: { id: [...new Set(questions.map(q => q.askedById))] },
+      attributes: ['id', 'name']
+    });
+    const names = Object.fromEntries(askers.map(u => [u.id, u.name]));
+
     res.json({
       success: true,
-      data: { questions: questions.map(q => q.toJSON()) }
+      data: {
+        questions: questions.map(q => ({
+          ...q.toJSON(),
+          askedByName: names[q.askedById] || 'Participant',
+          upvotes: undefined,
+          hasUpvoted: q.hasUserUpvoted(req.user.id),
+          askedByMe: q.askedById === req.user.id
+        }))
+      }
     });
   } catch (error) {
     console.error('Get questions error:', error);
@@ -75,6 +101,7 @@ router.put('/:questionId/upvote', protect, async (req, res) => {
 
     await question.save();
 
+    notify(req, question.meetingId);
     res.json({
       success: true,
       data: { question: question.toJSON() }
@@ -117,6 +144,7 @@ router.put('/:questionId/answer', protect, async (req, res) => {
 
     await question.save();
 
+    notify(req, question.meetingId);
     res.json({
       success: true,
       data: { question: question.toJSON() }
@@ -149,6 +177,7 @@ router.delete('/:questionId', protect, async (req, res) => {
 
     question.isDismissed = true;
     await question.save();
+    notify(req, question.meetingId);
 
     res.json({
       success: true,

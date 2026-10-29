@@ -18,6 +18,10 @@ import WaitingRoom from '../components/WaitingRoom'
 import DeviceSettings from '../components/DeviceSettings'
 import MeetingSettingsPanel from '../components/MeetingSettingsPanel'
 import MeetingDetailsPanel from '../components/MeetingDetailsPanel'
+import PollsQAPanel from '../components/PollsQAPanel'
+import NotesPanel from '../components/NotesPanel'
+import ShortcutsModal from '../components/ShortcutsModal'
+import { downloadAttendanceReport } from '../lib/attendance'
 
 export default function Meeting() {
   const navigate = useNavigate()
@@ -29,6 +33,7 @@ export default function Meeting() {
     isMuted, isVideoOff, isScreenSharing, isRecording,
     remoteStreams, mediasoupReady, activeReactions,
     handRaisedUsers, isHandRaised, layout, pinnedUserId,
+    mirrorSelf, toggleMirrorSelf, hideSelf, toggleHideSelf,
     spotlightUserId, activeSpeakerId, captionsEnabled, captions,
     isBeingRecorded, waitingRoomUsers, isMeetingLocked, recordingUser, isPiP,
     screenStream,
@@ -53,6 +58,9 @@ export default function Meeting() {
   const [showDeviceSettings, setShowDeviceSettings] = useState(false)
   const [showMeetingSettings, setShowMeetingSettings] = useState(false)
   const [showWhiteboard, setShowWhiteboard] = useState(false)
+  const [activitiesTab, setActivitiesTab] = useState(null) // 'polls' | 'qa' | null
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showNotes, setShowNotes] = useState(false)
   const [showMeetingDetails, setShowMeetingDetails] = useState(false)
   const [isJoining, setIsJoining] = useState(true)
   const [screenShareUser, setScreenShareUser] = useState(null)
@@ -76,6 +84,14 @@ export default function Meeting() {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') { e.preventDefault(); handleScreenShare() }
       // Ctrl/Cmd + Shift + H = raise hand
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'H') { e.preventDefault(); toggleHandRaise() }
+      // Ctrl/Cmd + Shift + C / P / U = chat / participants / captions
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') { e.preventDefault(); setShowChat(v => !v) }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') { e.preventDefault(); setShowParticipants(v => !v) }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'U') { e.preventDefault(); toggleCaptions() }
+      // ? = shortcut help (ignored while typing)
+      if (e.key === '?' && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !e.target.isContentEditable) {
+        setShowShortcuts(v => !v)
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
@@ -565,6 +581,13 @@ export default function Meeting() {
     toast.success('Meeting link copied!')
   }, [roomId])
 
+  // Attendance CSV (fetch fresh join/leave times first)
+  const handleDownloadAttendance = useCallback(async () => {
+    const result = await useMeetingStore.getState().getMeeting(roomId)
+    if (!result.success) return toast.error('Could not load attendance')
+    downloadAttendanceReport(result.meeting)
+  }, [roomId])
+
   // Toggle PiP
   const handleTogglePiP = useCallback(() => {
     if (isPiP) {
@@ -668,6 +691,31 @@ export default function Meeting() {
           />
         )}
 
+        {showNotes && (
+          <NotesPanel roomId={roomId} title={currentMeeting?.title} onClose={() => setShowNotes(false)} />
+        )}
+
+        {activitiesTab && currentMeeting?.id && (
+          <PollsQAPanel
+            key={activitiesTab}
+            meetingId={currentMeeting.id}
+            canManage={isHost || isCoHost}
+            initialTab={activitiesTab}
+            onClose={() => setActivitiesTab(null)}
+          />
+        )}
+
+        {showMeetingSettings && (
+          <MeetingSettingsPanel
+            meeting={currentMeeting}
+            isHost={isHost}
+            isCoHost={isCoHost}
+            canManage={isHost || isCoHost}
+            isMeetingLocked={isMeetingLocked}
+            onClose={() => setShowMeetingSettings(false)}
+          />
+        )}
+
         {showMeetingDetails && (
           <MeetingDetailsPanel
             meeting={currentMeeting}
@@ -686,6 +734,8 @@ export default function Meeting() {
       {showDeviceSettings && (
         <DeviceSettings onClose={() => setShowDeviceSettings(false)} />
       )}
+
+      {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
 
       {/* Whiteboard Modal */}
       {showWhiteboard && (
@@ -730,6 +780,14 @@ export default function Meeting() {
         showParticipants={showParticipants}
         onTogglePiP={handleTogglePiP}
         onOpenWhiteboard={() => setShowWhiteboard(true)}
+        onOpenActivities={setActivitiesTab}
+        onToggleMirror={toggleMirrorSelf}
+        onOpenShortcuts={() => setShowShortcuts(true)}
+        onDownloadAttendance={handleDownloadAttendance}
+        mirrorSelf={mirrorSelf}
+        hideSelf={hideSelf}
+        onToggleHideSelf={toggleHideSelf}
+        onOpenNotes={() => setShowNotes(true)}
         isPiP={isPiP}
         captionsEnabled={captionsEnabled}
         handRaisedCount={handRaisedUsers.length}

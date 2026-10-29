@@ -16,7 +16,14 @@ import {
   Subtitles,
   Shield,
   PictureInPicture,
-  Brush
+  Brush,
+  BarChart3,
+  HelpCircle,
+  FlipHorizontal,
+  Keyboard,
+  Download,
+  StickyNote,
+  EyeOff
 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { REACTION_EMOJIS } from './EmojiReactions'
@@ -49,6 +56,14 @@ export default function MeetingControls({
   onOpenMeetingDetails,
   onTogglePiP,
   onOpenWhiteboard,
+  onOpenActivities,
+  onToggleMirror,
+  onOpenShortcuts,
+  onDownloadAttendance,
+  onOpenNotes,
+  onToggleHideSelf,
+  hideSelf,
+  mirrorSelf,
   isPiP,
   chatUnread
 }) {
@@ -210,6 +225,46 @@ export default function MeetingControls({
                 icon={<Brush className="w-4 h-4" />}
                 label="Whiteboard"
                 onClick={() => { onOpenWhiteboard(); setShowMore(false) }}
+              />
+              {/* Polls & Q&A */}
+              <MoreMenuItem
+                icon={<BarChart3 className="w-4 h-4" />}
+                label="Polls"
+                onClick={() => { onOpenActivities('polls'); setShowMore(false) }}
+              />
+              <MoreMenuItem
+                icon={<HelpCircle className="w-4 h-4" />}
+                label="Q&A"
+                onClick={() => { onOpenActivities('qa'); setShowMore(false) }}
+              />
+              <MoreMenuItem
+                icon={<StickyNote className="w-4 h-4" />}
+                label="Meeting notes"
+                onClick={() => { onOpenNotes(); setShowMore(false) }}
+              />
+              <MoreMenuItem
+                icon={<EyeOff className="w-4 h-4" />}
+                label={hideSelf ? 'Show my video tile' : 'Hide my video tile'}
+                onClick={() => { onToggleHideSelf(); setShowMore(false) }}
+              />
+              {/* Self-view mirror */}
+              <MoreMenuItem
+                icon={<FlipHorizontal className="w-4 h-4" />}
+                label={mirrorSelf ? 'Unmirror my video' : 'Mirror my video'}
+                onClick={() => { onToggleMirror(); setShowMore(false) }}
+              />
+              {/* Attendance */}
+              {canManage && (
+                <MoreMenuItem
+                  icon={<Download className="w-4 h-4" />}
+                  label="Download attendance"
+                  onClick={() => { onDownloadAttendance(); setShowMore(false) }}
+                />
+              )}
+              <MoreMenuItem
+                icon={<Keyboard className="w-4 h-4" />}
+                label="Keyboard shortcuts"
+                onClick={() => { onOpenShortcuts(); setShowMore(false) }}
               />
               {/* Meeting Details */}
               <MoreMenuItem

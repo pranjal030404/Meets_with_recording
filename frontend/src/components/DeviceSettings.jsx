@@ -5,7 +5,7 @@ import { useMeetingStore } from '../store/meetingStore'
 export default function DeviceSettings({ onClose }) {
   const {
     availableDevices, selectedAudioDevice, selectedVideoDevice, selectedAudioOutputDevice,
-    videoQuality, audioLevel, isSpeaking,
+    videoQuality, audioLevel, isSpeaking, audioProcessing, setAudioProcessing,
     enumerateDevices, switchAudioDevice, switchVideoDevice, switchAudioOutput, setVideoQuality
   } = useMeetingStore()
 
@@ -71,6 +71,19 @@ export default function DeviceSettings({ onClose }) {
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="space-y-2">
+              {[
+                ['noiseSuppression', 'Noise suppression'],
+                ['echoCancellation', 'Echo cancellation'],
+                ['autoGainControl', 'Automatic volume adjustment'],
+              ].map(([key, label]) => (
+                <label key={key} className="flex items-center justify-between text-sm text-gray-300 cursor-pointer">
+                  {label}
+                  <input type="checkbox" checked={audioProcessing[key]}
+                    onChange={(e) => setAudioProcessing(key, e.target.checked)} />
+                </label>
+              ))}
             </div>
             {audioLevel > 0 && (
               <div>
