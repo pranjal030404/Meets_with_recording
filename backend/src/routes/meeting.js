@@ -1,5 +1,5 @@
 import express from 'express';
-import { Op, fn, col, where as seqWhere, cast } from 'sequelize';
+import { Op, fn, col, where as seqWhere } from 'sequelize';
 import fs from 'fs/promises';
 import multer from 'multer';
 import path from 'path';
@@ -12,9 +12,13 @@ import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
 import { enforceMeetingQuota, enforceRecordingAllowed, enforceTranscriptionAllowed } from '../middleware/subscription.js';
 import { recordUsage, assertCanRecord } from '../services/subscriptionService.js';
-import { saveMeetingRecording } from '../services/recordingService.js';
+import { saveMeetingRecording, appendRecording, enqueueTranscription, retryTranscription } from '../services/recordingService.js';
 import { buildCompleteTranscriptArtifacts } from '../services/transcriptionService.js';
-import { canManageMeeting } from '../lib/meetingPermissions.js';
+import { canManageMeeting, canAccessMeeting, hostHasJoined } from '../lib/meetingPermissions.js';
+import { requirePermission } from '../lib/permissions.js';
+import { inviteeMachine, StateTransitionError } from '../lib/stateMachines.js';
+import { startMeeting, endMeeting, cancelMeeting } from '../services/meetingLifecycle.js';
+import { parseBreakoutRoomId, resolveBreakoutAccess } from '../lib/breakoutRoomId.js';
 
 const router = express.Router();
 
@@ -55,7 +59,7 @@ const includeTeam = () => ({
   attributes: ['id', 'name', 'description']
 });
 
-router.post('/', protect, enforceMeetingQuota, async (req, res) => {
+router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQuota, async (req, res) => {
   try {
     const { title, description, scheduledAt, settings, teamId, invitees, reminders, recurrence } = req.body;
 
@@ -184,8 +188,8 @@ router.get('/', protect, async (req, res) => {
     const whereClause = {
       [Op.or]: [
         { hostId: req.user.id },
-        seqWhere(fn('JSON_CONTAINS', col('participantIds'), cast(JSON.stringify(req.user.id), 'json')), 1),
-        seqWhere(fn('JSON_CONTAINS', col('inviteeIds'), cast(JSON.stringify(req.user.id), 'json')), 1)
+        seqWhere(fn('JSON_CONTAINS', col('participantIds'), JSON.stringify(req.user.id)), 1),
+        seqWhere(fn('JSON_CONTAINS', col('inviteeIds'), JSON.stringify(req.user.id)), 1)
       ]
     };
 
@@ -285,8 +289,18 @@ router.get('/team/:teamId', protect, async (req, res) => {
 
 router.get('/:roomId', protect, async (req, res) => {
   try {
+    // Breakout rooms present the parent meeting's details
+    let lookupRoomId = req.params.roomId;
+    if (parseBreakoutRoomId(lookupRoomId)) {
+      const access = await resolveBreakoutAccess(lookupRoomId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ success: false, message: 'Breakout room is closed or not assigned to you' });
+      }
+      lookupRoomId = access.meeting.roomId;
+    }
+
     const meeting = await Meeting.findOne({
-      where: { roomId: req.params.roomId },
+      where: { roomId: lookupRoomId },
       include: [includeHost(), includeTeam()]
     });
 
@@ -311,8 +325,21 @@ router.get('/:roomId', protect, async (req, res) => {
   }
 });
 
-router.post('/:roomId/join', protect, async (req, res) => {
+router.post('/:roomId/join', protect, requirePermission('meetings.join'), async (req, res) => {
   try {
+    // Entering a breakout room doesn't change the parent meeting's attendance
+    if (parseBreakoutRoomId(req.params.roomId)) {
+      const access = await resolveBreakoutAccess(req.params.roomId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ success: false, message: 'Breakout room is closed or not assigned to you' });
+      }
+      return res.json({
+        success: true,
+        message: 'Joined breakout room successfully',
+        data: { meeting: access.meeting.toJSON() }
+      });
+    }
+
     const meeting = await Meeting.findOne({
       where: { roomId: req.params.roomId },
       include: [includeHost()]
@@ -325,11 +352,29 @@ router.post('/:roomId/join', protect, async (req, res) => {
       });
     }
 
-    if (meeting.status === 'ended') {
-      console.warn(`Join failed: meeting ${roomId} has status 'ended'`);
+    if (meeting.status === 'ended' || meeting.status === 'cancelled') {
+      console.warn(`Join failed: meeting ${meeting.roomId} has status '${meeting.status}'`);
       return res.status(400).json({
         success: false,
-        message: 'This meeting has ended'
+        message: meeting.status === 'cancelled' ? 'This meeting was cancelled' : 'This meeting has ended'
+      });
+    }
+
+    if (!canAccessMeeting(meeting, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'This meeting is restricted to invited people'
+      });
+    }
+
+    if (
+      meeting.settings?.hostMustJoinFirst &&
+      !canManageMeeting(meeting, req.user.id) &&
+      !hostHasJoined(meeting)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'The host has not joined yet. Please try again shortly.'
       });
     }
 
@@ -338,7 +383,7 @@ router.post('/:roomId/join', protect, async (req, res) => {
     const maxParticipants = (meeting.settings && meeting.settings.maxParticipants) || 50;
 
     if (activeParticipants >= maxParticipants) {
-      console.warn(`Join failed: meeting ${roomId} is full (${activeParticipants}/${maxParticipants})`);
+      console.warn(`Join failed: meeting ${meeting.roomId} is full (${activeParticipants}/${maxParticipants})`);
       return res.status(400).json({
         success: false,
         message: 'Meeting is full'
@@ -367,10 +412,7 @@ router.post('/:roomId/join', protect, async (req, res) => {
       meeting.participantIds = [...(meeting.participantIds || []), req.user.id];
     }
 
-    if (meeting.status === 'scheduled') {
-      meeting.status = 'active';
-      meeting.startedAt = new Date();
-    }
+    await startMeeting(meeting);
 
     await meeting.save();
 
@@ -391,6 +433,11 @@ router.post('/:roomId/join', protect, async (req, res) => {
 
 router.post('/:roomId/leave', protect, async (req, res) => {
   try {
+    // Leaving a breakout room must never end the parent meeting
+    if (parseBreakoutRoomId(req.params.roomId)) {
+      return res.json({ success: true, message: 'Left breakout room successfully' });
+    }
+
     const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
@@ -412,13 +459,17 @@ router.post('/:roomId/leave', protect, async (req, res) => {
     const isHost = meeting.hostId === req.user.id;
     const activeParticipants = participants.filter(p => !p.leftAt).length;
 
-    if (isHost || activeParticipants === 0) {
-      meeting.status = 'ended';
-      meeting.endedAt = new Date();
-    }
-
     meeting.participants = participants;
     await meeting.save();
+
+    // Host leaving, or the last person leaving, ends the meeting (once, and it gets billed).
+    let ended = false;
+    if (isHost || activeParticipants === 0) {
+      ended = (await endMeeting(meeting)).changed;
+    }
+    if (ended) {
+      req.app.get('io')?.to(meeting.roomId).emit('meeting:ended', { roomId: meeting.roomId, endedBy: req.user.id });
+    }
 
     res.json({
       success: true,
@@ -494,27 +545,8 @@ router.post('/:roomId/end', protect, async (req, res) => {
       });
     }
 
-    const firstEnd = meeting.status !== 'ended';
-
-    meeting.status = 'ended';
-    meeting.endedAt = new Date();
-
-    // Bill the meeting's duration against the host's plan (once per meeting)
-    if (firstEnd) {
-      const startedAt = meeting.startedAt || meeting.createdAt;
-      const minutes = Math.max(0, (meeting.endedAt - new Date(startedAt)) / 60000);
-      await recordUsage(meeting.hostId, 'meeting_minutes', minutes, meeting.id, {
-        title: meeting.title
-      });
-    }
-
-    const participants = (meeting.participants || []).map(p => ({
-      ...p,
-      leftAt: p.leftAt || new Date().toISOString()
-    }));
-    meeting.participants = participants;
-
-    await meeting.save();
+    // Idempotent: ending an already-ended meeting succeeds without re-billing or touching endedAt.
+    await endMeeting(meeting);
 
     const io = req.app.get('io');
     io.to(meeting.roomId).emit('meeting:ended', {
@@ -536,7 +568,44 @@ router.post('/:roomId/end', protect, async (req, res) => {
   }
 });
 
-router.post('/:roomId/recordings', protect, enforceRecordingAllowed, recordingUpload.single('recording'), async (req, res) => {
+const transcriptionContext = (meeting) => ({
+  title: meeting.title,
+  description: meeting.description,
+  participantNames: [...new Set((meeting.participants || []).map(p => p.user?.name).filter(Boolean))]
+});
+
+router.post('/:roomId/recordings/:recordingId/retry-transcription', protect, requirePermission('meetings.transcribe'), enforceTranscriptionAllowed, async (req, res) => {
+  try {
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
+    if (!meeting) return res.status(404).json({ success: false, message: 'Meeting not found' });
+
+    const rec = (meeting.recordings || []).find(r => (r.id || path.parse(r.filename || '').name) === req.params.recordingId);
+    if (!rec) return res.status(404).json({ success: false, message: 'Recording not found' });
+    if (!canManageMeeting(meeting, req.user.id) && rec.recordedBy !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Only the host, a co-host, or whoever recorded it can retry transcription' });
+    }
+
+    try {
+      await retryTranscription({
+        meeting,
+        recordingId: req.params.recordingId,
+        language: req.body?.language || process.env.TRANSCRIPTION_LANGUAGE || 'en',
+        context: transcriptionContext(meeting)
+      });
+    } catch (error) {
+      if (error instanceof StateTransitionError) {
+        return res.status(409).json({ success: false, message: 'Transcription is already running for this recording' });
+      }
+      throw error;
+    }
+    res.status(202).json({ success: true, message: 'Transcription queued' });
+  } catch (error) {
+    console.error('Retry transcription error:', error);
+    res.status(500).json({ success: false, message: 'Error retrying transcription', error: error.message });
+  }
+});
+
+router.post('/:roomId/recordings', protect, requirePermission('meetings.record'), enforceRecordingAllowed, recordingUpload.single('recording'), async (req, res) => {
   try {
     const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
@@ -588,14 +657,19 @@ router.post('/:roomId/recordings', protect, enforceRecordingAllowed, recordingUp
       mimeType: req.file.mimetype,
       size: req.file.size,
       duration: Number.isFinite(duration) ? duration : 0,
-      recordedBy: req.user.id,
-      language
+      recordedBy: req.user.id
     });
 
-    const recordings = meeting.recordings || [];
-    recordings.push(result.recording);
-    meeting.recordings = recordings;
-    await meeting.save();
+    await appendRecording(meeting.id, result.recording);
+
+    // Transcription runs in the background (queued -> processing -> completed|failed); the response doesn't wait for it.
+    enqueueTranscription({
+      meetingId: meeting.id,
+      roomId: meeting.roomId,
+      recording: result.recording,
+      language,
+      context: transcriptionContext(meeting)
+    });
 
     const recordingMinutes = Number.isFinite(duration) ? duration / 60 : 0;
     await recordUsage(meeting.hostId, 'recording_minutes', recordingMinutes, meeting.id, {
@@ -605,10 +679,9 @@ router.post('/:roomId/recordings', protect, enforceRecordingAllowed, recordingUp
 
     res.status(201).json({
       success: true,
-      message: 'Recording uploaded and transcribed successfully',
+      message: 'Recording uploaded; transcription is processing',
       data: {
-        recording: result.recording,
-        transcript: result.transcript
+        recording: result.recording
       }
     });
   } catch (error) {
@@ -699,6 +772,9 @@ router.post('/:roomId/invite', protect, async (req, res) => {
 router.put('/:roomId/respond', protect, async (req, res) => {
   try {
     const { status } = req.body;
+    if (!['accepted', 'declined'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be 'accepted' or 'declined'" });
+    }
     const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 
     if (!meeting) {
@@ -720,6 +796,14 @@ router.put('/:roomId/respond', protect, async (req, res) => {
       });
     }
 
+    if (meeting.status === 'ended' || meeting.status === 'cancelled') {
+      return res.status(400).json({ success: false, message: 'This meeting is over; you can no longer respond' });
+    }
+    try {
+      inviteeMachine.assertTransition(invitee.status || inviteeMachine.initial, status);
+    } catch (error) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
     invitee.status = status;
     invitee.respondedAt = new Date().toISOString();
 
@@ -738,6 +822,15 @@ router.put('/:roomId/respond', protect, async (req, res) => {
         });
         meeting.participants = participants;
         meeting.participantIds = [...(meeting.participantIds || []), req.user.id];
+      }
+    }
+
+    if (status === 'declined') {
+      // Changed their mind after accepting: remove the seat they were given (unless they're in the room now)
+      const stillPresent = (meeting.participants || []).some(p => p.userId === req.user.id && !p.leftAt);
+      if (!stillPresent) {
+        meeting.participants = (meeting.participants || []).filter(p => p.userId !== req.user.id || p.leftAt);
+        meeting.participantIds = (meeting.participantIds || []).filter(id => id !== req.user.id);
       }
     }
 
@@ -777,15 +870,14 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
       });
     }
 
-    if (meeting.status === 'ended' || meeting.status === 'cancelled') {
-      return res.status(400).json({
-        success: false,
-        message: 'Meeting is already ended or cancelled'
-      });
+    try {
+      await cancelMeeting(meeting);
+    } catch (error) {
+      if (error instanceof StateTransitionError) {
+        return res.status(400).json({ success: false, message: 'Meeting is already ended or cancelled' });
+      }
+      throw error;
     }
-
-    meeting.status = 'cancelled';
-    await meeting.save();
 
     const invitees = meeting.invitees || [];
     const notificationPromises = invitees.map(inv => {
@@ -824,7 +916,7 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
 
 
 // Generate/generate or get complete meeting transcript (merged from all recordings)
-router.post('/:roomId/complete-transcript', protect, enforceTranscriptionAllowed, async (req, res) => {
+router.post('/:roomId/complete-transcript', protect, requirePermission('meetings.transcribe'), enforceTranscriptionAllowed, async (req, res) => {
   try {
     const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
     if (!meeting) {

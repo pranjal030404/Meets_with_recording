@@ -140,21 +140,6 @@ export default function AppShell({ children, wide = false }) {
             </Link>
           )
         })}
-
-        {['admin', 'superadmin'].includes(user?.role) && (
-          <Link
-            to="/admin"
-            onClick={() => setSidebarOpen(false)}
-            className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-              location.pathname.startsWith('/admin')
-                ? 'bg-amber-500/15 text-amber-200 border border-amber-500/30'
-                : 'text-gray-400 hover:text-gray-100 hover:bg-white/[0.04] border border-transparent'
-            }`}
-          >
-            <Shield className="w-[18px] h-[18px] text-amber-400/70" />
-            Admin
-          </Link>
-        )}
       </nav>
 
       {/* User + status */}

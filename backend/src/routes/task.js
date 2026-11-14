@@ -1,4 +1,5 @@
 import express from 'express';
+import { taskMachine } from '../lib/stateMachines.js';
 import { Op } from 'sequelize';
 import Task from '../models/Task.js';
 import Team from '../models/Team.js';
@@ -7,6 +8,7 @@ import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import { protect } from '../middleware/auth.js';
 import logAudit from '../services/auditService.js';
+import { requirePermission } from '../lib/permissions.js';
 import { Sequelize } from 'sequelize';
 
 const router = express.Router();
@@ -89,7 +91,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // Create task
-router.post('/', protect, async (req, res) => {
+router.post('/', protect, requirePermission('tasks.create'), async (req, res) => {
   try {
     const { title, description, assigneeId, dueDate, priority = 'medium', teamId, messageId, meetingId, labels = [], parentId } = req.body;
     if (!title || title.trim() === '') {
@@ -181,7 +183,15 @@ router.put('/:taskId', protect, async (req, res) => {
     if (description !== undefined) task.description = description;
     if (dueDate !== undefined) task.dueDate = dueDate ? new Date(dueDate) : null;
     if (priority !== undefined) task.priority = priority;
-    if (status !== undefined && ['todo', 'in_progress', 'done'].includes(status)) task.status = status;
+    if (status !== undefined) {
+      if (!taskMachine.isState(status)) {
+        return res.status(400).json({ success: false, message: `Status must be one of: ${taskMachine.states.join(', ')}` });
+      }
+      if (!taskMachine.can(task.status, status)) {
+        return res.status(409).json({ success: false, message: `Cannot move a task from '${task.status}' to '${status}'` });
+      }
+      task.status = status;
+    }
     if (labels !== undefined) task.labels = labels;
     if (assigneeId !== undefined) {
       if (assigneeId === null || assigneeId === '') {

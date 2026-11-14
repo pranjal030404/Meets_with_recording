@@ -6,7 +6,7 @@ export async function up(queryInterface, Sequelize) {
   const password = process.env.SUPERADMIN_PASSWORD || 'SuperAdmin@2026';
   const name = process.env.SUPERADMIN_NAME || 'Super Admin';
 
-  const existing = await queryInterface.rawSelect('Users', {
+  const existing = await queryInterface.rawSelect('Admins', {
     where: { email }
   }, ['id']);
 
@@ -14,14 +14,12 @@ export async function up(queryInterface, Sequelize) {
     const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    await queryInterface.bulkInsert('Users', [{
+    await queryInterface.bulkInsert('Admins', [{
       id: uuidv4(),
       name,
       email,
       password: hashedPassword,
       avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
-      isOnline: false,
-      lastSeen: new Date(),
       role: 'superadmin',
       createdAt: new Date(),
       updatedAt: new Date()
@@ -35,5 +33,5 @@ export async function up(queryInterface, Sequelize) {
 
 export async function down(queryInterface) {
   const email = process.env.SUPERADMIN_EMAIL || 'admin@meetclone.com';
-  await queryInterface.bulkDelete('Users', { email });
+  await queryInterface.bulkDelete('Admins', { email });
 }

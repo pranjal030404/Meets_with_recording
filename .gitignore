@@ -93,3 +93,4 @@ uploads/*
 .cache/
 .parcel-cache/
 .vite/
+.venv-whisper/

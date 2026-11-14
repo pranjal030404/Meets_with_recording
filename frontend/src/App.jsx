@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import { useAuthStore } from './store/authStore'
+import { useAdminStore } from './store/adminStore'
 
 // Pages
 import Landing from './pages/Landing'
@@ -19,6 +21,7 @@ import Tasks from './pages/Tasks'
 import Files from './pages/Files'
 import Search from './pages/Search'
 import Admin from './pages/Admin'
+import AdminLogin from './pages/AdminLogin'
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
@@ -52,6 +55,14 @@ function PublicRoute({ children }) {
   }
 
   return children
+}
+
+// Admin portal: separate admin session, only reachable via /admin
+function AdminRoute() {
+  const { admin, isLoading, restore } = useAdminStore()
+  useEffect(() => { restore() }, [restore])
+  if (isLoading) return null
+  return admin ? <Admin /> : <AdminLogin />
 }
 
 export default function App() {
@@ -146,11 +157,7 @@ export default function App() {
           <Search />
         </ProtectedRoute>
       } />
-      <Route path="/admin" element={
-        <ProtectedRoute>
-          <Admin />
-        </ProtectedRoute>
-      } />
+      <Route path="/admin" element={<AdminRoute />} />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />

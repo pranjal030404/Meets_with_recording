@@ -21,11 +21,14 @@ import taskRoutes from './routes/task.js';
 import fileRoutes from './routes/file.js';
 import searchRoutes from './routes/search.js';
 import adminRoutes from './routes/admin.js';
+import activityLog from './middleware/activityLog.js';
+import { ensureSystemRoles } from './lib/permissions.js';
 import aiRoutes from './routes/ai.js';
 
 import { initializeSocketHandlers } from './sockets/index.js';
 
 import ReminderService from './services/reminderService.js';
+import { recoverStuckTranscriptions } from './services/recordingService.js';
 import mediasoupService from './lib/mediasoup.js';
 
 import { connectDB, sequelize } from './database/index.js';
@@ -135,6 +138,7 @@ if (process.env.NODE_ENV === 'production') {
 // =============================================
 // ROUTES
 // =============================================
+app.use('/api', activityLog);
 app.use('/api/auth', authRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/chat', chatRoutes);
@@ -175,8 +179,10 @@ app.set('io', io);
 const startServer = async () => {
   try {
     await connectDB();
+    recoverStuckTranscriptions().then((n) => n && console.log(`Marked ${n} interrupted transcription(s) as failed (retry available)`)).catch((e) => console.error('Transcription recovery failed:', e.message));
     await sequelize.sync({ alter: false });
     console.log('Database tables synchronized');
+    await ensureSystemRoles();
 
     // Downgrade lapsed paid subscriptions to Free now and every hour
     setInterval(() => {

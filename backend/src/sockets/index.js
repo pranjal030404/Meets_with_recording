@@ -5,12 +5,86 @@ import Team from '../models/Team.js';
 import User from '../models/User.js';
 import ConversationMember from '../models/ConversationMember.js';
 import FileEntry from '../models/FileEntry.js';
+import { getPermissions } from '../lib/permissions.js';
 import mediasoupService from '../lib/mediasoup.js';
-import { canManageMeeting, isMeetingHost, getMeetingRole } from '../lib/meetingPermissions.js';
+import { canManageMeeting, isMeetingHost, getMeetingRole, contributorAllowed } from '../lib/meetingPermissions.js';
+import { saveRuntime, loadRuntime, deleteRuntime } from '../services/roomRuntimeStore.js';
+import { endMeeting } from '../services/meetingLifecycle.js';
+import { persistLiveTranscript, scheduleTranscriptCheckpoint, cancelTranscriptCheckpoint } from '../services/liveTranscriptStore.js';
+import { parseBreakoutRoomId, resolveBreakoutAccess } from '../lib/breakoutRoomId.js';
 
 const connectedUsers = new Map();
 const roomParticipants = new Map();
 const meetingNotes = new Map(); // roomId -> shared notes text
+
+// In-meeting tools state (per socket room, so breakout rooms get their own)
+const roomTimers = new Map(); // roomId -> { endsAt, duration, label, startedBy }
+const roomTranscription = new Map(); // roomId -> { enabled, by }
+const roomTranscripts = new Map(); // roomId -> [{ userId, userName, text, timestamp }]
+const roomStreams = new Map(); // roomId -> { startedAt, startedBy }
+
+// Admission state machine per (room, user):  (none) -> waiting -> admitted | denied
+// Managers (host/co-host) skip it. 'admitted' sticks for the life of the room so rejoining isn't re-gated.
+const roomWaiting = new Map(); // roomId -> Map<socketId, { user }>
+const roomAdmitted = new Map(); // roomId -> Set<userId>
+
+const MAX_TIMER_SECONDS = 12 * 60 * 60;
+const MAX_TRANSCRIPT_LINES = 2000;
+const MAX_LINE_CHARS = 500;
+
+const restoredRooms = new Set(); // rooms whose saved state we've already looked for this process
+
+const runtimeSnapshot = (roomId) => ({
+  timer: roomTimers.get(roomId) || null,
+  transcription: roomTranscription.get(roomId) || null,
+  notes: meetingNotes.get(roomId) ?? null,
+  stream: roomStreams.get(roomId) || null,
+  admitted: [...(roomAdmitted.get(roomId) || [])]
+});
+const persistRuntime = (roomId) => {
+  if (!parseBreakoutRoomId(roomId)) saveRuntime(roomId, () => runtimeSnapshot(roomId));
+};
+
+// After a server restart the first person to reconnect brings the room's tools back.
+const restoreRuntime = async (roomId) => {
+  if (restoredRooms.has(roomId) || parseBreakoutRoomId(roomId)) return;
+  restoredRooms.add(roomId);
+  const saved = await loadRuntime(roomId);
+  if (!saved) return;
+  if (saved.timer && saved.timer.endsAt > Date.now() && !roomTimers.has(roomId)) roomTimers.set(roomId, saved.timer);
+  if (saved.transcription && !roomTranscription.has(roomId)) roomTranscription.set(roomId, saved.transcription);
+  if (typeof saved.notes === 'string' && !meetingNotes.has(roomId)) meetingNotes.set(roomId, saved.notes);
+  if (saved.stream && !roomStreams.has(roomId)) roomStreams.set(roomId, saved.stream);
+  if (Array.isArray(saved.admitted) && saved.admitted.length && !roomAdmitted.has(roomId)) roomAdmitted.set(roomId, new Set(saved.admitted));
+};
+
+const clearRoomTools = (roomId) => {
+  restoredRooms.delete(roomId);
+  deleteRuntime(roomId);
+  // Keep the live captions as the meeting's transcript (main rooms only; breakouts are throwaway)
+  cancelTranscriptCheckpoint(roomId);
+  if (!parseBreakoutRoomId(roomId)) persistLiveTranscript(roomId, roomTranscripts.get(roomId));
+  meetingNotes.delete(roomId);
+  roomTimers.delete(roomId);
+  roomTranscription.delete(roomId);
+  roomTranscripts.delete(roomId);
+  roomStreams.delete(roomId);
+  roomWaiting.delete(roomId);
+  roomAdmitted.delete(roomId);
+};
+
+const emitToolsState = (socket, roomId) => {
+  if (!socket.rooms.has(roomId)) return;
+  socket.emit('timer:state', { timer: roomTimers.get(roomId) || null, serverNow: Date.now() });
+  socket.emit('transcribe:state', roomTranscription.get(roomId) || { enabled: false, by: null });
+  socket.emit('stream:state', { stream: roomStreams.get(roomId) || null });
+};
+
+// Breakout rooms authorize against their parent meeting
+const loadRoomMeeting = (roomId) => {
+  const parsed = parseBreakoutRoomId(roomId);
+  return Meeting.findOne({ where: { roomId: parsed ? parsed.parentRoomId : roomId } });
+};
 
 const userTransports = new Map();
 const userProducers = new Map();
@@ -33,6 +107,13 @@ export const initializeSocketHandlers = (io) => {
     next();
   });
 
+  // True when host management forbids this user from the given contributor action
+  const isBlocked = async (roomId, userId, key) => {
+    if (!roomId) return false;
+    const meeting = await Meeting.findOne({ where: { roomId }, attributes: ['id', 'hostId', 'settings', 'participants'] });
+    return !!meeting && !contributorAllowed(meeting, userId, key);
+  };
+
   io.on('connection', (socket) => {
     console.log(`User connected: ${socket.user.name} (${socket.id})`);
 
@@ -46,13 +127,46 @@ export const initializeSocketHandlers = (io) => {
     // Mark user online for the workspace
     User.update({ isOnline: true }, { where: { id: socket.user.id } }).catch(() => {});
 
-    socket.on('room:join', async ({ roomId }) => {
+    const handleRoomJoin = async ({ roomId }, { admitted = false } = {}) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
+        let meeting;
+        if (parseBreakoutRoomId(roomId)) {
+          const access = await resolveBreakoutAccess(roomId, socket.user.id);
+          if (!access) {
+            socket.emit('error', { message: 'Breakout room is closed or not assigned to you' });
+            return;
+          }
+          meeting = access.meeting;
+        } else {
+          meeting = await Meeting.findOne({ where: { roomId } });
+        }
 
         if (!meeting) {
           socket.emit('error', { message: 'Meeting not found' });
           return;
+        }
+
+        await restoreRuntime(roomId);
+
+        // Admission gate (main rooms only): locked meeting / waiting room, enforced server-side
+        if (!parseBreakoutRoomId(roomId) && !admitted && !canManageMeeting(meeting, socket.user.id)
+            && !roomAdmitted.get(roomId)?.has(socket.user.id)) {
+          if (meeting.settings?.isLocked) {
+            socket.emit('error', { message: 'This meeting is locked by the host' });
+            return;
+          }
+          if (meeting.settings?.waitingRoom) {
+            if (!roomWaiting.has(roomId)) roomWaiting.set(roomId, new Map());
+            roomWaiting.get(roomId).set(socket.id, { user: { id: socket.user.id, name: socket.user.name, email: socket.user.email, avatar: socket.user.avatar } });
+            socket.emit('room:waiting-for-host', { roomId });
+            // Tell the room's managers (they're in the socket room) that someone is at the door
+            for (const [userId, info] of roomParticipants.get(roomId) || []) {
+              if (info.role === 'host' || info.role === 'co-host') {
+                io.to(info.socketId).emit('room:waiting', { user: { id: socket.user.id, name: socket.user.name, email: socket.user.email, avatar: socket.user.avatar }, socketId: socket.id });
+              }
+            }
+            return;
+          }
         }
 
         socket.join(roomId);
@@ -123,12 +237,24 @@ export const initializeSocketHandlers = (io) => {
           socketId: socket.id
         });
 
+        // Late joiners pick up any running timer / transcription / live stream
+        emitToolsState(socket, roomId);
+
+        // A manager arriving after guests are already waiting still needs to see them
+        if (canManageMeeting(meeting, socket.user.id)) {
+          for (const [waitingSocketId, entry] of roomWaiting.get(roomId) || []) {
+            socket.emit('room:waiting', { user: entry.user, socketId: waitingSocketId });
+          }
+        }
+
         console.log(`${socket.user.name} joined room: ${roomId}`);
       } catch (error) {
         console.error('Room join error:', error);
         socket.emit('error', { message: 'Error joining room' });
       }
-    });
+    };
+    socket.data.joinRoom = handleRoomJoin;
+    socket.on('room:join', (payload) => handleRoomJoin(payload));
 
     socket.on('room:leave', () => {
       handleRoomLeave(socket, io);
@@ -178,6 +304,10 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('mediasoup:produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
       try {
+        const produceKey = { audio: 'allowMic', video: 'allowVideo', screen: 'allowScreenShare' }[appData?.mediaType || kind];
+        if (produceKey && await isBlocked(socket.roomId, socket.user.id, produceKey)) {
+          return callback({ success: false, error: 'The host has turned this off for participants' });
+        }
         const { id: producerId } = await mediasoupService.produce(
           transportId,
           kind,
@@ -213,6 +343,8 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('mediasoup:consume', async ({ roomId, producerId, rtpCapabilities }, callback) => {
       try {
+        // Only people actually in the room (not waiting, not denied) may receive its media
+        if (!socket.rooms.has(roomId)) return callback({ success: false, error: 'Not in this room' });
         const transports = userTransports.get(socket.id);
         if (!transports || !transports.recv) {
           throw new Error('Receive transport not created');
@@ -336,7 +468,8 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('media:screen-share', ({ isScreenSharing }) => {
+    socket.on('media:screen-share', async ({ isScreenSharing }) => {
+      if (isScreenSharing && await isBlocked(socket.roomId, socket.user.id, 'allowScreenShare')) return;
       if (socket.roomId) {
         const roomUsers = roomParticipants.get(socket.roomId);
         if (roomUsers && roomUsers.has(socket.user.id)) {
@@ -406,17 +539,24 @@ export const initializeSocketHandlers = (io) => {
         const meeting = await Meeting.findOne({ where: { roomId } });
 
         if (meeting && canManageMeeting(meeting, socket.user.id)) {
+          await endMeeting(meeting); // idempotent, bills minutes once
           io.to(roomId).emit('meeting:ended', {
             roomId,
             endedBy: socket.user.id
           });
 
-          meeting.status = 'ended';
-          meeting.endedAt = new Date();
-          await meeting.save();
-
           roomParticipants.delete(roomId);
-          meetingNotes.delete(roomId);
+          clearRoomTools(roomId);
+
+          // Pull anyone sitting in a breakout room out as well
+          for (const name of io.sockets.adapter.rooms.keys()) {
+            const parsed = parseBreakoutRoomId(name);
+            if (parsed && parsed.parentRoomId === roomId) {
+              io.to(name).emit('meeting:ended', { roomId: name, endedBy: socket.user.id });
+              roomParticipants.delete(name);
+              clearRoomTools(name);
+            }
+          }
         }
       } catch (error) {
         console.error('Host end meeting error:', error);
@@ -425,6 +565,10 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('chat:send', async ({ roomId, content, recipientId, attachment }) => {
       try {
+        if (!(await getPermissions(socket.user)).includes('chat.send')) {
+          socket.emit('error', { message: 'Your role does not allow sending messages' });
+          return;
+        }
         const meeting = await Meeting.findOne({ where: { roomId } });
 
         if (!meeting) {
@@ -536,7 +680,8 @@ export const initializeSocketHandlers = (io) => {
       });
     });
 
-    socket.on('reaction:emoji', ({ roomId, emoji }) => {
+    socket.on('reaction:emoji', async ({ roomId, emoji }) => {
+      if (await isBlocked(roomId, socket.user.id, 'allowReactions')) return;
       io.to(roomId).emit('reaction:emoji', {
         userId: socket.user.id,
         userName: socket.user.name,
@@ -601,12 +746,29 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
+    // Resolve a waiting socket for this room. Only sockets actually waiting here can be admitted/denied,
+    // so a host can't act on an arbitrary socket id from another room.
+    const takeWaiting = async (roomId, targetSocketId) => {
+      const meeting = await Meeting.findOne({ where: { roomId } });
+      if (!meeting || !canManageMeeting(meeting, socket.user.id)) return null;
+      const waiting = roomWaiting.get(roomId);
+      const entry = waiting?.get(targetSocketId);
+      if (!entry) return null;
+      waiting.delete(targetSocketId);
+      return entry;
+    };
+
     socket.on('host:admit-user', async ({ roomId, targetSocketId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
-          io.to(targetSocketId).emit('room:admitted');
-        }
+        const entry = await takeWaiting(roomId, targetSocketId);
+        if (!entry) return;
+        if (!roomAdmitted.has(roomId)) roomAdmitted.set(roomId, new Set());
+        roomAdmitted.get(roomId).add(entry.user.id);
+        persistRuntime(roomId);
+        const target = io.sockets.sockets.get(targetSocketId);
+        if (!target) return;
+        target.emit('room:admitted');
+        await target.data.joinRoom?.({ roomId }, { admitted: true });
       } catch (error) {
         console.error('Host admit user error:', error);
       }
@@ -614,10 +776,7 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:deny-user', async ({ roomId, targetSocketId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
-          io.to(targetSocketId).emit('room:denied');
-        }
+        if (await takeWaiting(roomId, targetSocketId)) io.to(targetSocketId).emit('room:denied');
       } catch (error) {
         console.error('Host deny user error:', error);
       }
@@ -713,7 +872,7 @@ export const initializeSocketHandlers = (io) => {
       try {
         const meeting = await Meeting.findOne({ where: { roomId } });
         if (meeting && canManageMeeting(meeting, socket.user.id)) {
-          Object.assign(meeting.settings || {}, settings);
+          meeting.settings = { ...(meeting.settings || {}), ...settings };
           await meeting.save();
           io.to(roomId).emit('meeting:settings-updated', { settings });
         }
@@ -733,10 +892,12 @@ export const initializeSocketHandlers = (io) => {
       socket.emit('notes:update', { text: meetingNotes.get(roomId) || '', userName: null });
     });
 
-    socket.on('notes:update', ({ roomId, text }) => {
+    socket.on('notes:update', async ({ roomId, text }) => {
       if (!socket.rooms.has(roomId) || typeof text !== 'string') return;
+      if (await isBlocked(roomId, socket.user.id, 'allowAddOns')) return;
       const clipped = text.slice(0, 20000);
       meetingNotes.set(roomId, clipped);
+      persistRuntime(roomId);
       socket.to(roomId).emit('notes:update', { text: clipped, userName: socket.user.name });
     });
 
@@ -748,11 +909,112 @@ export const initializeSocketHandlers = (io) => {
       });
     });
 
-    socket.on('whiteboard:draw', ({ roomId, x0, y0, x1, y1, color, width, tool }) => {
+    // ---- Meeting tools: timer, live transcription, live streaming ----
+
+    // Tools panel / badges ask for the current state when they mount
+    socket.on('tools:request', ({ roomId }) => emitToolsState(socket, roomId));
+
+    const requireManager = async (roomId) => {
+      if (!socket.rooms.has(roomId)) return false;
+      const meeting = await loadRoomMeeting(roomId);
+      return !!meeting && canManageMeeting(meeting, socket.user.id);
+    };
+
+    socket.on('timer:start', async ({ roomId, seconds, label }) => {
+      try {
+        const duration = Math.floor(Number(seconds));
+        if (!Number.isFinite(duration) || duration < 1 || duration > MAX_TIMER_SECONDS) return;
+        if (!(await requireManager(roomId))) return;
+        const timer = {
+          duration,
+          endsAt: Date.now() + duration * 1000,
+          label: typeof label === 'string' ? label.slice(0, 60) : '',
+          startedBy: socket.user.name
+        };
+        roomTimers.set(roomId, timer);
+        persistRuntime(roomId);
+        io.to(roomId).emit('timer:state', { timer, serverNow: Date.now() });
+      } catch (error) {
+        console.error('Timer start error:', error);
+      }
+    });
+
+    socket.on('timer:stop', async ({ roomId }) => {
+      try {
+        if (!(await requireManager(roomId))) return;
+        roomTimers.delete(roomId);
+        persistRuntime(roomId);
+        io.to(roomId).emit('timer:state', { timer: null, serverNow: Date.now() });
+      } catch (error) {
+        console.error('Timer stop error:', error);
+      }
+    });
+
+    socket.on('transcribe:set', async ({ roomId, enabled }) => {
+      try {
+        if (!(await requireManager(roomId))) return;
+        const state = { enabled: !!enabled, by: socket.user.name };
+        roomTranscription.set(roomId, state);
+        persistRuntime(roomId);
+        io.to(roomId).emit('transcribe:state', state);
+      } catch (error) {
+        console.error('Transcribe set error:', error);
+      }
+    });
+
+    // Each client recognises its own mic locally and sends finished phrases here
+    socket.on('transcribe:line', ({ roomId, text }) => {
+      if (!socket.rooms.has(roomId) || typeof text !== 'string') return;
+      if (!roomTranscription.get(roomId)?.enabled) return;
+      const clean = text.trim().slice(0, MAX_LINE_CHARS);
+      if (!clean) return;
+
+      const line = {
+        userId: socket.user.id,
+        userName: socket.user.name,
+        text: clean,
+        timestamp: Date.now()
+      };
+      const lines = roomTranscripts.get(roomId) || [];
+      lines.push(line);
+      if (lines.length > MAX_TRANSCRIPT_LINES) lines.shift();
+      roomTranscripts.set(roomId, lines);
+      if (!parseBreakoutRoomId(roomId)) scheduleTranscriptCheckpoint(roomId, () => roomTranscripts.get(roomId));
+
+      io.to(roomId).emit('transcript:line', line);
+      socket.to(roomId).emit('caption:text', { userId: line.userId, userName: line.userName, text: clean });
+    });
+
+    socket.on('transcript:request', ({ roomId }) => {
+      if (!socket.rooms.has(roomId)) return;
+      socket.emit('transcript:history', { lines: roomTranscripts.get(roomId) || [] });
+    });
+
+    socket.on('stream:set', async ({ roomId, enabled }) => {
+      try {
+        if (!(await requireManager(roomId))) return;
+        if (enabled) {
+          if (!roomStreams.has(roomId)) {
+            roomStreams.set(roomId, { startedAt: Date.now(), startedBy: socket.user.name });
+            persistRuntime(roomId);
+          }
+        } else {
+          roomStreams.delete(roomId);
+          persistRuntime(roomId);
+        }
+        io.to(roomId).emit('stream:state', { stream: roomStreams.get(roomId) || null });
+      } catch (error) {
+        console.error('Stream set error:', error);
+      }
+    });
+
+    socket.on('whiteboard:draw', async ({ roomId, x0, y0, x1, y1, color, width, tool }) => {
+      if (await isBlocked(roomId, socket.user.id, 'allowAddOns')) return;
       socket.to(roomId).emit('whiteboard:draw', { x0, y0, x1, y1, color, width, tool });
     });
 
-    socket.on('whiteboard:clear', ({ roomId }) => {
+    socket.on('whiteboard:clear', async ({ roomId }) => {
+      if (await isBlocked(roomId, socket.user.id, 'allowAddOns')) return;
       socket.to(roomId).emit('whiteboard:clear');
     });
 
@@ -874,6 +1136,7 @@ export const initializeSocketHandlers = (io) => {
     });
 
     socket.on('disconnect', () => {
+      for (const waiting of roomWaiting.values()) waiting.delete(socket.id);
       console.log(`User disconnected: ${socket.user.name} (${socket.id})`);
 
       const producers = userProducers.get(socket.id);
@@ -924,7 +1187,7 @@ function handleRoomLeave(socket, io) {
 
       if (roomUsers.size === 0) {
         roomParticipants.delete(roomId);
-        meetingNotes.delete(roomId);
+        clearRoomTools(roomId);
       }
     }
 

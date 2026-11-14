@@ -51,6 +51,14 @@ const Meeting = sequelize.define('Meeting', {
       allowChat: true,
       allowRecording: true,
       muteOnEntry: false,
+      hostManagement: false,
+      allowReactions: true,
+      allowMic: true,
+      allowVideo: true,
+      allowAddOns: true,
+      hostMustJoinFirst: false,
+      accessType: 'trusted',
+      allowLinkRequests: true,
       isLocked: false,
       maxParticipants: 50
     }

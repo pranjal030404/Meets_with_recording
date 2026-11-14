@@ -13,6 +13,19 @@ const AuditLog = sequelize.define('AuditLog', {
   actorName: {
     type: DataTypes.STRING(100)
   },
+  actorType: {
+    type: DataTypes.STRING(16),
+    defaultValue: 'user'
+  },
+  method: {
+    type: DataTypes.STRING(10)
+  },
+  path: {
+    type: DataTypes.STRING(500)
+  },
+  statusCode: {
+    type: DataTypes.INTEGER
+  },
   action: {
     type: DataTypes.STRING(50),
     allowNull: false

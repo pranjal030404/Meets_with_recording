@@ -12,11 +12,15 @@ import AuditLog from '../models/AuditLog.js';
  *   req                       // optional express req for ip/user-agent
  * })
  */
-export default async function logAudit({ actor, action, entityType, entityId, metadata = {}, req }) {
+export default async function logAudit({ actor, actorType, actorName, action, entityType, entityId, metadata = {}, req, method, path, statusCode }) {
   try {
     await AuditLog.create({
       actorId: actor?.id || null,
-      actorName: actor?.name || 'system',
+      actorType: actorType || (actor ? 'user' : 'system'),
+      actorName: actorName || actor?.name || 'system',
+      method: method || null,
+      path: path ? String(path).slice(0, 500) : null,
+      statusCode: statusCode || null,
       action,
       entityType: entityType || null,
       entityId: entityId ? String(entityId) : null,

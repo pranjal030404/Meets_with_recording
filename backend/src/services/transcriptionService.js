@@ -2,6 +2,8 @@ import fs from 'fs';
 import { promises as fsPromises } from 'fs';
 import path from 'path';
 import OpenAI from 'openai';
+import { isLocalWhisperAvailable, transcribeLocally } from './localWhisper.js';
+import { buildVocabulary, buildAsrPrompt, refineSegments } from './transcriptRefiner.js';
 
 const client = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -69,7 +71,7 @@ const buildVtt = (segments) => {
   return `WEBVTT\n\n${body}`;
 };
 
-const transcribeWithOpenAI = async ({ recordingPath, language }) => {
+const transcribeWithOpenAI = async ({ recordingPath, language, prompt }) => {
   if (!client) {
     return {
       text: 'Transcription skipped because OPENAI_API_KEY is not configured.',
@@ -84,7 +86,8 @@ const transcribeWithOpenAI = async ({ recordingPath, language }) => {
     file: fs.createReadStream(recordingPath),
     model,
     language: language || process.env.TRANSCRIPTION_LANGUAGE || 'en',
-    response_format: 'verbose_json'
+    response_format: 'verbose_json',
+    ...(prompt ? { prompt } : {})
   });
 
   return {
@@ -101,14 +104,30 @@ export const generateTranscriptionArtifacts = async ({
   transcriptsDir,
   transcriptBaseName,
   recordingDuration = 0,
-  language
+  language,
+  context = {}
 }) => {
   await fsPromises.mkdir(transcriptsDir, { recursive: true });
 
   let transcript;
 
   try {
-    transcript = await transcribeWithOpenAI({ recordingPath, language });
+    const vocabulary = buildVocabulary(context);
+    const prompt = buildAsrPrompt({ title: context.title, vocabulary });
+    // TRANSCRIPTION_PROVIDER=auto|local|openai. auto = free local Whisper first, OpenAI only if a key is set.
+    const want = (process.env.TRANSCRIPTION_PROVIDER || 'auto').toLowerCase();
+    if ((want === 'auto' || want === 'local') && isLocalWhisperAvailable()) {
+      transcript = await transcribeLocally({ recordingPath, language, prompt });
+    } else if (want !== 'local' && client) {
+      transcript = await transcribeWithOpenAI({ recordingPath, language, prompt });
+    } else {
+      transcript = {
+        text: 'No speech-to-text engine configured. Live captions are used for notes instead.',
+        language: language || 'en',
+        segments: [],
+        provider: 'none'
+      };
+    }
   } catch (error) {
     const errorMessage = error?.message || 'Transcription failed';
     transcript = {
@@ -121,14 +140,22 @@ export const generateTranscriptionArtifacts = async ({
     };
   }
 
-  const normalizedSegments = normalizeSegments(transcript.segments, recordingDuration);
-  const transcriptText = transcript.text || normalizedSegments.map((s) => s.text).join(' ');
+  const rawSegments = normalizeSegments(transcript.segments, recordingDuration);
+  const rawText = transcript.text || rawSegments.map((s) => s.text).join(' ');
+
+  // Polish spoken-language artefacts (fillers, self-corrections, names) before saving.
+  const usable = !['none', 'error'].includes(transcript.provider);
+  const refinedResult = usable ? await refineSegments(rawSegments, context) : { segments: rawSegments, text: rawText, refined: false };
+  const normalizedSegments = refinedResult.segments.length ? refinedResult.segments : rawSegments;
+  const transcriptText = refinedResult.refined ? refinedResult.text : rawText;
 
   const jsonPayload = {
     language: transcript.language,
     provider: transcript.provider,
     model: transcript.model,
     text: transcriptText,
+    rawText,
+    refined: !!refinedResult.refined,
     duration: toNumber(recordingDuration),
     generatedAt: new Date().toISOString(),
     segments: normalizedSegments
@@ -151,6 +178,8 @@ export const generateTranscriptionArtifacts = async ({
     model: transcript.model,
     language: transcript.language,
     text: transcriptText,
+    rawText,
+    refined: !!refinedResult.refined,
     segments: normalizedSegments,
     generatedAt: jsonPayload.generatedAt,
     files: {
