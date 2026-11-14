@@ -11,6 +11,7 @@ import ConversationMember from '../models/ConversationMember.js';
 import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import { protect } from '../middleware/auth.js';
+import { requirePermission } from '../lib/permissions.js';
 import logAudit from '../services/auditService.js';
 
 const router = express.Router();
@@ -39,7 +40,7 @@ const upload = multer({
 });
 
 // Upload a file (optionally attached to a team channel or conversation)
-router.post('/upload', protect, upload.single('file'), async (req, res) => {
+router.post('/upload', protect, requirePermission('files.upload'), upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });

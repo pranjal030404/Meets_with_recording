@@ -39,6 +39,21 @@ const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
   }
 });
 
+// MariaDB stores JSON columns as LONGTEXT, so Sequelize's mysql dialect hands them back as strings
+// ("[]" instead of []). Parse them on load so models behave the same on MySQL and MariaDB.
+sequelize.addHook('afterFind', (result) => {
+  if (!result) return;
+  for (const row of Array.isArray(result) ? result : [result]) {
+    if (!row?.constructor?.rawAttributes) continue;
+    for (const [name, attr] of Object.entries(row.constructor.rawAttributes)) {
+      if (attr.type?.key !== 'JSON') continue;
+      const value = row.dataValues[name];
+      if (typeof value !== 'string') continue;
+      try { row.dataValues[name] = JSON.parse(value); } catch { /* leave as is */ }
+    }
+  }
+});
+
 const connectDB = async () => {
   try {
     await sequelize.authenticate();

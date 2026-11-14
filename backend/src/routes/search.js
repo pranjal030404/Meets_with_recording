@@ -1,5 +1,5 @@
 import express from 'express';
-import { Op, fn, col, where as seqWhere, cast } from 'sequelize';
+import { Op, fn, col, where as seqWhere } from 'sequelize';
 import Message from '../models/Message.js';
 import Meeting from '../models/Meeting.js';
 import Team from '../models/Team.js';
@@ -26,8 +26,8 @@ const getMyMeetingIds = async (userId) => {
     where: {
       [Op.or]: [
         { hostId: userId },
-        seqWhere(fn('JSON_CONTAINS', col('participantIds'), cast(JSON.stringify(userId), 'json')), 1),
-        seqWhere(fn('JSON_CONTAINS', col('inviteeIds'), cast(JSON.stringify(userId), 'json')), 1)
+        seqWhere(fn('JSON_CONTAINS', col('participantIds'), JSON.stringify(userId)), 1),
+        seqWhere(fn('JSON_CONTAINS', col('inviteeIds'), JSON.stringify(userId)), 1)
       ]
     },
     attributes: ['id']

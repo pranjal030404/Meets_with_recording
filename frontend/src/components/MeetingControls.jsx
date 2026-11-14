@@ -23,7 +23,8 @@ import {
   Keyboard,
   Download,
   StickyNote,
-  EyeOff
+  EyeOff,
+  Shapes
 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { REACTION_EMOJIS } from './EmojiReactions'
@@ -39,6 +40,7 @@ export default function MeetingControls({
   isHandRaised,
   showChat,
   showParticipants,
+  showTools,
   captionsEnabled,
   handRaisedCount,
   onToggleMute,
@@ -47,6 +49,7 @@ export default function MeetingControls({
   onToggleRecording,
   onToggleChat,
   onToggleParticipants,
+  onToggleTools,
   onToggleHandRaise,
   onToggleCaptions,
   onSendReaction,
@@ -174,6 +177,17 @@ export default function MeetingControls({
             onClick={onToggleParticipants}
             icon={<Users className="w-5 h-5" />}
             label="Participants"
+          />
+        </div>
+
+        {/* Meeting tools */}
+        <div className="tooltip-host" data-tooltip="Meeting tools">
+          <ControlButton
+            active={showTools}
+            activeColor="blue"
+            onClick={onToggleTools}
+            icon={<Shapes className="w-5 h-5" />}
+            label="Meeting tools"
           />
         </div>
 

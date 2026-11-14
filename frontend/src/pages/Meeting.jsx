@@ -1,10 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
 import { useChatStore } from '../store/chatStore'
 import { getSocket, initSocket, waitForSocket, isSocketConnected } from '../lib/socket'
+import api from '../lib/api'
+import { isBreakoutRoomId, parentRoomIdOf, goToRoom } from '../lib/breakout'
+import { translateText } from '../lib/translate'
+import useMeetingTools from '../hooks/useMeetingTools'
 
 // Components
 import MeetingControls from '../components/MeetingControls'
@@ -20,12 +24,18 @@ import MeetingSettingsPanel from '../components/MeetingSettingsPanel'
 import MeetingDetailsPanel from '../components/MeetingDetailsPanel'
 import PollsQAPanel from '../components/PollsQAPanel'
 import NotesPanel from '../components/NotesPanel'
+import MeetingToolsPanel from '../components/MeetingToolsPanel'
+import TimerBadge from '../components/TimerBadge'
 import ShortcutsModal from '../components/ShortcutsModal'
 import { downloadAttendanceReport } from '../lib/attendance'
 
 export default function Meeting() {
   const navigate = useNavigate()
   const { roomId } = useParams()
+  const [searchParams] = useSearchParams()
+  const viewOnly = searchParams.get('viewOnly') === '1'
+  const inBreakout = isBreakoutRoomId(roomId)
+  const parentRoomId = parentRoomIdOf(roomId)
   const { user, token } = useAuthStore()
   const {
     currentMeeting, participants, localStream, isHost, isCoHost,
@@ -62,9 +72,23 @@ export default function Meeting() {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showNotes, setShowNotes] = useState(false)
   const [showMeetingDetails, setShowMeetingDetails] = useState(false)
+  const [showTools, setShowTools] = useState(false)
   const [isJoining, setIsJoining] = useState(true)
   const [screenShareUser, setScreenShareUser] = useState(null)
   const [showLeaveDialog, setShowLeaveDialog] = useState(false)
+
+  const tools = useMeetingTools({
+    roomId,
+    enabled: !isJoining,
+    isMuted,
+    onBreakoutClosed: (returnRoomId) => {
+      toast('The host closed the breakout rooms. Returning to the main room…', { icon: '🚪' })
+      goToRoom(returnRoomId)
+    }
+  })
+  // Caption handlers run inside a long-lived socket effect, so they read the language from a ref
+  const translateToRef = useRef('')
+  translateToRef.current = tools.translateTo
 
   const localVideoRef = useRef(null)
   const socketRef = useRef(null)
@@ -154,6 +178,13 @@ export default function Meeting() {
 
         if (initCancelledRef.current) return
 
+        // View-only links (live stream audience) join without publishing anything
+        if (viewOnly) {
+          const existing = useMeetingStore.getState().localStream
+          if (existing) existing.getTracks().forEach(t => t.stop())
+          useMeetingStore.setState({ localStream: null, isMuted: true, isVideoOff: true })
+        }
+
         // Get local media stream if not already obtained (from pre-join)
         let stream = useMeetingStore.getState().localStream
 
@@ -191,8 +222,10 @@ export default function Meeting() {
         }
 
         // Join meeting via API
+        useMeetingStore.getState().setSessionPhase('joining')
         const joinResult = await joinMeeting(roomId)
         if (!joinResult.success) {
+          useMeetingStore.getState().setSessionPhase('idle')
           toast.error(joinResult.message || 'Failed to join meeting')
           navigate('/app')
           return
@@ -249,7 +282,7 @@ export default function Meeting() {
           if (audioTrack && audioTrack.readyState === 'live' && !useMeetingStore.getState().isMuted) {
             await produceAudio(audioTrack)
           }
-          if (videoTrack && videoTrack.readyState === 'live') {
+          if (!viewOnly && videoTrack && videoTrack.readyState === 'live') {
             await produceVideo(videoTrack)
           }
         } else {
@@ -296,6 +329,7 @@ export default function Meeting() {
 
     // Room participants (on join)
     socket.on('room:participants', ({ participants: existingParticipants, isHost: hostStatus, isCoHost: coHostStatus, role }) => {
+      useMeetingStore.getState().setSessionPhase('connected')
       setParticipants(existingParticipants)
       setIsHost(hostStatus)
       if (coHostStatus !== undefined) setIsCoHost(coHostStatus)
@@ -437,11 +471,17 @@ export default function Meeting() {
       toast(`${waitingUser.name} is waiting to join`, { icon: '🚪' })
     })
 
+    socket.on('room:waiting-for-host', () => {
+      useMeetingStore.getState().setSessionPhase('waiting')
+      toast('Waiting for the host to let you in…', { icon: '🚪', duration: 6000 })
+    })
+
     socket.on('room:admitted', () => {
       toast.success('You have been admitted to the meeting')
     })
 
     socket.on('room:denied', () => {
+      useMeetingStore.getState().setSessionPhase('idle')
       toast.error('Your request to join was denied')
       navigate('/app')
     })
@@ -485,15 +525,48 @@ export default function Meeting() {
     })
 
     // Captions
-    socket.on('caption:text', ({ userId, userName, text }) => {
+    socket.on('caption:text', async ({ userId, userName, text }) => {
+      const target = translateToRef.current
+      if (target) {
+        try {
+          text = await translateText(text, target)
+        } catch (error) {
+          // Don't spam: say why once, then fall back to the original captions
+          toast.error(`${error.message}. Showing original captions.`, { id: 'translate-error' })
+          tools.setTranslateTo('')
+        }
+      }
       addCaption(userId, userName, text)
+    })
+
+    // Breakout rooms opened/changed by the host: tell people in the main room where to go
+    socket.on('breakout:changed', async () => {
+      const { currentMeeting: meeting } = useMeetingStore.getState()
+      if (!meeting?.id || isBreakoutRoomId(roomId)) return
+      try {
+        const { data } = await api.get(`/breakout/meeting/${meeting.id}`)
+        const mine = data.data.breakoutRooms.find(r => r.assignedToMe)
+        if (!mine) return
+        toast((t) => (
+          <span className="flex items-center gap-3 text-sm">
+            You've been assigned to {mine.name}
+            <button
+              className="px-3 py-1 rounded-full bg-primary-500 text-white text-xs font-semibold"
+              onClick={() => { toast.dismiss(t.id); goToRoom(mine.joinRoomId) }}
+            >
+              Join
+            </button>
+          </span>
+        ), { id: 'breakout-assigned', duration: 20000, icon: '🚪' })
+      } catch {}
     })
 
     // Settings updates
     socket.on('meeting:settings-updated', ({ settings }) => {
-      if (currentMeeting) {
+      const meeting = useMeetingStore.getState().currentMeeting
+      if (meeting) {
         useMeetingStore.setState({
-          currentMeeting: { ...currentMeeting, settings: { ...currentMeeting.settings, ...settings } }
+          currentMeeting: { ...meeting, settings: { ...meeting.settings, ...settings } }
         })
       }
     })
@@ -512,11 +585,11 @@ export default function Meeting() {
         'host:force-mute', 'host:force-video-off', 'host:request-unmute',
         'host:removed', 'meeting:ended', 'host:spotlight', 'host:meeting-locked',
         'host:promoted', 'host:demoted', 'room:role-changed',
-        'room:waiting', 'room:admitted', 'room:denied',
+        'room:waiting', 'room:waiting-for-host', 'room:admitted', 'room:denied',
         'chat:message', 'chat:user-typing',
         'recording:started', 'recording:stopped',
         'reaction:hand-raise', 'reaction:emoji',
-        'caption:text', 'meeting:settings-updated', 'error'
+        'caption:text', 'breakout:changed', 'meeting:settings-updated', 'error'
       ]
       events.forEach(e => socket.off(e))
     }
@@ -561,6 +634,21 @@ export default function Meeting() {
       }
     }
   }, [isScreenSharing, user])
+
+  // View-only attendees can't publish; everything else passes straight through
+  const guardViewOnly = (action) => (...args) => {
+    if (viewOnly) return toast('You joined with a view-only link', { icon: '👀' })
+    return action(...args)
+  }
+
+  // Host controls: contributors are limited only while host management is on
+  const meetingSettings = currentMeeting?.settings || {}
+  const canManageRoom = isHost || isCoHost
+  const isRestricted = (key) => !!meetingSettings.hostManagement && !canManageRoom && meetingSettings[key] === false
+  const guardHostControl = (key, label, action) => (...args) => {
+    if (isRestricted(key)) return toast(`The host has turned off ${label} for participants`, { icon: '🔒' })
+    return action(...args)
+  }
 
   // Recording toggle
   const handleRecording = useCallback(() => {
@@ -626,6 +714,22 @@ export default function Meeting() {
         </div>
       )}
 
+      {/* Live stream banner */}
+      {tools.stream && (
+        <div className="bg-gradient-to-r from-primary-700 via-primary-600 to-primary-700 text-white text-center py-1.5 text-sm font-medium flex items-center justify-center gap-2 animate-slide-down">
+          <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse" />
+          Live streaming to a view-only audience
+        </div>
+      )}
+      {inBreakout && (
+        <div className="bg-dark-300 border-b border-white/[0.06] text-gray-200 text-center py-1.5 text-sm flex items-center justify-center gap-3">
+          You're in a breakout room
+          <button onClick={() => goToRoom(parentRoomId)} className="text-primary-400 hover:text-primary-300 font-semibold">
+            Return to main room
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <MeetingHeader
         roomId={roomId}
@@ -667,6 +771,9 @@ export default function Meeting() {
           {/* Emoji Reactions Overlay */}
           <EmojiReactions reactions={activeReactions} />
 
+          {/* Countdown timer */}
+          <TimerBadge timer={tools.timer} clockOffset={tools.clockOffset} />
+
           {/* Captions Overlay */}
           {captionsEnabled && <CaptionsOverlay captions={captions} />}
         </div>
@@ -702,6 +809,28 @@ export default function Meeting() {
             canManage={isHost || isCoHost}
             initialTab={activitiesTab}
             onClose={() => setActivitiesTab(null)}
+          />
+        )}
+
+        {showTools && (
+          <MeetingToolsPanel
+            roomId={roomId}
+            parentRoomId={parentRoomId}
+            inBreakout={inBreakout}
+            meeting={currentMeeting}
+            user={user}
+            participants={participants}
+            canManage={isHost || isCoHost}
+            tools={tools}
+            isRecording={isRecording}
+            captionsEnabled={captionsEnabled}
+            onToggleRecording={handleRecording}
+            onToggleCaptions={toggleCaptions}
+            onOpenActivities={setActivitiesTab}
+            onOpenWhiteboard={() => setShowWhiteboard(true)}
+            onOpenNotes={() => setShowNotes(true)}
+            onDownloadAttendance={handleDownloadAttendance}
+            onClose={() => setShowTools(false)}
           />
         )}
 
@@ -749,7 +878,12 @@ export default function Meeting() {
             <h3 className="text-xl font-bold font-display mb-2">Leave Meeting</h3>
             <p className="text-gray-400 text-sm mb-6">Are you sure you want to leave? You can rejoin anytime with the same link.</p>
             <div className="space-y-3">
-              {(isHost || isCoHost) && (
+              {inBreakout && (
+                <button onClick={() => goToRoom(parentRoomId)} className="btn btn-primary w-full py-3">
+                  Return to Main Room
+                </button>
+              )}
+              {(isHost || isCoHost) && !inBreakout && (
                 <button onClick={() => { setShowLeaveDialog(false); handleEndForAll() }}
                   className="btn btn-danger w-full py-3">
                   End Meeting for All
@@ -779,7 +913,7 @@ export default function Meeting() {
         showChat={showChat}
         showParticipants={showParticipants}
         onTogglePiP={handleTogglePiP}
-        onOpenWhiteboard={() => setShowWhiteboard(true)}
+        onOpenWhiteboard={guardHostControl('allowAddOns', 'activities', () => setShowWhiteboard(true))}
         onOpenActivities={setActivitiesTab}
         onToggleMirror={toggleMirrorSelf}
         onOpenShortcuts={() => setShowShortcuts(true)}
@@ -787,19 +921,21 @@ export default function Meeting() {
         mirrorSelf={mirrorSelf}
         hideSelf={hideSelf}
         onToggleHideSelf={toggleHideSelf}
-        onOpenNotes={() => setShowNotes(true)}
+        onOpenNotes={guardHostControl('allowAddOns', 'activities', () => setShowNotes(true))}
         isPiP={isPiP}
         captionsEnabled={captionsEnabled}
         handRaisedCount={handRaisedUsers.length}
-        onToggleMute={toggleMute}
-        onToggleVideo={toggleVideo}
-        onToggleScreenShare={handleScreenShare}
+        onToggleMute={guardViewOnly(isMuted ? guardHostControl('allowMic', 'microphones', toggleMute) : toggleMute)}
+        onToggleVideo={guardViewOnly(isVideoOff ? guardHostControl('allowVideo', 'cameras', toggleVideo) : toggleVideo)}
+        onToggleScreenShare={guardViewOnly(isScreenSharing ? handleScreenShare : guardHostControl('allowScreenShare', 'screen sharing', handleScreenShare))}
+        showTools={showTools}
+        onToggleTools={() => setShowTools(v => !v)}
         onToggleRecording={handleRecording}
         onToggleChat={() => setShowChat(!showChat)}
         onToggleParticipants={() => setShowParticipants(!showParticipants)}
         onToggleHandRaise={toggleHandRaise}
         onToggleCaptions={toggleCaptions}
-        onSendReaction={sendReaction}
+        onSendReaction={guardHostControl('allowReactions', 'reactions', sendReaction)}
         onLeave={() => setShowLeaveDialog(true)}
         onOpenSettings={() => setShowDeviceSettings(true)}
         onOpenMeetingSettings={() => setShowMeetingSettings(true)}

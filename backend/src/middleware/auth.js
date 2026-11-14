@@ -29,6 +29,13 @@ export const protect = async (req, res, next) => {
       });
     }
 
+    if (user.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been suspended. Contact an administrator.'
+      });
+    }
+
     req.user = user;
     next();
   } catch (error) {
@@ -46,6 +53,7 @@ export const verifySocketToken = async (token) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findByPk(decoded.id);
+    if (user && user.isActive === false) return null;
 
     return user;
   } catch (error) {

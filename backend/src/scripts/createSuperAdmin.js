@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sequelize } from '../database/index.js';
-import User from '../models/User.js';
+import Admin from '../models/Admin.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,9 +20,10 @@ const SUPERADMIN_CREDENTIALS = {
 const createSuperAdmin = async () => {
   try {
     await sequelize.authenticate();
+    await Admin.sync();
     console.log('Database connected');
 
-    const existingAdmin = await User.findOne({
+    const existingAdmin = await Admin.findOne({
       where: { email: SUPERADMIN_CREDENTIALS.email }
     });
 
@@ -34,7 +35,7 @@ const createSuperAdmin = async () => {
       const salt = await bcrypt.genSalt(12);
       const hashedPassword = await bcrypt.hash(SUPERADMIN_CREDENTIALS.password, salt);
 
-      await User.create({
+      await Admin.create({
         name: SUPERADMIN_CREDENTIALS.name,
         email: SUPERADMIN_CREDENTIALS.email,
         password: hashedPassword,

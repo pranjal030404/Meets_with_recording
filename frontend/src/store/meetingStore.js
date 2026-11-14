@@ -3,10 +3,54 @@ import api from '../lib/api'
 import { getSocket } from '../lib/socket'
 import MediasoupClientService from '../lib/mediasoupClient'
 import toast from 'react-hot-toast'
+import { isBreakoutRoomId } from '../lib/breakout'
+import { canTransition } from '../lib/sessionMachine'
 
 // Singleton mediasoup client
 let mediasoupClient = null
 export const getMediasoupClient = () => mediasoupClient
+
+// Everything that belongs to ONE joined session. Used for the initial state AND the reset on leave,
+// so a flag added here can never be forgotten in the reset (and Maps/arrays are always fresh objects).
+const sessionDefaults = () => ({
+  // idle | joining | waiting | connected | leaving  (see lib/sessionMachine.js)
+  sessionPhase: 'idle',
+  localStream: null,
+  screenStream: null,
+  isMuted: false,
+  isVideoOff: false,
+  isScreenSharing: false,
+  isRecording: false,
+  mediaRecorder: null,
+  recordedChunks: [],
+  isPiP: false,
+
+  remoteStreams: new Map(),
+  producers: { audio: null, video: null, screen: null },
+  mediasoupReady: false,
+
+  handRaisedUsers: [],
+  isHandRaised: false,
+  activeReactions: [],
+  pinnedUserId: null,
+  spotlightUserId: null,
+  activeSpeakerId: null,
+  layout: 'grid',
+  isWaitingRoom: false,
+  waitingRoomUsers: [],
+  isMeetingLocked: false,
+
+  captionsEnabled: false,
+  captions: [],
+
+  audioLevel: 0,
+  isSpeaking: false,
+
+  isBeingRecorded: false,
+  recordingUser: null,
+
+  peers: new Map()
+})
 
 export const useMeetingStore = create((set, get) => ({
   currentMeeting: null,
@@ -18,56 +62,18 @@ export const useMeetingStore = create((set, get) => ({
   isLoading: false,
   error: null,
 
-  // Local media state
-  localStream: null,
-  screenStream: null,
-  isMuted: false,
-  isVideoOff: false,
-  isScreenSharing: false,
-  isRecording: false,
-  mediaRecorder: null,
-  recordedChunks: [],
+  // Per-session state (media, SFU, hands/layout, waiting room, captions, recording indicator, peers)
+  ...sessionDefaults(),
+
+  // Preferences that survive leaving a meeting
   videoQuality: '720p', // '360p', '720p', '1080p'
-  isPiP: false,
-
-  // SFU state
-  remoteStreams: new Map(), // Map<peerId, { stream, user, audioConsumer, videoConsumer, screenConsumer }>
-  producers: { audio: null, video: null, screen: null },
-  mediasoupReady: false,
-
-  // Meeting features state
-  handRaisedUsers: [],
-  isHandRaised: false,
-  activeReactions: [],
-  pinnedUserId: null,
-  spotlightUserId: null,
-  activeSpeakerId: null,
-  layout: 'grid',
   mirrorSelf: true,
   hideSelf: false,
   audioProcessing: { noiseSuppression: true, echoCancellation: true, autoGainControl: true },
-  isWaitingRoom: false,
-  waitingRoomUsers: [],
-  isMeetingLocked: false,
-
-  // Captions
-  captionsEnabled: false,
-  captions: [],
-
-  // Devices
   selectedAudioDevice: null,
   selectedVideoDevice: null,
   selectedAudioOutputDevice: null,
   availableDevices: { audioinput: [], videoinput: [], audiooutput: [] },
-  audioLevel: 0,
-  isSpeaking: false,
-
-  // Recording indicator
-  isBeingRecorded: false,
-  recordingUser: null,
-
-  // Legacy peers (compat)
-  peers: new Map(),
 
   // =============================================
   // MEETING CRUD
@@ -85,6 +91,17 @@ export const useMeetingStore = create((set, get) => ({
       set({ isLoading: false, error: message })
       return { success: false, message }
     }
+  },
+
+  // The only way to change the session phase; refuses illegal jumps. isWaitingRoom is derived from it.
+  setSessionPhase: (next) => {
+    const current = get().sessionPhase
+    if (!canTransition(current, next)) {
+      console.warn(`Ignored session transition ${current} -> ${next}`)
+      return false
+    }
+    set({ sessionPhase: next, isWaitingRoom: next === 'waiting' })
+    return true
   },
 
   joinMeeting: async (roomId) => {
@@ -126,10 +143,19 @@ export const useMeetingStore = create((set, get) => ({
   },
 
   leaveMeeting: async () => {
-    const { currentMeeting, localStream, screenStream } = get()
+    const { currentMeeting, localStream, screenStream, mediaRecorder } = get()
+    if (get().sessionPhase !== 'idle') get().setSessionPhase(get().sessionPhase === 'leaving' ? 'idle' : 'leaving')
+
+    // Leaving mid-recording: finish it so the file still gets saved/uploaded (its handler holds its own meeting ref)
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      try { mediaRecorder.stop() } catch { /* already stopped */ }
+    }
 
     if (currentMeeting) {
-      try { await api.post(`/meetings/${currentMeeting.roomId}/leave`) } catch (e) { console.error('Leave error:', e) }
+      // A breakout room shares the parent's meeting record; leaving it must not end that meeting
+      if (!isBreakoutRoomId(window.location.pathname.split('/meeting/')[1])) {
+        try { await api.post(`/meetings/${currentMeeting.roomId}/leave`) } catch (e) { console.error('Leave error:', e) }
+      }
       const socket = getSocket()
       if (socket) socket.emit('room:leave')
     }
@@ -141,15 +167,7 @@ export const useMeetingStore = create((set, get) => ({
 
     set({
       currentMeeting: null, participants: [], isHost: false, isCoHost: false, myRole: 'participant',
-      localStream: null, screenStream: null,
-      isMuted: false, isVideoOff: false, isScreenSharing: false,
-      isRecording: false, mediasoupReady: false,
-      remoteStreams: new Map(), producers: { audio: null, video: null, screen: null },
-      handRaisedUsers: [], isHandRaised: false, activeReactions: [],
-      pinnedUserId: null, spotlightUserId: null, activeSpeakerId: null,
-      layout: 'grid', isWaitingRoom: false, waitingRoomUsers: [],
-      isMeetingLocked: false, captionsEnabled: false, captions: [],
-      isBeingRecorded: false, recordingUser: null, peers: new Map()
+      ...sessionDefaults()
     })
   },
 

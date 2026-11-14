@@ -1,4 +1,6 @@
 import express from 'express';
+import { Op } from 'sequelize';
+import { pollMachine } from '../lib/stateMachines.js';
 import { v4 as uuidv4 } from 'uuid';
 import { protect } from '../middleware/auth.js';
 import Poll from '../models/Poll.js';
@@ -45,7 +47,7 @@ const router = express.Router();
 
 router.post('/', protect, async (req, res) => {
   try {
-    const { meetingId, question, options, allowMultiple, isAnonymous } = req.body;
+    const { meetingId, question, options, allowMultiple, isAnonymous, draft } = req.body;
 
     const meeting = await Meeting.findByPk(meetingId);
     if (!meeting) {
@@ -73,10 +75,10 @@ router.post('/', protect, async (req, res) => {
       })),
       allowMultiple,
       isAnonymous,
-      status: 'active'
+      status: draft ? 'draft' : 'active'
     });
 
-    notify(req, meetingId);
+    if (!draft) notify(req, meetingId); // drafts are private to managers until started
     res.status(201).json({
       success: true,
       data: { poll: present(poll, req.user.id) }
@@ -159,6 +161,31 @@ router.get('/:pollId/results', protect, async (req, res) => {
   }
 });
 
+router.put('/:pollId/start', protect, async (req, res) => {
+  try {
+    const poll = await Poll.findByPk(req.params.pollId);
+    if (!poll) return res.status(404).json({ message: 'Poll not found' });
+    const meeting = await Meeting.findByPk(poll.meetingId);
+    if (!meeting) return res.status(404).json({ message: 'Meeting not found' });
+    const isManager = meeting.hostId === req.user.id ||
+      (meeting.participants || []).some(p => p.userId === req.user.id && p.role === 'co-host');
+    if (!isManager) return res.status(403).json({ message: 'Only host or co-host can start polls' });
+    if (!pollMachine.can(poll.status, 'active')) {
+      return res.status(409).json({ message: `A ${poll.status} poll cannot be started` });
+    }
+    if (meeting.status === 'ended' || meeting.status === 'cancelled') {
+      return res.status(409).json({ message: 'The meeting is over' });
+    }
+    poll.status = 'active';
+    await poll.save();
+    notify(req, poll.meetingId);
+    res.json({ success: true, data: { poll: present(poll, req.user.id) } });
+  } catch (error) {
+    console.error('Start poll error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 router.put('/:pollId/end', protect, async (req, res) => {
   try {
     const { pollId } = req.params;
@@ -183,6 +210,12 @@ router.put('/:pollId/end', protect, async (req, res) => {
       return res.status(403).json({ message: 'Only host or co-host can end polls' });
     }
 
+    if (!pollMachine.can(poll.status, 'ended')) {
+      return res.status(409).json({ message: 'Poll has already ended' });
+    }
+    if (poll.status === 'ended') {
+      return res.json({ success: true, data: { poll: present(poll, req.user.id) } });
+    }
     poll.status = 'ended';
     poll.endsAt = new Date();
     await poll.save();
@@ -202,8 +235,12 @@ router.get('/meeting/:meetingId', protect, async (req, res) => {
   try {
     const { meetingId } = req.params;
 
+    const meeting = await Meeting.findByPk(meetingId);
+    const isManager = !!meeting && (meeting.hostId === req.user.id ||
+      (meeting.participants || []).some(p => p.userId === req.user.id && p.role === 'co-host'));
+
     const polls = await Poll.findAll({
-      where: { meetingId },
+      where: { meetingId, ...(isManager ? {} : { status: { [Op.ne]: 'draft' } }) },
       order: [['createdAt', 'DESC']]
     });
 

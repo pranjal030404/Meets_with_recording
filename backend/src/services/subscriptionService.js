@@ -4,6 +4,7 @@ import SubscriptionPlan, { normalizePlan } from '../models/SubscriptionPlan.js';
 import Subscription from '../models/Subscription.js';
 import Payment from '../models/Payment.js';
 import UsageLog from '../models/UsageLog.js';
+import { subscriptionMachine, paymentMachine } from '../lib/stateMachines.js';
 
 const FREE_PLAN_SLUG = 'free';
 
@@ -211,6 +212,16 @@ const recordUsage = async (userId, type, amount = 1, meetingId = null, metadata 
 
 // Payments are simulated (demo gateway). Swap this block for a real
 // provider (Stripe/Razorpay) — the Payment row and period assignment stay the same.
+// Every status change goes through these so illegal jumps (e.g. paid -> pending) fail loudly.
+const setSubscriptionStatus = (subscription, next, patch = {}) => {
+  subscriptionMachine.assertTransition(subscription.status, next);
+  return subscription.update({ ...patch, status: next });
+};
+const setPaymentStatus = (payment, next, patch = {}) => {
+  paymentMachine.assertTransition(payment.status, next);
+  return payment.update({ ...patch, status: next });
+};
+
 const activatePaidPlan = async (userId, subscription, plan, interval) => {
   const now = new Date();
   const periodEnd = interval === 'yearly' ? addYears(now, 1) : addMonths(now, 1);
@@ -222,18 +233,19 @@ const activatePaidPlan = async (userId, subscription, plan, interval) => {
     planId: plan.id,
     amount,
     currency: plan.currency,
-    status: 'paid',
+    status: 'pending',
     method: 'demo-card',
     transactionId: `txn_${uuidv4()}`,
     description: `${plan.name} plan — ${interval} subscription`,
     periodStart: now,
-    periodEnd,
-    paidAt: now
+    periodEnd
   });
 
-  await subscription.update({
+  // Demo gateway always succeeds; a real provider would confirm here and call setPaymentStatus(..., 'failed') otherwise.
+  await setPaymentStatus(payment, 'paid', { paidAt: now });
+
+  await setSubscriptionStatus(subscription, 'active', {
     planId: plan.id,
-    status: 'active',
     billingInterval: interval,
     amount,
     currency: plan.currency,
@@ -253,9 +265,8 @@ const subscribeToPlan = async (userId, planSlug, billingInterval = 'monthly') =>
   const subscription = await ensureSubscription(userId);
 
   if (plan.slug === FREE_PLAN_SLUG) {
-    await subscription.update({
+    await setSubscriptionStatus(subscription, 'active', {
       planId: plan.id,
-      status: 'active',
       billingInterval: interval,
       amount: 0,
       currency: plan.currency,
@@ -311,6 +322,11 @@ const processExpiries = async () => {
   if (!freePlan) return 0;
 
   for (const subscription of lapsed) {
+    // A subscription the user chose to cancel ends as 'canceled'; one that simply ran out ends as 'expired'.
+    // Both immediately fall back to the Free plan, which is 'active' again (allowed: canceled|expired -> active).
+    const endState = subscription.cancelAtPeriodEnd ? 'canceled' : 'expired';
+    subscriptionMachine.assertTransition(subscription.status, endState);
+    subscriptionMachine.assertTransition(endState, 'active');
     await subscription.update({
       planId: freePlan.id,
       status: 'active',

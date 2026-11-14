@@ -3,8 +3,22 @@ import { v4 as uuidv4 } from 'uuid';
 import { protect } from '../middleware/auth.js';
 import BreakoutRoom from '../models/BreakoutRoom.js';
 import Meeting from '../models/Meeting.js';
+import { canManageMeeting } from '../lib/meetingPermissions.js';
+import { makeBreakoutRoomId } from '../lib/breakoutRoomId.js';
 
 const router = express.Router();
+
+// Clients get the room id to navigate to; participants only see rooms they're assigned to.
+const present = (room, meeting, userId) => ({
+  ...room.toJSON(),
+  joinRoomId: makeBreakoutRoomId(meeting.roomId, room.id),
+  assignedToMe: room.isUserAssigned(userId)
+});
+
+const notify = (req, meeting, event, payload = {}) => {
+  const io = req.app.get('io');
+  if (io) io.to(meeting.roomId).emit(event, { meetingId: meeting.id, ...payload });
+};
 
 router.post('/', protect, async (req, res) => {
   try {
@@ -15,9 +29,19 @@ router.post('/', protect, async (req, res) => {
       return res.status(404).json({ message: 'Meeting not found' });
     }
 
-    if (meeting.hostId !== req.user.id) {
+    if (!canManageMeeting(meeting, req.user.id)) {
       return res.status(403).json({ message: 'Only host can create breakout rooms' });
     }
+
+    if (!Array.isArray(rooms) || rooms.length === 0 || rooms.length > 50) {
+      return res.status(400).json({ message: 'Provide between 1 and 50 rooms' });
+    }
+
+    // A new set of rooms replaces whatever was open before
+    await BreakoutRoom.update(
+      { status: 'closed' },
+      { where: { parentMeetingId: meetingId, status: 'open' } }
+    );
 
     const breakoutRooms = [];
     for (let i = 0; i < rooms.length; i++) {
@@ -35,9 +59,11 @@ router.post('/', protect, async (req, res) => {
       breakoutRooms.push(breakoutRoom);
     }
 
+    notify(req, meeting, 'breakout:changed');
+
     res.status(201).json({
       success: true,
-      data: { breakoutRooms: breakoutRooms.map(b => b.toJSON()) }
+      data: { breakoutRooms: breakoutRooms.map(b => present(b, meeting, req.user.id)) }
     });
   } catch (error) {
     console.error('Create breakout rooms error:', error);
@@ -49,13 +75,20 @@ router.get('/meeting/:meetingId', protect, async (req, res) => {
   try {
     const { meetingId } = req.params;
 
-    const breakoutRooms = await BreakoutRoom.findAll({
-      where: { parentMeetingId: meetingId, status: 'open' }
-    });
+    const meeting = await Meeting.findByPk(meetingId);
+    if (!meeting) {
+      return res.status(404).json({ message: 'Meeting not found' });
+    }
+
+    const canManage = canManageMeeting(meeting, req.user.id);
+    const breakoutRooms = (await BreakoutRoom.findAll({
+      where: { parentMeetingId: meetingId, status: 'open' },
+      order: [['roomNumber', 'ASC']]
+    })).filter(room => canManage || room.isUserAssigned(req.user.id));
 
     res.json({
       success: true,
-      data: { breakoutRooms: breakoutRooms.map(b => b.toJSON()) }
+      data: { breakoutRooms: breakoutRooms.map(b => present(b, meeting, req.user.id)) }
     });
   } catch (error) {
     console.error('Get breakout rooms error:', error);
@@ -74,7 +107,7 @@ router.put('/:breakoutRoomId/assign', protect, async (req, res) => {
     }
 
     const meeting = await Meeting.findByPk(breakoutRoom.parentMeetingId);
-    if (meeting.hostId !== req.user.id) {
+    if (!canManageMeeting(meeting, req.user.id)) {
       return res.status(403).json({ message: 'Only host can assign participants' });
     }
 
@@ -88,6 +121,8 @@ router.put('/:breakoutRoomId/assign', protect, async (req, res) => {
 
     breakoutRoom.assignedParticipants = assignedParticipants;
     await breakoutRoom.save();
+
+    notify(req, meeting, 'breakout:changed');
 
     res.json({
       success: true,
@@ -147,14 +182,29 @@ router.post('/close-all', protect, async (req, res) => {
       return res.status(404).json({ message: 'Meeting not found' });
     }
 
-    if (meeting.hostId !== req.user.id) {
+    if (!canManageMeeting(meeting, req.user.id)) {
       return res.status(403).json({ message: 'Only host can close breakout rooms' });
     }
+
+    const openRooms = await BreakoutRoom.findAll({
+      where: { parentMeetingId: meetingId, status: 'open' }
+    });
 
     await BreakoutRoom.update(
       { status: 'closed' },
       { where: { parentMeetingId: meetingId, status: 'open' } }
     );
+
+    // Bring everyone sitting in a breakout room back to the main meeting
+    const io = req.app.get('io');
+    if (io) {
+      openRooms.forEach(room => {
+        io.to(makeBreakoutRoomId(meeting.roomId, room.id)).emit('breakout:closed', {
+          returnRoomId: meeting.roomId
+        });
+      });
+    }
+    notify(req, meeting, 'breakout:changed');
 
     res.json({
       success: true,

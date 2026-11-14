@@ -1,4 +1,5 @@
 import User from './User.js';
+import Role from './Role.js';
 import Meeting from './Meeting.js';
 import Team from './Team.js';
 import Message from './Message.js';
@@ -32,6 +33,8 @@ Payment.belongsTo(Subscription, { foreignKey: 'subscriptionId', as: 'subscriptio
 User.hasMany(UsageLog, { foreignKey: 'userId', as: 'usageLogs' });
 UsageLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
+User.belongsTo(Role, { foreignKey: 'roleId', as: 'customRole' });
+Role.hasMany(User, { foreignKey: 'roleId', as: 'members' });
 User.hasMany(Meeting, { foreignKey: 'hostId', as: 'hostedMeetings' });
 Meeting.belongsTo(User, { foreignKey: 'hostId', as: 'host' });
 

@@ -38,6 +38,32 @@ export default function MeetingHistory() {
     await getMeetings(status)
   }
 
+  // While any transcription is queued/processing, quietly refresh so its status updates by itself
+  const hasPendingTranscript = meetings.some(m =>
+    (m.recordings || []).some(r => ['queued', 'processing'].includes(r.transcription?.status)))
+  useEffect(() => {
+    if (!hasPendingTranscript) return
+    const timer = setInterval(async () => {
+      try {
+        const params = filter === 'all' ? {} : { status: filter }
+        const response = await api.get('/meetings', { params })
+        useMeetingStore.setState({ meetings: response.data.data.meetings })
+      } catch { /* try again next tick */ }
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [hasPendingTranscript, filter])
+
+  const retryTranscription = async (meeting, recording) => {
+    const id = recording.id || (recording.filename || '').replace(/\.[^.]+$/, '')
+    try {
+      await api.post(`/meetings/${meeting.roomId}/recordings/${id}/retry-transcription`)
+      toast.success('Transcription restarted')
+      await loadMeetings()
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not retry transcription')
+    }
+  }
+
   const formatDate = (date) => {
     return new Date(date).toLocaleDateString('en-US', {
       weekday: 'short',
@@ -112,6 +138,7 @@ export default function MeetingHistory() {
                 navigate={navigate}
                 formatDate={formatDate}
                 getDuration={getDuration}
+                onRetryTranscription={retryTranscription}
                 index={i}
               />
             ))}
@@ -144,7 +171,7 @@ function formatRecordingDuration(seconds) {
   return `${mins}m ${secs}s`
 }
 
-function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration, index = 0 }) {
+function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration, onRetryTranscription, index = 0 }) {
   const isHost = meeting.host?._id === currentUserId
   const participantCount = meeting.participants?.length || 0
   const recordings = Array.isArray(meeting.recordings) ? [...meeting.recordings].reverse() : []
@@ -279,8 +306,19 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
                         ? 'bg-red-500/10 text-red-300 border-red-400/25'
                         : 'bg-yellow-500/10 text-yellow-300 border-yellow-400/25'
                     }`}>
-                      Transcript: {transcript.status || 'pending'}
+                      Transcript: {transcript.status === 'processing' ? 'processing…' : transcript.status === 'queued' ? 'queued' : transcript.status || 'pending'}
                     </span>
+                    {(transcript.status === 'failed' || transcript.status === 'completed') && (
+                      <button
+                        onClick={() => onRetryTranscription?.(meeting, recording)}
+                        className="ml-2 text-gray-500 hover:text-fuchsia-300 transition-colors"
+                      >
+                        {transcript.status === 'failed' ? 'Retry' : 'Re-run'}
+                      </button>
+                    )}
+                    {transcript.status === 'failed' && transcript.error && (
+                      <p className="mt-1 text-[11px] text-red-300/70 truncate" title={transcript.error}>{transcript.error}</p>
+                    )}
                   </div>
 
                   {transcriptLinks.length > 0 && (
@@ -454,7 +492,7 @@ function AiSummaryPanel({ meeting, navigate }) {
         <h4 className="text-sm font-semibold text-white flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-fuchsia-300" />
           AI Summary
-          {summary.model && <span className="text-[10px] font-normal text-gray-600">({summary.model})</span>}
+          {(summary.model || summary.engine) && <span className="text-[10px] font-normal text-gray-600">({summary.engine === 'extractive' ? 'free · on-device' : summary.model || summary.engine})</span>}
         </h4>
         <button onClick={() => generate(true)} disabled={isLoading} className="text-xs text-gray-500 hover:text-fuchsia-300 transition-colors disabled:opacity-50">
           {isLoading ? 'Regenerating...' : 'Regenerate'}
@@ -462,6 +500,24 @@ function AiSummaryPanel({ meeting, navigate }) {
       </div>
 
       <p className="text-sm text-gray-300 leading-relaxed mb-3">{summary.summary}</p>
+
+      {summary.topics?.length > 0 && (
+        <div className="mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Discussion topics</p>
+          <div className="space-y-2">
+            {summary.topics.map((t, i) => (
+              <div key={i}>
+                <p className="text-sm text-gray-300 font-medium">{t.title}</p>
+                <ul className="space-y-0.5">
+                  {(t.notes || []).map((n, j) => (
+                    <li key={j} className="text-sm text-gray-400 flex gap-2"><span className="text-primary-400 mt-0.5">•</span> {n}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {summary.keyPoints?.length > 0 && (
         <div className="mb-3">
@@ -500,6 +556,7 @@ function AiSummaryPanel({ meeting, navigate }) {
                   <span className="text-sm text-gray-300">
                     {item.title}
                     {item.assigneeHint && <span className="text-gray-600"> · {item.assigneeHint}</span>}
+                    {item.dueHint && <span className="text-gray-600"> · due {item.dueHint}</span>}
                   </span>
                   <button
                     onClick={() => createTaskFromItem(item)}
@@ -516,6 +573,17 @@ function AiSummaryPanel({ meeting, navigate }) {
               )
             })}
           </div>
+        </div>
+      )}
+
+      {summary.openQuestions?.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Open questions</p>
+          <ul className="space-y-1">
+            {summary.openQuestions.map((q, i) => (
+              <li key={i} className="text-sm text-amber-300/80 flex gap-2"><span className="mt-0.5">?</span> {q}</li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

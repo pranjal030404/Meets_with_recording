@@ -5,11 +5,13 @@ import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import { protect } from '../middleware/auth.js';
 
+import { requirePermission } from '../lib/permissions.js';
+
 const router = express.Router();
 
 router.use(protect);
 
-router.post('/', async (req, res) => {
+router.post('/', requirePermission('teams.create'), async (req, res) => {
   try {
     const { name, description, settings } = req.body;
 
