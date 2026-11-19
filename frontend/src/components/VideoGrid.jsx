@@ -112,9 +112,7 @@ export default function VideoGrid({
       <div className="h-full p-4 flex flex-col lg:flex-row gap-4">
         <div className="flex-1 bg-dark-300 rounded-2xl flex items-center justify-center relative shadow-xl overflow-hidden">
           {screenSrcStream ? (
-            <video autoPlay playsInline
-              ref={(el) => { if (el) el.srcObject = screenSrcStream }}
-              className="w-full h-full object-contain bg-dark-300" />
+            <ScreenVideo stream={screenSrcStream} muted={isLocalScreenShare} />
           ) : (
             <div className="text-center">
               <div className="w-24 h-24 bg-gradient-to-br from-primary-500 to-primary-700 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary-500/30">
@@ -268,4 +266,20 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
       )}
     </div>
   )
+}
+
+
+// Attaches the stream only when it changes. An inline ref callback re-ran on every parent render
+// (the meeting timer ticks each second), reloading the video and making the shared screen flicker.
+function ScreenVideo({ stream, muted }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el && el.srcObject !== stream) {
+      el.srcObject = stream
+      el.play?.().catch(() => {})
+    }
+  }, [stream])
+  // Muted for your own share so shared-tab audio doesn't echo back at you.
+  return <video ref={ref} autoPlay playsInline muted={muted} className="w-full h-full object-contain bg-dark-300" />
 }

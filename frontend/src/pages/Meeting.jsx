@@ -96,6 +96,14 @@ export default function Meeting() {
   const mountedRef = useRef(false)
   const initCancelledRef = useRef(false)
 
+  // Sharing can end without the toolbar button (browser's "Stop sharing" bar, shared window closed).
+  // The store then resets isScreenSharing, so clear our own stale share banner here.
+  useEffect(() => {
+    if (!isScreenSharing) {
+      setScreenShareUser(prev => (prev && prev.id === user?.id ? null : prev))
+    }
+  }, [isScreenSharing, user?.id])
+
   // =============================================
   // KEYBOARD SHORTCUTS
   // =============================================
@@ -403,6 +411,8 @@ export default function Meeting() {
       toast(`${userName || 'Someone'} left the meeting`)
       removeParticipant(userId)
       removeRemoteStream(userId)
+      // If the person who left was sharing, drop the stale "is sharing their screen" view
+      setScreenShareUser(prev => (prev && prev.id === userId ? null : prev))
       // Play leave sound
       try { new Audio('/sounds/leave.mp3').play().catch(() => {}) } catch {}
     })

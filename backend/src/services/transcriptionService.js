@@ -1,13 +1,7 @@
-import fs from 'fs';
 import { promises as fsPromises } from 'fs';
 import path from 'path';
-import OpenAI from 'openai';
 import { isLocalWhisperAvailable, transcribeLocally } from './localWhisper.js';
 import { buildVocabulary, buildAsrPrompt, refineSegments } from './transcriptRefiner.js';
-
-const client = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
 
 const toNumber = (value, fallback = 0) => {
   const n = Number(value);
@@ -71,34 +65,6 @@ const buildVtt = (segments) => {
   return `WEBVTT\n\n${body}`;
 };
 
-const transcribeWithOpenAI = async ({ recordingPath, language, prompt }) => {
-  if (!client) {
-    return {
-      text: 'Transcription skipped because OPENAI_API_KEY is not configured.',
-      language: language || process.env.TRANSCRIPTION_LANGUAGE || 'en',
-      segments: [{ start: 0, end: 2, text: 'Transcription unavailable: missing OPENAI_API_KEY.' }],
-      provider: 'none'
-    };
-  }
-
-  const model = process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe';
-  const response = await client.audio.transcriptions.create({
-    file: fs.createReadStream(recordingPath),
-    model,
-    language: language || process.env.TRANSCRIPTION_LANGUAGE || 'en',
-    response_format: 'verbose_json',
-    ...(prompt ? { prompt } : {})
-  });
-
-  return {
-    text: String(response.text || '').trim(),
-    language: response.language || language || process.env.TRANSCRIPTION_LANGUAGE || 'en',
-    segments: response.segments || [],
-    provider: 'openai',
-    model
-  };
-};
-
 export const generateTranscriptionArtifacts = async ({
   recordingPath,
   transcriptsDir,
@@ -114,15 +80,12 @@ export const generateTranscriptionArtifacts = async ({
   try {
     const vocabulary = buildVocabulary(context);
     const prompt = buildAsrPrompt({ title: context.title, vocabulary });
-    // TRANSCRIPTION_PROVIDER=auto|local|openai. auto = free local Whisper first, OpenAI only if a key is set.
-    const want = (process.env.TRANSCRIPTION_PROVIDER || 'auto').toLowerCase();
-    if ((want === 'auto' || want === 'local') && isLocalWhisperAvailable()) {
+    // Free, offline speech-to-text only (local Whisper). No paid API is used.
+    if (isLocalWhisperAvailable()) {
       transcript = await transcribeLocally({ recordingPath, language, prompt });
-    } else if (want !== 'local' && client) {
-      transcript = await transcribeWithOpenAI({ recordingPath, language, prompt });
     } else {
       transcript = {
-        text: 'No speech-to-text engine configured. Live captions are used for notes instead.',
+        text: 'Local Whisper is not installed on the server (run backend/scripts/setup-free-transcription.sh). Live captions are used for notes instead.',
         language: language || 'en',
         segments: [],
         provider: 'none'

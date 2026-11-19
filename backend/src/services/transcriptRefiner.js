@@ -5,7 +5,7 @@ import { chatJSON, getLlm } from './llm.js';
  * Dictation-style transcript polishing, free by default:
  *   1. context-biased ASR (vocabulary prompt)            — buildVocabulary / buildAsrPrompt
  *   2. deterministic rule cleaner (always on, offline)   — localCleaner.js
- *   3. optional LLM polish when Ollama/OpenAI is present — never required, falls back per chunk
+ *   3. optional LLM polish when a local Ollama model is present — never required, falls back per chunk
  */
 
 const CHUNK_SEGMENTS = Number(process.env.REFINE_CHUNK_SEGMENTS) || 25;
