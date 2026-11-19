@@ -94,6 +94,7 @@ export default function Meeting() {
   const socketRef = useRef(null)
   const producerMapRef = useRef(new Map()) // Map<producerId, { peerId, mediaType }>
   const mountedRef = useRef(false)
+  const [socketVersion, setSocketVersion] = useState(0)
   const initCancelledRef = useRef(false)
 
   // Sharing can end without the toolbar button (browser's "Stop sharing" bar, shared window closed).
@@ -175,7 +176,7 @@ export default function Meeting() {
 
     const initialize = async () => {
       try {
-        const socket = initSocket(token)
+        let socket = initSocket(token)
         socketRef.current = socket
 
         // The socket handshake and the REST join don't depend on each other: run them together
@@ -187,6 +188,9 @@ export default function Meeting() {
         const joinPromise = joinMeeting(roomId)
         joinPromise.catch(() => {})
         await socketReady
+        // Safety net: if something replaced the socket while we waited, follow the live one
+        const liveSocket = getSocket()
+        if (liveSocket && liveSocket !== socket) { socket = liveSocket; socketRef.current = liveSocket; setSocketVersion(v => v + 1) }
 
         if (initCancelledRef.current) return
 
@@ -631,7 +635,7 @@ export default function Meeting() {
       ]
       events.forEach(e => socket.off(e))
     }
-  }, [socketRef.current])
+  }, [socketRef.current, socketVersion])
 
   // Cleanup on unmount
   const handleCleanup = useCallback(() => {
