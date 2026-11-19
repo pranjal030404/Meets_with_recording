@@ -35,7 +35,7 @@ export const useAuthStore = create((set, get) => ({
         ? 'Cannot reach backend server. Start backend (port 5000) and MongoDB, then try again.'
         : error.response?.data?.message || 'Login failed'
       set({ isLoading: false, error: message })
-      return { success: false, message }
+      return { success: false, message, code: error.response?.data?.code }
     }
   },
 
@@ -43,6 +43,14 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const response = await api.post('/auth/signup', { name, email, password })
+
+      // Email verification is on: no session yet, the user must confirm their address first.
+      if (response.data.data?.requiresVerification) {
+        set({ isLoading: false, error: null })
+        const { emailSent, email: sentTo } = response.data.data
+        return { success: true, requiresVerification: true, emailSent, email: sentTo, message: response.data.message }
+      }
+
       const { user, token } = response.data.data
 
       localStorage.setItem('token', token)

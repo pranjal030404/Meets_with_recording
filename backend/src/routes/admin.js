@@ -13,6 +13,8 @@ import { PERMISSIONS, ALL_PERMISSIONS, ADMIN_PERMISSIONS, ALL_ADMIN_PERMISSIONS,
 import { getSubscriptionDetails } from '../services/subscriptionService.js';
 import logAudit from '../services/auditService.js';
 import Admin from '../models/Admin.js';
+import { getSetting, setSetting } from '../services/settingsService.js';
+import { isSmtpConfigured, smtpSummary, verifySmtpConnection, sendTestEmail } from '../services/mailService.js';
 import { protectAdmin, generateAdminToken, requireAdminPermission as need } from '../middleware/adminAuth.js';
 
 const router = express.Router();
@@ -314,12 +316,62 @@ router.post('/users', need('admin.users.manage'), async (req, res) => {
       const role = await Role.findOne({ where: { id: roleId, scope: 'user' } });
       if (!role) return res.status(400).json({ success: false, message: 'Role not found' });
     }
-    const user = await User.create({ name, email: String(email).toLowerCase(), password, roleId: roleId || null });
+    // Admin-created accounts are trusted, so no email verification is needed.
+    const user = await User.create({ name, email: String(email).toLowerCase(), password, roleId: roleId || null, isEmailVerified: true });
     await getSubscriptionDetails(user.id);
     audit(req, 'user.create', 'User', user.id, { email: user.email, roleId: user.roleId });
     res.status(201).json({ success: true, data: { user: user.toJSON() } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.errors?.[0]?.message || 'Error creating user', error: error.message });
+  }
+});
+
+// ---------- Platform settings (SMTP / email verification) ----------
+router.get('/settings', need('admin.settings.manage'), async (req, res) => {
+  try {
+    res.json({ success: true, data: {
+      emailVerificationEnabled: (await getSetting('emailVerificationEnabled')) === true,
+      smtp: smtpSummary()
+    } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error loading settings' });
+  }
+});
+
+router.put('/settings', need('admin.settings.manage'), async (req, res) => {
+  try {
+    const { emailVerificationEnabled } = req.body;
+    if (typeof emailVerificationEnabled !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'emailVerificationEnabled must be true or false' });
+    }
+    if (emailVerificationEnabled) {
+      if (!isSmtpConfigured()) {
+        return res.status(400).json({ success: false, message: 'SMTP is not configured. Add SMTP_HOST, SMTP_USER and SMTP_PASS to backend/.env and restart the backend.' });
+      }
+      try {
+        await verifySmtpConnection();
+      } catch (e) {
+        return res.status(400).json({ success: false, message: `Cannot connect to the SMTP server: ${e.message}` });
+      }
+    }
+    await setSetting('emailVerificationEnabled', emailVerificationEnabled);
+    audit(req, 'settings.update', 'Setting', 'emailVerificationEnabled', { emailVerificationEnabled });
+    res.json({ success: true, data: { emailVerificationEnabled, smtp: smtpSummary() } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error saving settings', error: error.message });
+  }
+});
+
+router.post('/settings/test-email', need('admin.settings.manage'), async (req, res) => {
+  try {
+    const to = String(req.body.to || req.admin.email || '').trim();
+    if (!/^\S+@\S+\.\S+$/.test(to)) return res.status(400).json({ success: false, message: 'Enter a valid recipient email' });
+    if (!isSmtpConfigured()) return res.status(400).json({ success: false, message: 'SMTP is not configured in backend/.env' });
+    await sendTestEmail(to);
+    audit(req, 'settings.test_email', 'Setting', 'smtp', { to });
+    res.json({ success: true, message: `Test email sent to ${to}` });
+  } catch (error) {
+    res.status(400).json({ success: false, message: `Send failed: ${error.message}` });
   }
 });
 

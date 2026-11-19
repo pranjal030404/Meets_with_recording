@@ -20,7 +20,8 @@ export const ADMIN_PERMISSIONS = {
   'admin.meetings.view': 'View meeting history',
   'admin.history.view': 'View activity history',
   'admin.roles.manage': 'Create & edit roles',
-  'admin.admins.manage': 'Create & manage admin accounts'
+  'admin.admins.manage': 'Create & manage admin accounts',
+  'admin.settings.manage': 'Manage platform settings (SMTP / email verification)'
 };
 export const ALL_ADMIN_PERMISSIONS = Object.keys(ADMIN_PERMISSIONS);
 

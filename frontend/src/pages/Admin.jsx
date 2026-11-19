@@ -3,7 +3,7 @@ import {
   Shield, Users, Video, MessageSquare, Folder, CheckSquare, Activity,
   Loader2, Search, ScrollText, BarChart3, LayoutDashboard
 } from 'lucide-react'
-import { LogOut, KeyRound, Plus, Trash2, X, UserCog } from 'lucide-react'
+import { LogOut, KeyRound, Plus, Trash2, X, UserCog, Settings, Mail } from 'lucide-react'
 import api from '../lib/adminApi'
 import { useAdminStore, useCan } from '../store/adminStore'
 import { formatBytes } from '../store/fileStore'
@@ -16,7 +16,8 @@ const TABS = [
   { key: 'admins', label: 'Admins', icon: UserCog, perm: 'admin.admins.manage' },
   { key: 'roles', label: 'Roles & permissions', icon: KeyRound, perm: 'admin.roles.manage' },
   { key: 'meetings', label: 'Meetings', icon: Video, perm: 'admin.meetings.view' },
-  { key: 'audit', label: 'Activity history', icon: ScrollText, perm: 'admin.history.view' }
+  { key: 'audit', label: 'Activity history', icon: ScrollText, perm: 'admin.history.view' },
+  { key: 'settings', label: 'Settings', icon: Settings, perm: 'admin.settings.manage' }
 ]
 
 export default function Admin() {
@@ -80,6 +81,7 @@ function AdminPage() {
       {tab === 'roles' && <RolesTab />}
       {tab === 'meetings' && <MeetingsTab />}
       {tab === 'audit' && <AuditTab />}
+      {tab === 'settings' && <SettingsTab />}
     </div>
   )
 }
@@ -756,6 +758,100 @@ function AdminsTab() {
           }}
         />
       )}
+    </div>
+  )
+}
+
+
+function SettingsTab() {
+  const [data, setData] = useState(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [testTo, setTestTo] = useState('')
+  const [testing, setTesting] = useState(false)
+
+  useEffect(() => {
+    api.get('/admin/settings')
+      .then(res => setData(res.data.data))
+      .catch(() => toast.error('Failed to load settings'))
+      .finally(() => setIsLoading(false))
+  }, [])
+
+  if (isLoading) return <Spinner />
+  if (!data) return null
+  const { smtp } = data
+
+  const toggle = async () => {
+    setSaving(true)
+    try {
+      const res = await api.put('/admin/settings', { emailVerificationEnabled: !data.emailVerificationEnabled })
+      setData(res.data.data)
+      toast.success(res.data.data.emailVerificationEnabled ? 'Email verification turned ON' : 'Email verification turned OFF')
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not save the setting')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const sendTest = async (e) => {
+    e.preventDefault()
+    setTesting(true)
+    try {
+      const res = await api.post('/admin/settings/test-email', { to: testTo })
+      toast.success(res.data.message)
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Test email failed')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const on = data.emailVerificationEnabled
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-6">
+        <div className="flex items-start justify-between gap-6">
+          <div>
+            <h3 className="font-semibold flex items-center gap-2"><Mail className="w-4 h-4 text-amber-300" /> Email verification (SMTP)</h3>
+            <p className="text-sm text-gray-400 mt-1">
+              When ON, new signups must click a link sent to their email before they can sign in. When OFF, no emails are sent and signup works as before.
+              Existing accounts and admin-created users are never affected.
+            </p>
+          </div>
+          <button
+            onClick={toggle}
+            disabled={saving || (!on && !smtp.configured)}
+            role="switch"
+            aria-checked={on}
+            className={`relative shrink-0 h-7 w-12 rounded-full transition-colors disabled:opacity-40 ${on ? 'bg-emerald-500' : 'bg-white/15'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white transition-transform ${on ? 'translate-x-5' : ''}`} />
+          </button>
+        </div>
+        {!smtp.configured && (
+          <p className="mt-4 text-sm rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-200 p-3">
+            SMTP is not configured. Add <code>SMTP_HOST</code>, <code>SMTP_USER</code> and <code>SMTP_PASS</code> to <code>backend/.env</code>, then restart the backend.
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-6">
+        <h3 className="font-semibold mb-3">SMTP connection <span className="text-xs font-normal text-gray-500">(read from backend/.env)</span></h3>
+        <dl className="grid grid-cols-[130px_1fr] gap-y-2 text-sm">
+          <dt className="text-gray-500">Status</dt><dd className={smtp.configured ? 'text-emerald-300' : 'text-amber-300'}>{smtp.configured ? 'Configured' : 'Not configured'}</dd>
+          <dt className="text-gray-500">Host</dt><dd className="font-mono text-gray-300">{smtp.host || '—'}</dd>
+          <dt className="text-gray-500">Port</dt><dd className="font-mono text-gray-300">{smtp.port} {smtp.secure ? '(SSL)' : '(STARTTLS)'}</dd>
+          <dt className="text-gray-500">User</dt><dd className="font-mono text-gray-300">{smtp.user || '—'}</dd>
+          <dt className="text-gray-500">From</dt><dd className="font-mono text-gray-300">{smtp.from || '—'}</dd>
+        </dl>
+        <form onSubmit={sendTest} className="mt-5 flex flex-wrap gap-3">
+          <input type="email" required value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="Send a test email to…" className="input !w-auto flex-1 min-w-[220px] !py-2 text-sm" />
+          <button type="submit" disabled={testing || !smtp.configured} className="btn btn-secondary !py-2 text-sm disabled:opacity-40">
+            {testing ? 'Sending…' : 'Send test email'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

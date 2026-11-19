@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import api from '../lib/api'
 import { Link } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Video, ShieldCheck, Radio, Sparkles, Users, Globe, ArrowRight } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
@@ -11,6 +12,21 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const { login, isLoading, error } = useAuthStore()
+  const [needsVerify, setNeedsVerify] = useState(false)
+  const [resending, setResending] = useState(false)
+
+  const resend = async () => {
+    if (!email) { toast.error('Enter your email first'); return }
+    setResending(true)
+    try {
+      const res = await api.post('/auth/resend-verification', { email })
+      toast.success(res.data.message || 'Verification email sent')
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not send the email')
+    } finally {
+      setResending(false)
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -20,7 +36,9 @@ export default function Login() {
       return
     }
 
+    setNeedsVerify(false)
     const result = await login(email, password)
+    if (!result.success && result.code === 'EMAIL_NOT_VERIFIED') setNeedsVerify(true)
 
     if (result.success) {
       toast.success('Welcome back!')
@@ -93,6 +111,11 @@ export default function Login() {
               {error && (
                 <div className="rounded-xl border border-red-400/40 bg-red-500/10 p-3 text-sm text-red-200 animate-slide-down">
                   {error}
+                  {needsVerify && (
+                    <button type="button" onClick={resend} disabled={resending} className="mt-2 block font-semibold text-primary-300 hover:text-primary-200 disabled:opacity-50">
+                      {resending ? 'Sending…' : 'Resend verification email'}
+                    </button>
+                  )}
                 </div>
               )}
 
