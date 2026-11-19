@@ -15,14 +15,18 @@ async function runMigrations() {
 
     const queryInterface = sequelize.getQueryInterface();
 
+    // Optional: `node src/database/migrate.js 012` runs only migrations >= 012
+    const from = process.argv[2] || '';
     const migrationFiles = readdirSync(migrationsDir)
-      .filter(f => f.endsWith('.js'))
+      .filter(f => f.endsWith('.js') && f >= from)
       .sort();
 
     for (const file of migrationFiles) {
       console.log(`Running migration: ${file}`);
       const migration = await import(`file://${path.join(migrationsDir, file)}`);
-      await migration.up(queryInterface, sequelize.Sequelize);
+      const up = migration.up || migration.default?.up;
+      if (typeof up !== 'function') throw new Error(`${file} does not export an up() function`);
+      await up(queryInterface, sequelize.Sequelize);
       console.log(`Completed migration: ${file}`);
     }
 
