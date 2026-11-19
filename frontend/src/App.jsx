@@ -1,28 +1,28 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { useAuthStore } from './store/authStore'
 import { useAdminStore } from './store/adminStore'
 
-// Pages
-import Landing from './pages/Landing'
-import Login from './pages/Login'
-import Signup from './pages/Signup'
-import VerifyEmail from './pages/VerifyEmail'
-import Home from './pages/Home'
-import Meeting from './pages/Meeting'
-import JoinMeeting from './pages/JoinMeeting'
-import MeetingHistory from './pages/MeetingHistory'
-import Teams from './pages/Teams'
-import TeamDetail from './pages/TeamDetail'
-import Calendar from './pages/Calendar'
-import Pricing from './pages/Pricing'
-import Billing from './pages/Billing'
-import Chat from './pages/Chat'
-import Tasks from './pages/Tasks'
-import Files from './pages/Files'
-import Search from './pages/Search'
-import Admin from './pages/Admin'
-import AdminLogin from './pages/AdminLogin'
+// Pages are code-split: each route downloads only when visited (the first load used to ship the whole app)
+const Landing = lazy(() => import('./pages/Landing'))
+const Login = lazy(() => import('./pages/Login'))
+const Signup = lazy(() => import('./pages/Signup'))
+const VerifyEmail = lazy(() => import('./pages/VerifyEmail'))
+const Home = lazy(() => import('./pages/Home'))
+const Meeting = lazy(() => import('./pages/Meeting'))
+const JoinMeeting = lazy(() => import('./pages/JoinMeeting'))
+const MeetingHistory = lazy(() => import('./pages/MeetingHistory'))
+const Teams = lazy(() => import('./pages/Teams'))
+const TeamDetail = lazy(() => import('./pages/TeamDetail'))
+const Calendar = lazy(() => import('./pages/Calendar'))
+const Pricing = lazy(() => import('./pages/Pricing'))
+const Billing = lazy(() => import('./pages/Billing'))
+const Chat = lazy(() => import('./pages/Chat'))
+const Tasks = lazy(() => import('./pages/Tasks'))
+const Files = lazy(() => import('./pages/Files'))
+const Search = lazy(() => import('./pages/Search'))
+const Admin = lazy(() => import('./pages/Admin'))
+const AdminLogin = lazy(() => import('./pages/AdminLogin'))
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
@@ -69,6 +69,7 @@ function AdminRoute() {
 export default function App() {
   useEffect(() => { useAuthStore.getState().initializeAuth() }, [])
   return (
+    <Suspense fallback={<div className="min-h-screen bg-dark-100" />}>
     <Routes>
       {/* Landing page */}
       <Route path="/" element={<Landing />} />
@@ -165,5 +166,6 @@ export default function App() {
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   )
 }

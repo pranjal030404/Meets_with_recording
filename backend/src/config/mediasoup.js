@@ -60,6 +60,13 @@ export const mediasoupConfig = {
         mimeType: 'audio/opus',
         clockRate: 48000,
         channels: 2,
+        parameters: {
+          useinbandfec: 1, // forward error correction: survives packet loss without crackling
+          usedtx: 0, // keep audio continuous (DTX can clip the start of words)
+          maxaveragebitrate: 64000, // clear wideband speech
+          'sprop-stereo': 0,
+          minptime: 10,
+        },
       },
       {
         kind: 'video',
@@ -114,10 +121,11 @@ export const mediasoupConfig = {
     enableUdp: true,
     enableTcp: true,
     preferUdp: true,
-    initialAvailableOutgoingBitrate: 1000000,
+    initialAvailableOutgoingBitrate: 2500000,
     minimumAvailableOutgoingBitrate: 600000,
     maxSctpMessageSize: 262144,
-    maxIncomingBitrate: 1500000,
+    // Was 1.5 Mbps: below the ~2.7 Mbps a camera's three simulcast layers need, so HD never got through.
+    maxIncomingBitrate: 6000000,
   },
 
   // Plain transport settings (for recording servers)

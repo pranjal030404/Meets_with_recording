@@ -10,6 +10,7 @@ class MediasoupService {
   constructor() {
     this.workers = [];
     this.nextWorkerIdx = 0;
+    this._pendingRouters = new Map();
     this.routers = new Map(); // Map<roomId, Router>
     this.transports = new Map(); // Map<transportId, Transport>
     this.producers = new Map(); // Map<producerId, Producer>
@@ -22,34 +23,51 @@ class MediasoupService {
   async init() {
     const { numWorkers } = mediasoupConfig;
     console.log(`🚀 Initializing ${numWorkers} mediasoup workers...`);
-
-    for (let i = 0; i < numWorkers; i++) {
-      const worker = await mediasoup.createWorker({
-        logLevel: mediasoupConfig.worker.logLevel,
-        logTags: mediasoupConfig.worker.logTags,
-        rtcMinPort: mediasoupConfig.worker.rtcMinPort,
-        rtcMaxPort: mediasoupConfig.worker.rtcMaxPort,
-      });
-
-      worker.on('died', () => {
-        console.error(`❌ mediasoup worker died [pid:${worker.pid}]`);
-        setTimeout(() => process.exit(1), 2000);
-      });
-
-      this.workers.push(worker);
-      console.log(`✅ mediasoup worker created [pid:${worker.pid}]`);
-    }
-
+    for (let i = 0; i < numWorkers; i++) await this._spawnWorker();
     console.log('✅ All mediasoup workers initialized');
   }
 
+  async _spawnWorker() {
+    const worker = await mediasoup.createWorker({
+      logLevel: mediasoupConfig.worker.logLevel,
+      logTags: mediasoupConfig.worker.logTags,
+      rtcMinPort: mediasoupConfig.worker.rtcMinPort,
+      rtcMaxPort: mediasoupConfig.worker.rtcMaxPort,
+    });
+    worker.appData.rooms = 0; // routers (= live meetings) currently hosted on this worker
+
+    worker.on('died', () => {
+      // One crashed worker used to take the whole server (every meeting) down with it. Now only the
+      // meetings on that worker are lost: drop it from the pool and start a replacement.
+      console.error(`❌ mediasoup worker died [pid:${worker.pid}] - replacing it`);
+      this.workers = this.workers.filter((w) => w !== worker);
+      for (const [roomId, router] of this.routers) {
+        if (router.appData?.worker === worker) this.routers.delete(roomId);
+      }
+      this._spawnWorker().catch((e) => {
+        console.error('Could not replace mediasoup worker:', e);
+        if (this.workers.length === 0) setTimeout(() => process.exit(1), 2000);
+      });
+    });
+
+    this.workers.push(worker);
+    console.log(`✅ mediasoup worker created [pid:${worker.pid}]`);
+    return worker;
+  }
+
   /**
-   * Get next worker in round-robin fashion
+   * Load balancing across CPU cores: a new meeting goes to the worker hosting the fewest meetings
+   * (ties are broken round-robin), instead of blindly rotating regardless of how busy each core is.
    */
   _getNextWorker() {
-    const worker = this.workers[this.nextWorkerIdx];
-    this.nextWorkerIdx = (this.nextWorkerIdx + 1) % this.workers.length;
-    return worker;
+    if (this.workers.length === 0) throw new Error('No mediasoup workers available');
+    let best = null;
+    for (let i = 0; i < this.workers.length; i++) {
+      const w = this.workers[(this.nextWorkerIdx + i) % this.workers.length];
+      if (!best || w.appData.rooms < best.appData.rooms) best = w;
+    }
+    this.nextWorkerIdx = (this.workers.indexOf(best) + 1) % this.workers.length;
+    return best;
   }
 
   /**
@@ -59,7 +77,10 @@ class MediasoupService {
     const worker = this._getNextWorker();
     const router = await worker.createRouter({
       mediaCodecs: mediasoupConfig.router.mediaCodecs,
+      appData: { worker, roomId },
     });
+    worker.appData.rooms++;
+    router.observer.once('close', () => { worker.appData.rooms = Math.max(0, worker.appData.rooms - 1); });
 
     this.routers.set(roomId, router);
     console.log(`✅ Router created for room: ${roomId}`);
@@ -72,12 +93,13 @@ class MediasoupService {
    */
   async getRouter(roomId) {
     let router = this.routers.get(roomId);
-    
-    if (!router) {
-      router = await this.createRouter(roomId);
+    if (router) return router;
+    // Two people joining at once must share ONE router, or they end up on different workers and can't hear each other
+    if (!this._pendingRouters) this._pendingRouters = new Map();
+    if (!this._pendingRouters.has(roomId)) {
+      this._pendingRouters.set(roomId, this.createRouter(roomId).finally(() => this._pendingRouters.delete(roomId)));
     }
-
-    return router;
+    return this._pendingRouters.get(roomId);
   }
 
   /**

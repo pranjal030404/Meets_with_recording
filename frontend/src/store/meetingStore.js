@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import api from '../lib/api'
 import { getSocket } from '../lib/socket'
-import MediasoupClientService from '../lib/mediasoupClient'
 import toast from 'react-hot-toast'
 import { isBreakoutRoomId } from '../lib/breakout'
 import { canTransition, canMove, SCREEN_SHARE_TRANSITIONS, MEDIA_LINK_TRANSITIONS } from '../lib/sessionMachine'
@@ -9,6 +8,23 @@ import { canTransition, canMove, SCREEN_SHARE_TRANSITIONS, MEDIA_LINK_TRANSITION
 // Singleton mediasoup client
 let mediasoupClient = null
 let levelMonitor = null
+
+// Recording mixer: one audio track containing EVERYONE (you + all remote voices + shared-tab audio),
+// so the recording has the whole meeting's sound, not just your microphone.
+let recordingMixer = null
+const mixerAdd = (track) => {
+  if (!recordingMixer || !track || track.kind !== 'audio' || recordingMixer.nodes.has(track.id)) return
+  try {
+    const node = recordingMixer.ctx.createMediaStreamSource(new MediaStream([track]))
+    node.connect(recordingMixer.dest)
+    recordingMixer.nodes.set(track.id, node)
+  } catch (e) { console.warn('Recording mixer: could not add track', e.message) }
+}
+const mixerStop = () => {
+  if (!recordingMixer) return
+  try { recordingMixer.ctx.close() } catch { /* already closed */ }
+  recordingMixer = null
+}
 const stopLevelMonitor = () => {
   if (!levelMonitor) return
   clearInterval(levelMonitor.interval)
@@ -198,6 +214,8 @@ export const useMeetingStore = create((set, get) => ({
 
   initMediasoup: async (socket, roomId) => {
     try {
+      // Loaded on demand: the 220 KB media library is only needed once you are actually in a meeting
+      const { default: MediasoupClientService } = await import('../lib/mediasoupClient')
       mediasoupClient = new MediasoupClientService()
       mediasoupClient.onLinkChange = (state) => get().setMediaLink(state)
       mediasoupClient.onDiagnostic = (msg) => toast.error(msg, { id: 'media-diagnostic', duration: 20000 })
@@ -260,6 +278,7 @@ export const useMeetingStore = create((set, get) => ({
       if (mediaType === 'audio') entry.audioConsumer = consumer
       else if (mediaType === 'video') entry.videoConsumer = consumer
       else if (mediaType === 'screen') entry.screenConsumer = consumer
+      if (mediaType === 'audio') mixerAdd(consumer.track)
       entry.user = peerUser
       newMap.set(peerId, { ...entry })
       set({ remoteStreams: newMap })
@@ -371,6 +390,7 @@ export const useMeetingStore = create((set, get) => ({
         gumStream.getTracks().forEach(t => { if (t !== newAudioTrack) t.stop() })
 
         if (mediasoupClient) await get().produceAudio(newAudioTrack)
+        mixerAdd(newAudioTrack)
         set({ isMuted: false })
         get().startAudioLevelMonitor()
         if (socket) socket.emit('media:toggle-mute', { isMuted: false })
@@ -407,9 +427,9 @@ export const useMeetingStore = create((set, get) => ({
       try {
         const { selectedVideoDevice, videoQuality } = get()
         const qualitySettings = {
-          '360p': { width: { ideal: 640 }, height: { ideal: 360 } },
-          '720p': { width: { ideal: 1280 }, height: { ideal: 720 } },
-          '1080p': { width: { ideal: 1920 }, height: { ideal: 1080 } }
+          '360p': { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 30 } },
+          '720p': { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+          '1080p': { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }
         }
         const videoConstraints = {
           ...qualitySettings[videoQuality] || qualitySettings['720p']
@@ -490,7 +510,7 @@ export const useMeetingStore = create((set, get) => ({
     set({ screenSharePhase: 'requesting' })
     let screenStream = null
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: true })
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }, audio: true })
       const socket = getSocket()
       const screenVideoTrack = screenStream.getVideoTracks()[0]
 
@@ -546,24 +566,46 @@ export const useMeetingStore = create((set, get) => ({
     const { screenStream, localStream, currentMeeting, isRecording, mediaRecorder: existing } = get()
     if (isRecording || (existing && existing.state !== 'inactive')) return { success: false, message: 'Already recording' }
     const socket = getSocket()
-    const streamToRecord = screenStream || localStream
-    if (!streamToRecord) return { success: false, message: 'No stream to record' }
-    // Check if stream has active tracks
+    // You join with camera/mic off now, so your own stream may be empty: the meeting's remote audio
+    // still makes a valid (audio-only) recording.
+    const streamToRecord = screenStream || localStream || new MediaStream()
     const tracks = streamToRecord.getTracks()
-    if (tracks.length === 0 || !tracks.some(t => t.readyState === 'live')) {
-      return { success: false, message: 'No active audio or video tracks available' }
+    const hasRemoteAudio = [...get().remoteStreams.values()].some(e => e.stream.getAudioTracks().length > 0)
+    if (!tracks.some(t => t.readyState === 'live') && !hasRemoteAudio) {
+      return { success: false, message: 'Nothing to record yet: turn on your mic or camera, or wait for someone to speak' }
     }
     try {
       const recordingStartedAt = Date.now()
       // vp9 isn't available everywhere (Safari, some Firefox builds): fall back instead of throwing
       const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
         .find((t) => typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(t))
-      const mediaRecorder = new MediaRecorder(streamToRecord, mimeType ? { mimeType } : undefined)
+      // Picture: the shared screen if sharing, else your camera. Sound: the mixed meeting audio.
+      const recordStream = new MediaStream(streamToRecord.getVideoTracks())
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 })
+        ctx.resume?.()
+        recordingMixer = { ctx, dest: ctx.createMediaStreamDestination(), nodes: new Map() }
+        get().localStream?.getAudioTracks().forEach(mixerAdd)
+        streamToRecord.getAudioTracks().forEach(mixerAdd) // shared-tab audio
+        for (const [, entry] of get().remoteStreams) entry.stream.getAudioTracks().forEach(mixerAdd)
+        recordingMixer.dest.stream.getAudioTracks().forEach(t => recordStream.addTrack(t))
+      } catch (e) {
+        console.warn('Audio mixing unavailable, recording your own audio only:', e.message)
+        mixerStop()
+        streamToRecord.getAudioTracks().forEach(t => recordStream.addTrack(t))
+      }
+      const isScreen = !!screenStream
+      const mediaRecorder = new MediaRecorder(recordStream, {
+        ...(mimeType ? { mimeType } : {}),
+        videoBitsPerSecond: isScreen ? 6000000 : 3500000, // default (~2.5 Mbps) smears text and motion
+        audioBitsPerSecond: 160000
+      })
       const blobType = (mediaRecorder.mimeType || mimeType || 'video/webm').split(';')[0]
       const ext = blobType === 'video/mp4' ? 'mp4' : 'webm'
       const recordedChunks = []
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data) }
       mediaRecorder.onstop = () => {
+        mixerStop()
         // The recorder can stop on its own (shared screen ended): bring the flags and other participants back in sync
         if (get().mediaRecorder === mediaRecorder) {
           set({ mediaRecorder: null, isRecording: false })
@@ -601,12 +643,8 @@ export const useMeetingStore = create((set, get) => ({
 
         setTimeout(() => URL.revokeObjectURL(url), 10000); set({ recordedChunks: [] })
       }
-      // If every captured track dies (screen share ended, device unplugged) the recording can't continue
-      tracks.forEach((t) => t.addEventListener('ended', () => {
-        if (streamToRecord.getTracks().every((x) => x.readyState === 'ended') && mediaRecorder.state !== 'inactive') {
-          try { mediaRecorder.stop() } catch { /* already stopped */ }
-        }
-      }))
+      // No auto-stop when your own tracks end (mute, camera off, share ended): the mixed meeting audio keeps
+      // flowing, and the recorder stops itself if every track really is gone.
       mediaRecorder.start(1000)
       set({ mediaRecorder, isRecording: true, recordedChunks, recordingUpload: 'idle' })
       if (socket) socket.emit('recording:started', { roomId: currentMeeting?.roomId })
