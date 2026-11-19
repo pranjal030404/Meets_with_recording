@@ -25,6 +25,7 @@ const roomStreams = new Map(); // roomId -> { startedAt, startedBy }
 
 // Admission state machine per (room, user):  (none) -> waiting -> admitted | denied
 // Managers (host/co-host) skip it. 'admitted' sticks for the life of the room so rejoining isn't re-gated.
+const roomRecorders = new Map(); // roomId -> Map<userId, userName> currently recording locally
 const roomWaiting = new Map(); // roomId -> Map<socketId, { user }>
 const roomAdmitted = new Map(); // roomId -> Set<userId>
 
@@ -58,7 +59,29 @@ const restoreRuntime = async (roomId) => {
   if (Array.isArray(saved.admitted) && saved.admitted.length && !roomAdmitted.has(roomId)) roomAdmitted.set(roomId, new Set(saved.admitted));
 };
 
+// An empty room keeps its tools/admissions for a grace period: a server blip or everyone reloading
+// shouldn't reset the timer, notes and waiting-room approvals of a meeting that is still active.
+const ROOM_EMPTY_GRACE_MS = 60 * 1000;
+const roomClearTimers = new Map(); // roomId -> Timeout
+const cancelRoomClear = (roomId) => {
+  const t = roomClearTimers.get(roomId);
+  if (t) { clearTimeout(t); roomClearTimers.delete(roomId); }
+};
+const scheduleRoomClear = (roomId) => {
+  cancelRoomClear(roomId);
+  const t = setTimeout(() => {
+    roomClearTimers.delete(roomId);
+    if ((roomParticipants.get(roomId)?.size || 0) === 0) {
+      roomParticipants.delete(roomId);
+      clearRoomTools(roomId);
+    }
+  }, ROOM_EMPTY_GRACE_MS);
+  t.unref?.();
+  roomClearTimers.set(roomId, t);
+};
+
 const clearRoomTools = (roomId) => {
+  cancelRoomClear(roomId);
   restoredRooms.delete(roomId);
   deleteRuntime(roomId);
   // Keep the live captions as the meeting's transcript (main rooms only; breakouts are throwaway)
@@ -71,6 +94,7 @@ const clearRoomTools = (roomId) => {
   roomStreams.delete(roomId);
   roomWaiting.delete(roomId);
   roomAdmitted.delete(roomId);
+  roomRecorders.delete(roomId);
 };
 
 const emitToolsState = (socket, roomId) => {
@@ -146,6 +170,12 @@ export const initializeSocketHandlers = (io) => {
           return;
         }
 
+        if (meeting.status === 'ended' || meeting.status === 'cancelled') {
+          socket.emit('error', { message: meeting.status === 'cancelled' ? 'This meeting was cancelled' : 'This meeting has ended' });
+          return;
+        }
+
+        cancelRoomClear(roomId);
         await restoreRuntime(roomId);
 
         // Admission gate (main rooms only): locked meeting / waiting room, enforced server-side
@@ -237,8 +267,11 @@ export const initializeSocketHandlers = (io) => {
           socketId: socket.id
         });
 
-        // Late joiners pick up any running timer / transcription / live stream
+        // Late joiners pick up any running timer / transcription / live stream / recording
         emitToolsState(socket, roomId);
+        for (const [userId, userName] of roomRecorders.get(roomId) || []) {
+          if (userId !== socket.user.id) socket.emit('recording:started', { userId, userName });
+        }
 
         // A manager arriving after guests are already waiting still needs to see them
         if (canManageMeeting(meeting, socket.user.id)) {
@@ -257,6 +290,14 @@ export const initializeSocketHandlers = (io) => {
     socket.on('room:join', (payload) => handleRoomJoin(payload));
 
     socket.on('room:leave', () => {
+      // A guest cancelling from the waiting screen has no socket.roomId: drop them from the queue
+      for (const [waitRoomId, waiting] of roomWaiting) {
+        if (waiting.delete(socket.id)) {
+          for (const [, info] of roomParticipants.get(waitRoomId) || []) {
+            if (info.role === 'host' || info.role === 'co-host') io.to(info.socketId).emit('room:waiting-left', { socketId: socket.id });
+          }
+        }
+      }
       handleRoomLeave(socket, io);
     });
 
@@ -545,6 +586,10 @@ export const initializeSocketHandlers = (io) => {
             endedBy: socket.user.id
           });
 
+          // People still at the door learn the meeting is over too
+          for (const waitingSocketId of roomWaiting.get(roomId)?.keys() || []) {
+            io.to(waitingSocketId).emit('meeting:ended', { roomId, endedBy: socket.user.id });
+          }
           roomParticipants.delete(roomId);
           clearRoomTools(roomId);
 
@@ -650,6 +695,7 @@ export const initializeSocketHandlers = (io) => {
     });
 
     socket.on('chat:typing', ({ roomId, isTyping }) => {
+      if (!socket.rooms.has(roomId)) return;
       socket.to(roomId).emit('chat:user-typing', {
         userId: socket.user.id,
         userName: socket.user.name,
@@ -657,7 +703,11 @@ export const initializeSocketHandlers = (io) => {
       });
     });
 
+    // Recording indicator is server-tracked so late joiners see it and several recorders don't clobber each other
     socket.on('recording:started', ({ roomId }) => {
+      if (!socket.rooms.has(roomId)) return;
+      if (!roomRecorders.has(roomId)) roomRecorders.set(roomId, new Map());
+      roomRecorders.get(roomId).set(socket.user.id, socket.user.name);
       socket.to(roomId).emit('recording:started', {
         userId: socket.user.id,
         userName: socket.user.name
@@ -665,13 +715,12 @@ export const initializeSocketHandlers = (io) => {
     });
 
     socket.on('recording:stopped', ({ roomId }) => {
-      socket.to(roomId).emit('recording:stopped', {
-        userId: socket.user.id,
-        userName: socket.user.name
-      });
+      if (!socket.rooms.has(roomId)) return;
+      stopRecorder(io, socket, roomId);
     });
 
     socket.on('reaction:hand-raise', ({ roomId, isRaised }) => {
+      if (!socket.rooms.has(roomId)) return;
       socket.to(roomId).emit('reaction:hand-raise', {
         socketId: socket.id,
         userId: socket.user.id,
@@ -762,11 +811,11 @@ export const initializeSocketHandlers = (io) => {
       try {
         const entry = await takeWaiting(roomId, targetSocketId);
         if (!entry) return;
+        const target = io.sockets.sockets.get(targetSocketId);
+        if (!target) return; // they left while waiting: don't pre-admit them
         if (!roomAdmitted.has(roomId)) roomAdmitted.set(roomId, new Set());
         roomAdmitted.get(roomId).add(entry.user.id);
         persistRuntime(roomId);
-        const target = io.sockets.sockets.get(targetSocketId);
-        if (!target) return;
         target.emit('room:admitted');
         await target.data.joinRoom?.({ roomId }, { admitted: true });
       } catch (error) {
@@ -1177,25 +1226,37 @@ export const initializeSocketHandlers = (io) => {
   });
 };
 
+function stopRecorder(io, socket, roomId) {
+  const recorders = roomRecorders.get(roomId);
+  if (!recorders?.delete(socket.user.id)) return;
+  if (recorders.size === 0) roomRecorders.delete(roomId);
+  socket.to(roomId).emit('recording:stopped', {
+    userId: socket.user.id,
+    userName: socket.user.name,
+    stillRecording: [...(recorders || [])].map(([userId, userName]) => ({ userId, userName }))
+  });
+}
+
 function handleRoomLeave(socket, io) {
   if (socket.roomId) {
     const roomId = socket.roomId;
 
     const roomUsers = roomParticipants.get(roomId);
-    if (roomUsers) {
+    // The entry is keyed by userId: after a reconnect or in a second tab it may belong to a newer
+    // socket, and a stale socket leaving must not evict (or announce the departure of) that user.
+    const entry = roomUsers?.get(socket.user.id);
+    const ownsEntry = !!entry && entry.socketId === socket.id;
+    if (ownsEntry) stopRecorder(io, socket, roomId);
+    if (ownsEntry) {
       roomUsers.delete(socket.user.id);
-
-      if (roomUsers.size === 0) {
-        roomParticipants.delete(roomId);
-        clearRoomTools(roomId);
-      }
+      io.to(roomId).emit('room:user-left', {
+        socketId: socket.id,
+        userId: socket.user.id,
+        userName: socket.user.name
+      });
     }
 
-    io.to(roomId).emit('room:user-left', {
-      socketId: socket.id,
-      userId: socket.user.id,
-      userName: socket.user.name
-    });
+    if (roomUsers && roomUsers.size === 0) scheduleRoomClear(roomId);
 
     socket.leave(roomId);
     socket.roomId = null;
@@ -1203,5 +1264,3 @@ function handleRoomLeave(socket, io) {
     console.log(`${socket.user.name} left room: ${roomId}`);
   }
 }
-
-export { connectedUsers, roomParticipants };

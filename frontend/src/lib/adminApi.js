@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const API_URL = import.meta.env.DEV
-  ? import.meta.env.VITE_API_URL || 'http://localhost:5173'
+  ? import.meta.env.VITE_API_URL || ''
   : ''
 
 // Separate client + storage key so admin sessions never mix with user sessions.

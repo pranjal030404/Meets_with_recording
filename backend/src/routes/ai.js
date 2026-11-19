@@ -79,7 +79,7 @@ router.post('/meetings/:roomId/summary', protect, enforceTranscriptionAllowed, a
     }
 
     const isParticipant = (meeting.participantIds || []).includes(req.user.id);
-    const isInvitee = (meeting.inviteeIds || []).some(i => i.userId === req.user.id);
+    const isInvitee = (meeting.inviteeIds || []).includes(req.user.id);
     if (meeting.hostId !== req.user.id && !isParticipant && !isInvitee) {
       return res.status(403).json({ success: false, message: 'No access to this meeting' });
     }

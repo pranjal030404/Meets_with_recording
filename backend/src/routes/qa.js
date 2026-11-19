@@ -137,6 +137,10 @@ router.put('/:questionId/answer', protect, async (req, res) => {
       return res.status(403).json({ message: 'Only host or co-host can answer questions' });
     }
 
+    if (question.isDismissed) {
+      return res.status(409).json({ message: 'This question was dismissed' });
+    }
+
     question.answer = answer;
     question.answeredById = req.user.id;
     question.answeredAt = new Date();
@@ -173,6 +177,10 @@ router.delete('/:questionId', protect, async (req, res) => {
 
     if (!isHost && !isCoHost && question.askedById !== req.user.id) {
       return res.status(403).json({ message: 'Not authorized to dismiss this question' });
+    }
+
+    if (question.isAnswered) {
+      return res.status(409).json({ message: 'An answered question cannot be dismissed' });
     }
 
     question.isDismissed = true;

@@ -47,6 +47,7 @@ const sessionDefaults = () => ({
   isSpeaking: false,
 
   isBeingRecorded: false,
+  recordingUpload: 'idle', // idle | uploading | uploaded | failed
   recordingUser: null,
 
   peers: new Map()
@@ -143,8 +144,10 @@ export const useMeetingStore = create((set, get) => ({
   },
 
   leaveMeeting: async () => {
+    // A second concurrent call (button + unmount cleanup, meeting:ended + click) must not skip ahead to idle
+    if (get().sessionPhase === 'leaving') return
     const { currentMeeting, localStream, screenStream, mediaRecorder } = get()
-    if (get().sessionPhase !== 'idle') get().setSessionPhase(get().sessionPhase === 'leaving' ? 'idle' : 'leaving')
+    if (get().sessionPhase !== 'idle') get().setSessionPhase('leaving')
 
     // Leaving mid-recording: finish it so the file still gets saved/uploaded (its handler holds its own meeting ref)
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
@@ -435,6 +438,7 @@ export const useMeetingStore = create((set, get) => ({
       set(s => ({ producers: { ...s.producers, audio: null } }))
     }
     set({ isMuted: true })
+    getSocket()?.emit('media:toggle-mute', { isMuted: true })
   },
 
   forceVideoOff: async () => {
@@ -449,6 +453,7 @@ export const useMeetingStore = create((set, get) => ({
       set(s => ({ producers: { ...s.producers, video: null } }))
     }
     set({ isVideoOff: true })
+    getSocket()?.emit('media:toggle-video', { isVideoOff: true })
   },
 
   // =============================================
@@ -493,7 +498,8 @@ export const useMeetingStore = create((set, get) => ({
   // =============================================
 
   startRecording: () => {
-    const { screenStream, localStream, currentMeeting } = get()
+    const { screenStream, localStream, currentMeeting, isRecording, mediaRecorder: existing } = get()
+    if (isRecording || (existing && existing.state !== 'inactive')) return { success: false, message: 'Already recording' }
     const socket = getSocket()
     const streamToRecord = screenStream || localStream
     if (!streamToRecord) return { success: false, message: 'No stream to record' }
@@ -504,13 +510,25 @@ export const useMeetingStore = create((set, get) => ({
     }
     try {
       const recordingStartedAt = Date.now()
-      const mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: 'video/webm;codecs=vp9,opus' })
+      // vp9 isn't available everywhere (Safari, some Firefox builds): fall back instead of throwing
+      const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+        .find((t) => typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(t))
+      const mediaRecorder = new MediaRecorder(streamToRecord, mimeType ? { mimeType } : undefined)
+      const blobType = (mediaRecorder.mimeType || mimeType || 'video/webm').split(';')[0]
+      const ext = blobType === 'video/mp4' ? 'mp4' : 'webm'
       const recordedChunks = []
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data) }
       mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunks, { type: 'video/webm' })
+        // The recorder can stop on its own (shared screen ended): bring the flags and other participants back in sync
+        if (get().mediaRecorder === mediaRecorder) {
+          set({ mediaRecorder: null, isRecording: false })
+          getSocket()?.emit('recording:stopped', { roomId: currentMeeting?.roomId })
+        }
+
+        const blob = new Blob(recordedChunks, { type: blobType })
+        if (blob.size === 0) { set({ recordedChunks: [] }); return }
         const url = URL.createObjectURL(blob)
-        const fileName = `meeting-recording-${Date.now()}.webm`
+        const fileName = `meeting-recording-${Date.now()}.${ext}`
         const a = document.createElement('a'); a.href = url
         a.download = fileName
         document.body.appendChild(a); a.click(); document.body.removeChild(a)
@@ -520,18 +538,32 @@ export const useMeetingStore = create((set, get) => ({
           const formData = new FormData()
           formData.append('recording', blob, fileName)
           formData.append('duration', String(durationSeconds))
-          formData.append('mimeType', blob.type || 'video/webm')
+          formData.append('mimeType', blob.type || blobType)
 
+          set({ recordingUpload: 'uploading' })
           api.post(`/meetings/${currentMeeting.roomId}/recordings`, formData)
+            .then(() => {
+              set({ recordingUpload: 'uploaded' })
+              toast.success('Recording uploaded - transcription is processing')
+            })
             .catch((error) => {
               console.error('Recording upload error:', error)
+              set({ recordingUpload: 'failed' })
+              // The local download above still has the file, so say so
+              toast.error(`${error.response?.data?.message || 'Recording upload failed'}. A copy was saved to your downloads.`, { duration: 8000 })
             })
         }
 
-        URL.revokeObjectURL(url); set({ recordedChunks: [] })
+        setTimeout(() => URL.revokeObjectURL(url), 10000); set({ recordedChunks: [] })
       }
+      // If every captured track dies (screen share ended, device unplugged) the recording can't continue
+      tracks.forEach((t) => t.addEventListener('ended', () => {
+        if (streamToRecord.getTracks().every((x) => x.readyState === 'ended') && mediaRecorder.state !== 'inactive') {
+          try { mediaRecorder.stop() } catch { /* already stopped */ }
+        }
+      }))
       mediaRecorder.start(1000)
-      set({ mediaRecorder, isRecording: true, recordedChunks })
+      set({ mediaRecorder, isRecording: true, recordedChunks, recordingUpload: 'idle' })
       if (socket) socket.emit('recording:started', { roomId: currentMeeting?.roomId })
       return { success: true }
     } catch (error) {
@@ -542,9 +574,12 @@ export const useMeetingStore = create((set, get) => ({
   stopRecording: () => {
     const { mediaRecorder, currentMeeting } = get()
     const socket = getSocket()
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop()
-    if (socket) socket.emit('recording:stopped', { roomId: currentMeeting?.roomId })
+    // Flip the flags first so onstop doesn't treat this as an unexpected stop
     set({ mediaRecorder: null, isRecording: false })
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop()
+      if (socket) socket.emit('recording:stopped', { roomId: currentMeeting?.roomId })
+    }
   },
 
   // =============================================
@@ -632,7 +667,14 @@ export const useMeetingStore = create((set, get) => ({
   // =============================================
 
   addToWaitingRoom: (user, socketId) => {
+    // A manager arriving later gets the queue replayed: never list the same guest twice
+    if (get().waitingRoomUsers.some(u => u.socketId === socketId)) return
     set({ waitingRoomUsers: [...get().waitingRoomUsers, { user, socketId }] })
+  },
+
+  // Guest cancelled/disconnected while waiting (no server round-trip needed)
+  removeFromWaitingRoom: (socketId) => {
+    set({ waitingRoomUsers: get().waitingRoomUsers.filter(u => u.socketId !== socketId) })
   },
 
   admitFromWaitingRoom: (socketId) => {

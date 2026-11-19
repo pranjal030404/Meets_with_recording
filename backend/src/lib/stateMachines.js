@@ -84,6 +84,6 @@ export const paymentMachine = define('payment', 'pending', {
 export const transcriptionMachine = define('transcription', 'queued', {
   queued: ['processing', 'failed'],
   processing: ['completed', 'failed'],
-  completed: ['processing'], // re-run
-  failed: ['processing'] // retry
+  completed: ['queued', 'processing'], // re-run (retry shows 'queued' first)
+  failed: ['queued', 'processing'] // retry
 });

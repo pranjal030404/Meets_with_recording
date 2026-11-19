@@ -104,10 +104,27 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
-  initializeAuth: () => {
+  // A stored token only means "was logged in once": confirm it (and the account) is still valid.
+  initializeAuth: async () => {
     const token = localStorage.getItem('token')
-    if (token) {
+    if (!token) return
+    try {
+      const response = await api.get('/auth/me')
+      const user = response.data?.data?.user
+      if (user) {
+        localStorage.setItem('user', JSON.stringify(user))
+        set({ user })
+      }
       initSocket(token)
+    } catch (error) {
+      // 401 / suspended are handled (session cleared + redirect) by the api interceptor; a network
+      // error just leaves the stored session alone so a flaky connection doesn't log people out.
+      if (error.response) {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        disconnectSocket()
+        set({ user: null, token: null, isAuthenticated: false })
+      }
     }
   },
 

@@ -160,11 +160,15 @@ export const saveMeetingRecording = async ({
 export const retryTranscription = async ({ meeting, recordingId, language, context }) => {
   const found = (meeting.recordings || []).find((r) => recordingIdOf(r) === recordingId);
   if (!found) return null;
-  const from = found.transcription?.status;
-  if (from === 'queued' || from === 'processing') throw new StateTransitionError('transcription', from, 'processing'); // already running
   const recording = { ...found, id: recordingIdOf(found) };
-  // Show 'queued' immediately so the UI reflects the retry before the worker picks it up
-  await updateRecording(meeting.id, recording.id, (rec) => ({ ...rec, transcription: { ...(rec.transcription || {}), status: 'queued', error: null } }));
+  // Check-and-set inside updateRecording's per-meeting lock so two quick retries can't both enqueue.
+  // Show 'queued' immediately so the UI reflects the retry before the worker picks it up.
+  await updateRecording(meeting.id, recording.id, (rec) => {
+    const from = rec.transcription?.status;
+    if (from === 'queued' || from === 'processing') throw new StateTransitionError('transcription', from, 'queued'); // already running
+    transcriptionMachine.assertTransition(from || 'queued', 'queued');
+    return { ...rec, transcription: { ...(rec.transcription || {}), status: 'queued', error: null } };
+  });
   enqueueTranscription({ meetingId: meeting.id, roomId: meeting.roomId, recording, language, context });
   return recording;
 };

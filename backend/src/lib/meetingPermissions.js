@@ -43,4 +43,4 @@ export const canAccessMeeting = (meeting, user) => {
 
 export const hostHasJoined = (meeting) =>
   meeting.status === 'active' &&
-  (meeting.participants || []).some(p => p.userId === meeting.hostId && !p.leftAt);
+  (meeting.participants || []).some(p => p.userId === meeting.hostId && p.joinedAt && !p.leftAt);

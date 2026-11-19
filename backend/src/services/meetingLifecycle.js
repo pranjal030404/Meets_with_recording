@@ -10,6 +10,10 @@ import { recordUsage } from './subscriptionService.js';
  * so rules (idempotent end, bill once, set leftAt, valid transitions) can't drift apart.
  */
 
+/** People actually in the call: seeded host/invitee entries have no joinedAt until they really join. */
+export const isPresent = (p) => !!p.joinedAt && !p.leftAt;
+export const presentParticipants = (meeting) => (meeting.participants || []).filter(isPresent);
+
 /** scheduled → active. No-op in any other state. Returns true if it started. */
 export const startMeeting = async (meeting) => {
   if (meeting.status !== 'scheduled') return false;
@@ -52,9 +56,30 @@ export const endMeeting = async (meeting) => {
   return { changed: true };
 };
 
-/** scheduled|active → cancelled. Throws StateTransitionError (409) if it's already over. */
+/**
+ * scheduled|active → cancelled, as one conditional UPDATE (can't race endMeeting).
+ * Throws StateTransitionError (409) if it's already over. Also closes breakouts/polls and
+ * marks everyone as having left so a live room doesn't outlive its cancelled meeting.
+ */
 export const cancelMeeting = async (meeting) => {
   meetingMachine.assertTransition(meeting.status, 'cancelled');
-  meeting.status = 'cancelled';
+  const cancelledAt = new Date();
+  const [affected] = await Meeting.update(
+    { status: 'cancelled', endedAt: cancelledAt },
+    { where: { id: meeting.id, status: { [Op.in]: ['scheduled', 'active'] } } }
+  );
+  await meeting.reload();
+  if (!affected) {
+    // Lost a race with end/cancel: report it the same way the machine would.
+    meetingMachine.assertTransition(meeting.status, 'cancelled');
+    return { changed: false };
+  }
+  const leftAt = cancelledAt.toISOString();
+  meeting.participants = (meeting.participants || []).map((p) => ({ ...p, leftAt: p.leftAt || leftAt }));
   await meeting.save();
+  await Promise.all([
+    BreakoutRoom.update({ status: 'closed' }, { where: { parentMeetingId: meeting.id, status: 'open' } }),
+    Poll.update({ status: 'ended', endsAt: cancelledAt }, { where: { meetingId: meeting.id, status: 'active' } })
+  ]).catch((e) => console.error('Meeting cancel cleanup failed:', e.message));
+  return { changed: true };
 };

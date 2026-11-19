@@ -10,6 +10,7 @@
     "db:create": "node src/database/createdb.js",
     "migrate": "node src/database/migrate.js",
     "db:setup": "node src/database/createdb.js && node src/database/migrate.js",
+    "test": "node --test tests/lifecycle.test.js",
     "create-admin": "node src/scripts/createSuperAdmin.js"
   },
   "dependencies": {
