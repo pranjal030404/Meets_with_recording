@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client'
 
 const SOCKET_URL = import.meta.env.DEV
-  ? import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'
+  ? import.meta.env.VITE_SOCKET_URL || ''
   : ''
 
 let socket = null
@@ -14,7 +14,8 @@ const RECONNECT_MAX_DELAY = 5000
 const KEEPALIVE_INTERVAL = 20000
 
 export const initSocket = (token) => {
-  if (socket?.connected) {
+  // Reuse a live socket only if it belongs to the same user: after a login as someone else it must be replaced
+  if (socket?.connected && socket.auth?.token === token) {
     return socket
   }
 
@@ -52,14 +53,10 @@ export const initSocket = (token) => {
     if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null }
   })
 
-  socket.on('reconnect_attempt', (attempt) => {
-    if (attempt % 5 === 0) {
-      window.location.reload()
-    }
-  })
-
-  socket.on('reconnect_failed', () => {
-    window.location.reload()
+  // socket.io re-joins on its own. Never reload the page here: that would destroy an in-progress
+  // recording and the whole meeting session. After the built-in attempts run out, keep trying slowly.
+  socket.io.on('reconnect_failed', () => {
+    setTimeout(() => { if (socket && !socket.connected) socket.connect() }, 10000)
   })
 
   return socket

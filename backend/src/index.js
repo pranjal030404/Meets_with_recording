@@ -33,6 +33,7 @@ import mediasoupService from './lib/mediasoup.js';
 
 import { connectDB, sequelize } from './database/index.js';
 import './models/associations.js';
+import User from './models/User.js';
 import { processExpiries } from './services/subscriptionService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -182,6 +183,8 @@ const startServer = async () => {
     recoverStuckTranscriptions().then((n) => n && console.log(`Marked ${n} interrupted transcription(s) as failed (retry available)`)).catch((e) => console.error('Transcription recovery failed:', e.message));
     await sequelize.sync({ alter: false });
     console.log('Database tables synchronized');
+    // No sockets survive a restart, so nobody can still be online (a crash would otherwise leave stale flags)
+    await User.update({ isOnline: false }, { where: { isOnline: true } }).catch((e) => console.error('Presence reset failed:', e.message));
     await ensureSystemRoles();
 
     // Downgrade lapsed paid subscriptions to Free now and every hour

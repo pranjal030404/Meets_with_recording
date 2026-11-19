@@ -17,7 +17,7 @@ import { buildCompleteTranscriptArtifacts } from '../services/transcriptionServi
 import { canManageMeeting, canAccessMeeting, hostHasJoined } from '../lib/meetingPermissions.js';
 import { requirePermission } from '../lib/permissions.js';
 import { inviteeMachine, StateTransitionError } from '../lib/stateMachines.js';
-import { startMeeting, endMeeting, cancelMeeting } from '../services/meetingLifecycle.js';
+import { startMeeting, endMeeting, cancelMeeting, presentParticipants } from '../services/meetingLifecycle.js';
 import { parseBreakoutRoomId, resolveBreakoutAccess } from '../lib/breakoutRoomId.js';
 
 const router = express.Router();
@@ -379,7 +379,7 @@ router.post('/:roomId/join', protect, requirePermission('meetings.join'), async 
     }
 
     const participants = meeting.participants || [];
-    const activeParticipants = participants.filter(p => !p.leftAt).length;
+    const activeParticipants = presentParticipants(meeting).length;
     const maxParticipants = (meeting.settings && meeting.settings.maxParticipants) || 50;
 
     if (activeParticipants >= maxParticipants) {
@@ -394,7 +394,13 @@ router.post('/:roomId/join', protect, requirePermission('meetings.join'), async 
       p => p.userId === req.user.id && !p.leftAt
     );
 
-    if (!existingParticipant) {
+    if (existingParticipant) {
+      // Seeded entries (scheduled host, accepted invitee) only count as present once they really join
+      if (!existingParticipant.joinedAt) {
+        existingParticipant.joinedAt = new Date().toISOString();
+        meeting.participants = [...participants];
+      }
+    } else {
       const previousEntry = participants.find(
         p => p.userId === req.user.id && p.role === 'co-host'
       );
@@ -409,7 +415,7 @@ router.post('/:roomId/join', protect, requirePermission('meetings.join'), async 
           isMuted: meeting.settings && meeting.settings.muteOnEntry
         }
       ];
-      meeting.participantIds = [...(meeting.participantIds || []), req.user.id];
+      meeting.participantIds = [...new Set([...(meeting.participantIds || []), req.user.id])];
     }
 
     await startMeeting(meeting);
@@ -457,14 +463,16 @@ router.post('/:roomId/leave', protect, async (req, res) => {
     }
 
     const isHost = meeting.hostId === req.user.id;
-    const activeParticipants = participants.filter(p => !p.leftAt).length;
+    const present = participants.filter(p => p.joinedAt && !p.leftAt);
+    const coHostRemains = present.some(p => p.role === 'co-host');
 
     meeting.participants = participants;
     await meeting.save();
 
-    // Host leaving, or the last person leaving, ends the meeting (once, and it gets billed).
+    // The last person leaving ends the meeting, as does the host leaving with no co-host to carry on
+    // (once, and it gets billed).
     let ended = false;
-    if (isHost || activeParticipants === 0) {
+    if (present.length === 0 || (isHost && !coHostRemains)) {
       ended = (await endMeeting(meeting)).changed;
     }
     if (ended) {
@@ -618,7 +626,9 @@ router.post('/:roomId/recordings', protect, requirePermission('meetings.record')
 
     const participants = meeting.participants || [];
     const isHost = meeting.hostId === req.user.id;
-    const isParticipant = participants.some(p => p.userId === req.user.id && !p.leftAt);
+    // Anyone who took part may upload, even after leftAt is set: the recorder's onstop upload
+    // routinely lands after /leave or /end has already closed their participant entry.
+    const isParticipant = participants.some(p => p.userId === req.user.id && p.joinedAt);
 
     if (!isHost && !isParticipant) {
       return res.status(403).json({
@@ -879,6 +889,9 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
       throw error;
     }
 
+    // Anyone already inside a live room gets the same signal as an ended meeting
+    req.app.get('io')?.to(meeting.roomId).emit('meeting:ended', { roomId: meeting.roomId, endedBy: req.user.id, cancelled: true });
+
     const invitees = meeting.invitees || [];
     const notificationPromises = invitees.map(inv => {
       if (inv.userId) {
@@ -925,7 +938,7 @@ router.post('/:roomId/complete-transcript', protect, requirePermission('meetings
 
     const isHost = meeting.hostId === req.user.id;
     const isParticipant = (meeting.participantIds || []).includes(req.user.id);
-    const isInvitee = (meeting.inviteeIds || []).some(i => i.userId === req.user.id);
+    const isInvitee = (meeting.inviteeIds || []).includes(req.user.id);
     if (!isHost && !isParticipant && !isInvitee) {
       return res.status(403).json({ success: false, message: 'No access to this meeting' });
     }

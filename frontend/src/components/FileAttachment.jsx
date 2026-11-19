@@ -6,7 +6,7 @@ import { formatBytes } from '../store/fileStore'
 export const assetUrl = (url) => {
   if (!url) return ''
   if (url.startsWith('http') || url.startsWith('blob:')) return url
-  return `${import.meta.env.DEV ? 'http://localhost:5000' : ''}${url}`
+  return `${import.meta.env.DEV ? import.meta.env.VITE_API_URL || '' : ''}${url}`
 }
 
 const IMAGE_TYPES = /^image\//

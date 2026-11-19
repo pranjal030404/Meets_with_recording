@@ -198,6 +198,8 @@ router.delete('/messages/:messageId', protect, async (req, res) => {
     }
 
     message.isDeleted = true;
+    message.isPinned = false;
+    message.pinnedBy = null;
     message.content = 'This message was deleted';
     message.fileUrl = null;
     await message.save();

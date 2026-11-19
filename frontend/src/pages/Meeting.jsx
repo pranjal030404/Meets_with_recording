@@ -93,6 +93,7 @@ export default function Meeting() {
   const localVideoRef = useRef(null)
   const socketRef = useRef(null)
   const producerMapRef = useRef(new Map()) // Map<producerId, { peerId, mediaType }>
+  const mountedRef = useRef(false)
   const initCancelledRef = useRef(false)
 
   // =============================================
@@ -261,6 +262,7 @@ export default function Meeting() {
           const audioTrack = stream?.getAudioTracks()[0]
           if (audioTrack) { audioTrack.stop(); stream.removeTrack(audioTrack) }
           useMeetingStore.setState({ isMuted: true })
+          socket.emit('media:toggle-mute', { isMuted: true })
           toast('You have been muted on entry by the host', { icon: '🔇' })
         }
 
@@ -309,7 +311,20 @@ export default function Meeting() {
     }
 
     initialize()
-    return () => { initCancelledRef.current = true; handleCleanup() }
+    mountedRef.current = true
+    return () => {
+      initCancelledRef.current = true
+      mountedRef.current = false
+      handleCleanup()
+      // Leaving by browser back / link click skips handleLeave: still tell the server (REST + socket) we left.
+      // Deferred so a dev StrictMode remount (which re-sets mountedRef) doesn't leave a meeting we're re-entering.
+      setTimeout(() => {
+        const st = useMeetingStore.getState()
+        if (!mountedRef.current && st.sessionPhase !== 'idle' && st.currentMeeting?.roomId === roomId) {
+          useMeetingStore.getState().leaveMeeting()
+        }
+      }, 300)
+    }
   }, [roomId])
 
   // =============================================
@@ -471,6 +486,10 @@ export default function Meeting() {
       toast(`${waitingUser.name} is waiting to join`, { icon: '🚪' })
     })
 
+    socket.on('room:waiting-left', ({ socketId }) => {
+      useMeetingStore.getState().removeFromWaitingRoom(socketId)
+    })
+
     socket.on('room:waiting-for-host', () => {
       useMeetingStore.getState().setSessionPhase('waiting')
       toast('Waiting for the host to let you in…', { icon: '🚪', duration: 6000 })
@@ -504,8 +523,10 @@ export default function Meeting() {
       toast(`${userName} started recording`, { icon: '🔴' })
     })
 
-    socket.on('recording:stopped', ({ userName }) => {
-      setBeingRecorded(false, null)
+    socket.on('recording:stopped', ({ userName, stillRecording }) => {
+      // Someone else may still be recording: keep the banner for them
+      if (stillRecording?.length) setBeingRecorded(true, stillRecording.map((r) => r.userName).join(', '))
+      else setBeingRecorded(false, null)
       toast(`${userName} stopped recording`)
     })
 
@@ -585,7 +606,7 @@ export default function Meeting() {
         'host:force-mute', 'host:force-video-off', 'host:request-unmute',
         'host:removed', 'meeting:ended', 'host:spotlight', 'host:meeting-locked',
         'host:promoted', 'host:demoted', 'room:role-changed',
-        'room:waiting', 'room:waiting-for-host', 'room:admitted', 'room:denied',
+        'room:waiting', 'room:waiting-left', 'room:waiting-for-host', 'room:admitted', 'room:denied',
         'chat:message', 'chat:user-typing',
         'recording:started', 'recording:stopped',
         'reaction:hand-raise', 'reaction:emoji',

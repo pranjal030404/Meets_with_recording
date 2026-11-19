@@ -155,7 +155,7 @@ function toAbsoluteUrl(pathOrUrl) {
     return pathOrUrl
   }
 
-  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+  const apiBase = import.meta.env.VITE_API_URL || window.location.origin
   return `${apiBase}${pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`}`
 }
 

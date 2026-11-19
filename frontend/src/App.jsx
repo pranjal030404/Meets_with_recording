@@ -66,6 +66,7 @@ function AdminRoute() {
 }
 
 export default function App() {
+  useEffect(() => { useAuthStore.getState().initializeAuth() }, [])
   return (
     <Routes>
       {/* Landing page */}

@@ -87,9 +87,14 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    user.isOnline = true;
-    await user.save();
+    if (user.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been suspended. Contact an administrator.'
+      });
+    }
 
+    // isOnline is owned by the socket connect/disconnect handlers, not by login
     const token = generateToken(user.id);
 
     res.json({

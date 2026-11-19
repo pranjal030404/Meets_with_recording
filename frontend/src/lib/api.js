@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const API_URL = import.meta.env.DEV
-  ? import.meta.env.VITE_API_URL || 'http://localhost:5173'
+  ? import.meta.env.VITE_API_URL || ''
   : ''
 
 const api = axios.create({
@@ -36,10 +36,16 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status
+    const url = error.config?.url || ''
+    const isCredentialCall = /\/auth\/(login|register|signup)/.test(url) || url.includes('/admin/')
+    // An expired token (401) or a suspended account (403) ends the session. A wrong password on the
+    // login form is also a 401, and must stay on the page so the error can be shown.
+    const suspended = status === 403 && /suspended/i.test(error.response?.data?.message || '')
+    if ((status === 401 || suspended) && !isCredentialCall) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
-      window.location.href = '/login'
+      if (window.location.pathname !== '/login') window.location.href = '/login'
     }
     return Promise.reject(error)
   }
