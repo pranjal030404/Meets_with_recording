@@ -18,6 +18,7 @@ class MediasoupClientService {
     this.consumers = new Map(); // Map<consumerId, Consumer>
     this.socket = null;
     this.roomId = null;
+    this.onDiagnostic = null; // (message) => void, human-readable reason when media can't flow
     this.onLinkChange = null; // (state) => void, aggregated send+recv link health for the UI
     this._linkStates = { send: 'new', recv: 'new' };
     this._restarting = { send: false, recv: false };
@@ -43,13 +44,35 @@ class MediasoupClientService {
     } catch (error) {
       console.error(`ICE restart failed (${direction}):`, error);
       this._reportLink(direction, 'failed');
+      this.onDiagnostic?.('Lost the media connection and could not recover it. Try leaving and rejoining.');
     } finally {
       this._restarting[direction] = false;
     }
   }
 
+  /** The #1 cause of "I see black tiles / hear nothing": the SFU advertises an address browsers can't reach. */
+  _inspectCandidates(candidates = [], direction) {
+    const ips = candidates.map(c => c.ip || c.address).filter(Boolean);
+    console.log(`[media] ${direction} transport ICE candidates:`, ips.join(', '));
+    const host = window.location.hostname;
+    const pageIsLocal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+    const isPrivate = (ip) => /^(0\.0\.0\.0|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(ip);
+    if (!pageIsLocal && ips.length && ips.every(isPrivate)) {
+      this.onDiagnostic?.(`Media server is announcing a private address (${ips[0]}). Set MEDIASOUP_ANNOUNCED_IP to the server's public IP in backend/.env and restart the backend.`);
+    }
+  }
+
   _watchTransport(transport, direction) {
+    let connectTimer = null;
     transport.on('connectionstatechange', (state) => {
+      clearTimeout(connectTimer);
+      if (state === 'connecting') {
+        connectTimer = setTimeout(() => {
+          if (transport.connectionState !== 'connected') {
+            this.onDiagnostic?.('Could not establish the media connection. Check that UDP/TCP ports 40000-49999 are open on the server and MEDIASOUP_ANNOUNCED_IP is its public IP.');
+          }
+        }, 12000);
+      }
       console.log(`${direction} transport connection state:`, state);
       this._reportLink(direction, state);
       if (state === 'failed') this._recover(direction);
@@ -96,6 +119,7 @@ class MediasoupClientService {
       direction: 'send',
     });
 
+    this._inspectCandidates(transportParams.iceCandidates, 'send');
     this.sendTransport = this.device.createSendTransport(transportParams);
 
     this.sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
@@ -139,6 +163,7 @@ class MediasoupClientService {
       direction: 'recv',
     });
 
+    this._inspectCandidates(transportParams.iceCandidates, 'recv');
     this.recvTransport = this.device.createRecvTransport(transportParams);
 
     this.recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {

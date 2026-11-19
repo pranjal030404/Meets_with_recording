@@ -192,9 +192,9 @@ export const useMeetingStore = create((set, get) => ({
     try {
       mediasoupClient = new MediasoupClientService()
       mediasoupClient.onLinkChange = (state) => get().setMediaLink(state)
+      mediasoupClient.onDiagnostic = (msg) => toast.error(msg, { id: 'media-diagnostic', duration: 20000 })
       await mediasoupClient.init(socket, roomId)
-      await mediasoupClient.createSendTransport()
-      await mediasoupClient.createRecvTransport()
+      await Promise.all([mediasoupClient.createSendTransport(), mediasoupClient.createRecvTransport()])
       set({ mediasoupReady: true })
       return { success: true }
     } catch (error) {
@@ -239,10 +239,16 @@ export const useMeetingStore = create((set, get) => ({
       const { remoteStreams } = get()
       const newMap = new Map(remoteStreams)
       let entry = newMap.get(peerId) || {
-        stream: new MediaStream(), user: peerUser,
+        stream: new MediaStream(), screenStream: null, user: peerUser,
         audioConsumer: null, videoConsumer: null, screenConsumer: null,
       }
-      entry.stream.addTrack(consumer.track)
+      // The shared screen gets its OWN stream. Mixed into the camera stream, a <video> plays whichever
+      // video track came first, so the share view could show the camera (or nothing) instead of the screen.
+      if (mediaType === 'screen') {
+        entry.screenStream = new MediaStream([consumer.track])
+      } else {
+        entry.stream.addTrack(consumer.track)
+      }
       if (mediaType === 'audio') entry.audioConsumer = consumer
       else if (mediaType === 'video') entry.videoConsumer = consumer
       else if (mediaType === 'screen') entry.screenConsumer = consumer
@@ -263,7 +269,7 @@ export const useMeetingStore = create((set, get) => ({
     } else if (mediaType === 'video' && entry.videoConsumer) {
       entry.stream.removeTrack(entry.videoConsumer.track); entry.videoConsumer.close(); entry.videoConsumer = null
     } else if (mediaType === 'screen' && entry.screenConsumer) {
-      entry.stream.removeTrack(entry.screenConsumer.track); entry.screenConsumer.close(); entry.screenConsumer = null
+      entry.screenConsumer.close(); entry.screenConsumer = null; entry.screenStream = null
     }
     if (!entry.audioConsumer && !entry.videoConsumer && !entry.screenConsumer) newMap.delete(peerId)
     else newMap.set(peerId, { ...entry })

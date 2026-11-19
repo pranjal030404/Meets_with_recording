@@ -178,12 +178,15 @@ export default function Meeting() {
         const socket = initSocket(token)
         socketRef.current = socket
 
-        // Wait for socket connection (with timeout)
-        try {
-          await waitForSocket(10000)
-        } catch (socketError) {
+        // The socket handshake and the REST join don't depend on each other: run them together
+        // (they used to run back to back, which is most of the "Joining meeting..." wait).
+        useMeetingStore.getState().setSessionPhase('joining')
+        const socketReady = waitForSocket(10000).catch((socketError) => {
           console.warn('Socket connection timed out, continuing with REST API only:', socketError.message)
-        }
+        })
+        const joinPromise = joinMeeting(roomId)
+        joinPromise.catch(() => {})
+        await socketReady
 
         if (initCancelledRef.current) return
 
@@ -196,6 +199,11 @@ export default function Meeting() {
 
         // Get local media stream if not already obtained (from pre-join)
         let stream = useMeetingStore.getState().localStream
+
+        // Never switch the camera / mic on behind the user's back. With no stream from the pre-join
+        // screen (direct links, instant meetings) join with both off; the control bar asks the browser
+        // for permission only when the user turns one on.
+        if (!stream) useMeetingStore.setState({ isMuted: true, isVideoOff: true })
 
         // Check if stream needs to be refreshed
         const hasLiveAudio = stream?.getAudioTracks().some(t => t.readyState === 'live')
@@ -231,8 +239,7 @@ export default function Meeting() {
         }
 
         // Join meeting via API
-        useMeetingStore.getState().setSessionPhase('joining')
-        const joinResult = await joinMeeting(roomId)
+        const joinResult = await joinPromise
         if (!joinResult.success) {
           useMeetingStore.getState().setSessionPhase('idle')
           toast.error(joinResult.message || 'Failed to join meeting')
@@ -289,12 +296,12 @@ export default function Meeting() {
           // Produce local tracks to SFU
           const audioTrack = stream?.getAudioTracks()[0]
           const videoTrack = stream?.getVideoTracks()[0]
-          if (audioTrack && audioTrack.readyState === 'live' && !useMeetingStore.getState().isMuted) {
-            await produceAudio(audioTrack)
-          }
-          if (!viewOnly && videoTrack && videoTrack.readyState === 'live') {
-            await produceVideo(videoTrack)
-          }
+          await Promise.all([
+            audioTrack && audioTrack.readyState === 'live' && !useMeetingStore.getState().isMuted
+              ? produceAudio(audioTrack) : null,
+            !viewOnly && videoTrack && videoTrack.readyState === 'live' && !useMeetingStore.getState().isVideoOff
+              ? produceVideo(videoTrack) : null
+          ])
         } else {
           console.warn('Socket not connected, skipping SFU initialization')
         }

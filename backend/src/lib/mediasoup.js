@@ -124,7 +124,7 @@ class MediasoupService {
       }
     });
 
-    console.log(`✅ WebRTC transport created [transportId:${transport.id}, direction:${direction}]`);
+    console.log(`✅ WebRTC transport created [transportId:${transport.id}, direction:${direction}, announced:${transport.iceCandidates.map(c => `${c.protocol}://${c.ip}:${c.port}`).join(' ')}]`);
 
     return {
       id: transport.id,

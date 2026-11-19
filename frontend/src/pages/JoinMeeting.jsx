@@ -25,8 +25,9 @@ export default function JoinMeeting() {
   const [roomId, setRoomId] = useState(paramRoomId || '')
   const [meeting, setMeeting] = useState(null)
   const [localStream, setLocalStreamState] = useState(null)
-  const [isMuted, setIsMuted] = useState(false)
-  const [isVideoOff, setIsVideoOff] = useState(false)
+  // Camera and mic start OFF: the browser's permission prompt only appears when the user turns one on
+  const [isMuted, setIsMuted] = useState(true)
+  const [isVideoOff, setIsVideoOff] = useState(true)
   const [isCheckingMeeting, setIsCheckingMeeting] = useState(false)
   const [showDeviceDropdown, setShowDeviceDropdown] = useState(null) // 'audio' | 'video' | null
   const [devices, setDevices] = useState({ audioinput: [], videoinput: [], audiooutput: [] })
@@ -40,41 +41,16 @@ export default function JoinMeeting() {
   const analyserRef = useRef(null)
   const animFrameRef = useRef(null)
 
-  // Initialize camera preview
+  // No automatic capture. We only list devices (labels stay hidden until permission is granted) and
+  // clean up whatever the user chose to turn on.
   useEffect(() => {
-    const initCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          }
-        })
-        streamRef.current = stream
-        setLocalStreamState(stream)
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-        }
-
-        // Enumerate devices after getting permission
-        const deviceList = await navigator.mediaDevices.enumerateDevices()
-        setDevices({
-          audioinput: deviceList.filter(d => d.kind === 'audioinput'),
-          videoinput: deviceList.filter(d => d.kind === 'videoinput'),
-          audiooutput: deviceList.filter(d => d.kind === 'audiooutput'),
-        })
-
-        // Start audio level monitoring
-        startAudioLevelMonitoring(stream)
-      } catch (error) {
-        console.error('Camera access error:', error)
-        toast.error('Unable to access camera/microphone')
-      }
-    }
-
-    initCamera()
+    navigator.mediaDevices?.enumerateDevices?.().then((deviceList) => {
+      setDevices({
+        audioinput: deviceList.filter(d => d.kind === 'audioinput'),
+        videoinput: deviceList.filter(d => d.kind === 'videoinput'),
+        audiooutput: deviceList.filter(d => d.kind === 'audiooutput'),
+      })
+    }).catch(() => {})
 
     return () => {
       if (streamRef.current) {
@@ -90,6 +66,11 @@ export default function JoinMeeting() {
       }
     }
   }, [])
+
+  // Attach the preview whenever the <video> element (re)appears or the stream changes
+  useEffect(() => {
+    if (!isVideoOff && videoRef.current && localStream) videoRef.current.srcObject = localStream
+  }, [isVideoOff, localStream])
 
   const startAudioLevelMonitoring = useCallback((stream) => {
     try {
@@ -166,12 +147,12 @@ export default function JoinMeeting() {
     if (selectedAudioDevice) store.setSelectedAudioDevice?.(selectedAudioDevice)
     if (selectedVideoDevice) store.setSelectedVideoDevice?.(selectedVideoDevice)
 
-    // Save stream to store before joining
-    setLocalStream(localStream)
+    // Save stream to store before joining (null when both are off: the meeting page then won't capture anything)
+    const hasTracks = localStream && localStream.getTracks().length > 0
+    setLocalStream(hasTracks ? localStream : null)
 
-    // Save muted/video-off state
-    if (isMuted) useMeetingStore.setState({ isMuted: true })
-    if (isVideoOff) useMeetingStore.setState({ isVideoOff: true })
+    // Hand over exactly what the user chose (the store defaults are not "off")
+    useMeetingStore.setState({ isMuted, isVideoOff })
 
     const result = await joinMeeting(meeting.roomId)
 
@@ -184,65 +165,71 @@ export default function JoinMeeting() {
     }
   }
 
-  const toggleMute = () => {
-    if (localStream) {
-      const audioTrack = localStream.getAudioTracks()[0]
-      if (audioTrack) {
-        if (!isMuted) {
-          // Mute: stop track (release mic permission, LED off)
-          audioTrack.stop()
-          localStream.removeTrack(audioTrack)
-          setAudioLevel(0)
-        } else {
-          const audioConstraints = {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          }
-          if (selectedAudioDevice) {
-            audioConstraints.deviceId = { exact: selectedAudioDevice }
-          }
-          const constraints = { audio: audioConstraints }
-          navigator.mediaDevices.getUserMedia(constraints).then(newStream => {
-            const newTrack = newStream.getAudioTracks()[0]
-            localStream.addTrack(newTrack)
-            streamRef.current = localStream
-            startAudioLevelMonitoring(localStream)
-          }).catch(err => {
-            console.error('Failed to reacquire mic:', err)
-            toast.error('Failed to access microphone')
-            return
-          })
-        }
-        setIsMuted(!isMuted)
-      }
+  // Turning something ON asks the browser for permission (first time) and only then flips the switch.
+  const ensureStream = () => {
+    let stream = streamRef.current || localStream
+    if (!stream) {
+      stream = new MediaStream()
+      streamRef.current = stream
+      setLocalStreamState(stream)
+    }
+    return stream
+  }
+
+  const toggleMute = async () => {
+    if (!isMuted) {
+      // Mute: stop the track (releases the mic, LED off)
+      const stream = streamRef.current || localStream
+      stream?.getAudioTracks().forEach(t => { t.stop(); stream.removeTrack(t) })
+      setAudioLevel(0)
+      setIsMuted(true)
+      return
+    }
+    try {
+      const audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      if (selectedAudioDevice) audioConstraints.deviceId = { exact: selectedAudioDevice }
+      const gum = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+      const stream = ensureStream()
+      stream.getAudioTracks().forEach(t => { t.stop(); stream.removeTrack(t) })
+      stream.addTrack(gum.getAudioTracks()[0])
+      startAudioLevelMonitoring(stream)
+      setIsMuted(false)
+      // Permission is granted now, so device labels are available
+      navigator.mediaDevices.enumerateDevices().then((list) => setDevices({
+        audioinput: list.filter(d => d.kind === 'audioinput'),
+        videoinput: list.filter(d => d.kind === 'videoinput'),
+        audiooutput: list.filter(d => d.kind === 'audiooutput'),
+      })).catch(() => {})
+    } catch (err) {
+      console.error('Failed to access microphone:', err)
+      toast.error(err.name === 'NotAllowedError' ? 'Microphone permission denied' : 'Failed to access microphone')
     }
   }
 
-  const toggleVideo = () => {
-    if (localStream) {
-      const videoTrack = localStream.getVideoTracks()[0]
-      if (!isVideoOff && videoTrack) {
-        // Turn off: stop track (release camera, LED off)
-        videoTrack.stop()
-        localStream.removeTrack(videoTrack)
-        setIsVideoOff(true)
-      } else {
-        // Turn on: reacquire
-        const constraints = selectedVideoDevice
-          ? { video: { deviceId: { exact: selectedVideoDevice }, width: 640, height: 480 } }
-          : { video: { width: 640, height: 480 } }
-        navigator.mediaDevices.getUserMedia(constraints).then(newStream => {
-          const newTrack = newStream.getVideoTracks()[0]
-          localStream.addTrack(newTrack)
-          streamRef.current = localStream
-          if (videoRef.current) videoRef.current.srcObject = localStream
-          setIsVideoOff(false)
-        }).catch(err => {
-          console.error('Failed to reacquire camera:', err)
-          toast.error('Failed to access camera')
-        })
-      }
+  const toggleVideo = async () => {
+    if (!isVideoOff) {
+      const stream = streamRef.current || localStream
+      stream?.getVideoTracks().forEach(t => { t.stop(); stream.removeTrack(t) })
+      setIsVideoOff(true)
+      return
+    }
+    try {
+      const constraints = selectedVideoDevice
+        ? { video: { deviceId: { exact: selectedVideoDevice }, width: { ideal: 1280 }, height: { ideal: 720 } } }
+        : { video: { width: { ideal: 1280 }, height: { ideal: 720 } } }
+      const gum = await navigator.mediaDevices.getUserMedia(constraints)
+      const stream = ensureStream()
+      stream.getVideoTracks().forEach(t => { t.stop(); stream.removeTrack(t) })
+      stream.addTrack(gum.getVideoTracks()[0])
+      setIsVideoOff(false)
+      navigator.mediaDevices.enumerateDevices().then((list) => setDevices({
+        audioinput: list.filter(d => d.kind === 'audioinput'),
+        videoinput: list.filter(d => d.kind === 'videoinput'),
+        audiooutput: list.filter(d => d.kind === 'audiooutput'),
+      })).catch(() => {})
+    } catch (err) {
+      console.error('Failed to access camera:', err)
+      toast.error(err.name === 'NotAllowedError' ? 'Camera permission denied' : 'Failed to access camera')
     }
   }
 

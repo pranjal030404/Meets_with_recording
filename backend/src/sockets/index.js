@@ -269,6 +269,20 @@ export const initializeSocketHandlers = (io) => {
           socket.emit('mediasoup:existingProducers', { producers: existingProducers });
         }
 
+        // The client publishes its tracks BEFORE room:join (so the SFU is ready), at which point
+        // socket.roomId wasn't set and 'mediasoup:newProducer' went nowhere. Announce them now, otherwise
+        // the joiner can see everyone while nobody can see the joiner.
+        for (const [mediaType, producerId] of Object.entries(userProducers.get(socket.id) || {})) {
+          socket.to(roomId).emit('mediasoup:newProducer', {
+            producerId,
+            socketId: socket.id,
+            userId: socket.user.id,
+            userName: socket.user.name,
+            kind: mediaType === 'screen' ? 'video' : mediaType,
+            mediaType,
+          });
+        }
+
         socket.to(roomId).emit('room:user-joined', {
           user: {
             id: socket.user.id,
