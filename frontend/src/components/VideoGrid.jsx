@@ -25,7 +25,18 @@ export default function VideoGrid({
   onSpotlightUser
 }) {
   // Build entries from remoteStreams Map
-  const remoteEntries = Array.from((remoteStreams || new Map()).entries())
+  const mediaEntries = Array.from((remoteStreams || new Map()).entries())
+  // Everyone in the meeting gets a tile, even if no media from them has arrived (camera/mic off,
+  // permission denied, or their connection to the media server hasn't come up yet).
+  const selfId = getUserId(user)
+  const mediaIds = new Set(mediaEntries.map(([id]) => id))
+  const placeholderEntries = (participants || [])
+    .filter(p => {
+      const id = getUserId(p.user)
+      return id && id !== selfId && !mediaIds.has(id)
+    })
+    .map(p => [getUserId(p.user), { stream: null, user: p.user }])
+  const remoteEntries = [...mediaEntries, ...placeholderEntries]
   const hideSelf = useMeetingStore((s) => s.hideSelf)
   const participantCount = Math.max(1, remoteEntries.length + (hideSelf ? 0 : 1))
 
@@ -191,7 +202,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {isVideoOff ? (
+      {isVideoOff || !stream ? (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-dark-300 to-dark-400/60">
           <div className={`${small ? 'w-14 h-14' : 'w-24 h-24'} bg-gradient-to-br from-primary-500 to-accent-600 rounded-full flex items-center justify-center shadow-glow`}>
             <span className={`${small ? 'text-xl' : 'text-3xl'} font-semibold text-white`}>
