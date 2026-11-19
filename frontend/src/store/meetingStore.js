@@ -4,7 +4,7 @@ import { getSocket } from '../lib/socket'
 import MediasoupClientService from '../lib/mediasoupClient'
 import toast from 'react-hot-toast'
 import { isBreakoutRoomId } from '../lib/breakout'
-import { canTransition } from '../lib/sessionMachine'
+import { canTransition, canMove, SCREEN_SHARE_TRANSITIONS, MEDIA_LINK_TRANSITIONS } from '../lib/sessionMachine'
 
 // Singleton mediasoup client
 let mediasoupClient = null
@@ -20,6 +20,8 @@ const sessionDefaults = () => ({
   isMuted: false,
   isVideoOff: false,
   isScreenSharing: false,
+  screenSharePhase: 'idle', // idle | requesting | sharing | stopping (see SCREEN_SHARE_TRANSITIONS)
+  mediaLink: 'new', // SFU transport health: new | connecting | connected | disconnected | reconnecting | failed | closed
   isRecording: false,
   mediaRecorder: null,
   recordedChunks: [],
@@ -189,6 +191,7 @@ export const useMeetingStore = create((set, get) => ({
   initMediasoup: async (socket, roomId) => {
     try {
       mediasoupClient = new MediasoupClientService()
+      mediasoupClient.onLinkChange = (state) => get().setMediaLink(state)
       await mediasoupClient.init(socket, roomId)
       await mediasoupClient.createSendTransport()
       await mediasoupClient.createRecvTransport()
@@ -461,36 +464,59 @@ export const useMeetingStore = create((set, get) => ({
   // =============================================
 
   startScreenShare: async () => {
+    // One share at a time: a second click while the picker is open / already sharing must not leak a stream
+    if (!canMove(SCREEN_SHARE_TRANSITIONS, get().screenSharePhase, 'requesting') || get().screenSharePhase !== 'idle') {
+      return { success: false, message: 'Screen share already in progress' }
+    }
+    set({ screenSharePhase: 'requesting' })
+    let screenStream = null
     try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: true })
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: true })
       const socket = getSocket()
-      set({ screenStream, isScreenSharing: true })
-
       const screenVideoTrack = screenStream.getVideoTracks()[0]
-      if (mediasoupClient && screenVideoTrack) await get().produceScreen(screenVideoTrack)
+
+      if (mediasoupClient && screenVideoTrack) {
+        const producer = await get().produceScreen(screenVideoTrack)
+        // produceScreen swallows its own error: without a producer nobody would ever see the share
+        if (!producer) throw new Error('Could not publish the screen share. Check your connection and try again.')
+      }
+      set({ screenStream, isScreenSharing: true, screenSharePhase: 'sharing' })
       if (socket) socket.emit('media:screen-share', { isScreenSharing: true })
 
       screenVideoTrack.onended = () => { get().stopScreenShare() }
       return { success: true, stream: screenStream }
     } catch (error) {
       console.error('Screen share error:', error)
-      const message = error.name === 'NotAllowedError' 
-        ? 'Screen sharing permission denied' 
+      // Roll back completely so the state never claims "sharing" with nothing behind it
+      screenStream?.getTracks().forEach(t => t.stop())
+      set({ screenStream: null, isScreenSharing: false, screenSharePhase: 'idle' })
+      const message = error.name === 'NotAllowedError'
+        ? 'Screen sharing permission denied'
         : error.message
       return { success: false, message }
     }
   },
 
   stopScreenShare: async () => {
+    // Idempotent: the track's `onended` and the Stop button can both fire for the same share
+    if (get().screenSharePhase !== 'sharing') return
+    set({ screenSharePhase: 'stopping' })
     const { screenStream, producers } = get()
     const socket = getSocket()
     if (screenStream) screenStream.getTracks().forEach(t => t.stop())
     if (mediasoupClient && producers.screen) {
-      await mediasoupClient.closeProducer('screen')
+      await mediasoupClient.closeProducer('screen').catch(() => {})
       set(s => ({ producers: { ...s.producers, screen: null } }))
     }
     if (socket) socket.emit('media:screen-share', { isScreenSharing: false })
-    set({ screenStream: null, isScreenSharing: false })
+    set({ screenStream: null, isScreenSharing: false, screenSharePhase: 'idle' })
+  },
+
+  setMediaLink: (next) => {
+    const current = get().mediaLink
+    if (current === next) return
+    if (!canMove(MEDIA_LINK_TRANSITIONS, current, next)) return
+    set({ mediaLink: next })
   },
 
   // =============================================

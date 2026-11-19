@@ -51,7 +51,7 @@ export default function MeetingDetailsPanel({
   }
 
   return (
-    <div className="w-80 bg-dark-200 border-l border-dark-400 flex flex-col">
+    <div className="side-panel bg-dark-200 border-l border-white/[0.06]">
       <div className="p-4 border-b border-dark-400 flex items-center justify-between">
         <h2 className="font-semibold">Meeting details</h2>
         <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">

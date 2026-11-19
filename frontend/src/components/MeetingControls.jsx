@@ -27,6 +27,7 @@ import {
   Shapes
 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
+import { useMeetingStore } from '../store/meetingStore'
 import { REACTION_EMOJIS } from './EmojiReactions'
 
 export default function MeetingControls({
@@ -70,6 +71,8 @@ export default function MeetingControls({
   isPiP,
   chatUnread
 }) {
+  const micLevel = useMeetingStore(st => st.audioLevel)
+  const micTalking = useMeetingStore(st => st.isSpeaking)
   const [showMore, setShowMore] = useState(false)
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const moreMenuRef = useRef(null)
@@ -86,16 +89,17 @@ export default function MeetingControls({
   }, [])
 
   return (
-    <div className="glass-strong border-t border-white/[0.06] px-4 py-3 relative z-30">
+    <div className="glass-strong border-t border-white/[0.06] px-2 sm:px-4 py-2 sm:py-3 relative z-30">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-400/20 to-transparent" />
-      <div className="flex items-center justify-center gap-2 sm:gap-3">
+      <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-3">
         {/* Mute */}
         <div className="tooltip-host" data-tooltip={isMuted ? 'Unmute (Ctrl+D)' : 'Mute (Ctrl+D)'}>
           <ControlButton
             active={!isMuted}
             onClick={onToggleMute}
-            icon={isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            icon={isMuted ? <MicOff className="w-5 h-5" /> : <Mic className={`w-5 h-5 ${micTalking ? 'text-emerald-400' : ''}`} />}
             label={isMuted ? 'Unmute (Ctrl+D)' : 'Mute (Ctrl+D)'}
+            ringLevel={!isMuted && micTalking ? Math.min(1, micLevel * 1.5) : 0}
           />
         </div>
 
@@ -133,7 +137,7 @@ export default function MeetingControls({
         </div>
 
         {/* Reactions */}
-        <div className="relative tooltip-host" data-tooltip="Reactions" ref={reactionRef}>
+        <div className="sm:relative tooltip-host" data-tooltip="Reactions" ref={reactionRef}>
           <ControlButton
             active={showReactionPicker}
             activeColor="blue"
@@ -142,7 +146,7 @@ export default function MeetingControls({
             label="Reactions"
           />
           {showReactionPicker && (
-            <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 glass-strong rounded-2xl shadow-float p-2.5 flex gap-1 animate-slide-up border border-white/10">
+            <div className="absolute bottom-full mb-2 sm:mb-3 left-1/2 -translate-x-1/2 max-w-[calc(100vw-1rem)] flex-wrap justify-center glass-strong rounded-2xl shadow-float p-2.5 flex gap-1 z-50 animate-slide-up border border-white/10">
               {REACTION_EMOJIS.map((emoji, i) => (
                 <button key={emoji} onClick={() => { onSendReaction(emoji); setShowReactionPicker(false) }}
                   className="w-11 h-11 flex items-center justify-center text-2xl hover:bg-primary-500/15 rounded-xl transition-all duration-200 hover:scale-125 transform"
@@ -155,7 +159,7 @@ export default function MeetingControls({
         </div>
 
         {/* Divider */}
-        <div className="w-px h-8 bg-white/10 mx-1" />
+        <div className="hidden sm:block w-px h-8 bg-white/10 mx-1" />
 
         {/* Chat */}
         <div className="tooltip-host" data-tooltip="Chat">
@@ -203,7 +207,7 @@ export default function MeetingControls({
         </div>
 
         {/* More options */}
-        <div className="relative tooltip-host" data-tooltip="More options" ref={moreMenuRef}>
+        <div className="sm:relative tooltip-host" data-tooltip="More options" ref={moreMenuRef}>
           <ControlButton
             active={showMore}
             onClick={() => setShowMore(!showMore)}
@@ -212,7 +216,7 @@ export default function MeetingControls({
           />
 
           {showMore && (
-            <div className="absolute bottom-full mb-3 right-0 glass-strong rounded-2xl shadow-float py-2 min-w-[230px] animate-slide-up border border-white/10 overflow-hidden">
+            <div className="absolute bottom-full mb-2 sm:mb-3 right-2 sm:right-0 glass-strong rounded-2xl shadow-float py-2 w-[min(18rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto z-50 animate-slide-up border border-white/10 ">
               {/* Recording */}
               <MoreMenuItem
                 icon={<Circle className={`w-4 h-4 ${isRecording ? 'fill-red-500 text-red-500 animate-pulse' : ''}`} />}
@@ -299,12 +303,12 @@ export default function MeetingControls({
         </div>
 
         {/* Divider */}
-        <div className="w-px h-8 bg-white/10 mx-1" />
+        <div className="hidden sm:block w-px h-8 bg-white/10 mx-1" />
 
         {/* Leave */}
         <button
           onClick={onLeave}
-          className="group px-5 py-2.5 bg-gradient-to-br from-red-500 to-red-600 hover:from-red-400 hover:to-red-500 rounded-full flex items-center gap-2 transition-all duration-300 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 hover:scale-105 active:scale-95"
+          className="group px-3.5 sm:px-5 py-2.5 bg-gradient-to-br from-red-500 to-red-600 hover:from-red-400 hover:to-red-500 rounded-full flex items-center gap-2 transition-all duration-300 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 hover:scale-105 active:scale-95"
           title="Leave meeting"
         >
           <PhoneOff className="w-5 h-5 transition-transform duration-300 group-hover:rotate-[15deg]" />
@@ -315,7 +319,7 @@ export default function MeetingControls({
   )
 }
 
-function ControlButton({ active, activeColor = 'default', onClick, icon, label, badge }) {
+function ControlButton({ active, activeColor = 'default', onClick, icon, label, badge, ringLevel = 0 }) {
   const getButtonClasses = () => {
     if (!active) {
       return 'bg-dark-400/70 hover:bg-dark-500/80 border border-white/[0.06] text-gray-200'
@@ -343,11 +347,12 @@ function ControlButton({ active, activeColor = 'default', onClick, icon, label, 
   return (
     <button
       onClick={onClick}
-      className={`relative w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all duration-300 ease-out transform hover:scale-110 active:scale-95 ${
+      className={`relative w-10 h-10 min-[400px]:w-11 min-[400px]:h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all duration-300 ease-out transform hover:scale-110 active:scale-95 ${
         activeColor === 'default' ? getToggleClasses() : getButtonClasses()
       }`}
       title={label}
       aria-label={label}
+      style={ringLevel > 0 ? { boxShadow: `0 0 0 ${2 + ringLevel * 4}px rgba(52, 211, 153, ${0.25 + ringLevel * 0.45})` } : undefined}
     >
       {icon}
       {badge != null && (

@@ -88,6 +88,13 @@ class MediasoupService {
     return router.rtpCapabilities;
   }
 
+  /** Restart ICE on a transport (client lost connectivity, e.g. wifi switch). Returns fresh iceParameters. */
+  async restartIce(transportId) {
+    const transport = this.transports.get(transportId);
+    if (!transport) throw new Error('Transport not found');
+    return transport.restartIce();
+  }
+
   /**
    * Create WebRTC transport (for sending or receiving)
    */

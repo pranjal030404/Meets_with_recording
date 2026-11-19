@@ -32,7 +32,7 @@ export default function Admin() {
 function AdminBar() {
   const { admin, logout } = useAdminStore()
   return (
-    <div className="flex items-center justify-end gap-4 px-6 py-3 border-b border-white/[0.06] text-sm text-gray-400">
+    <div className="flex items-center justify-end gap-3 sm:gap-4 px-4 sm:px-6 py-3 flex-wrap border-b border-white/[0.06] text-sm text-gray-400">
       <span>{admin?.name} · {admin?.role === 'superadmin' ? 'Super Admin' : 'Admin'}</span>
       <button onClick={logout} className="flex items-center gap-1.5 hover:text-white">
         <LogOut className="w-4 h-4" /> Sign out
@@ -52,7 +52,7 @@ function AdminPage() {
           <Shield className="w-6 h-6 text-white" />
         </div>
         <div>
-          <h1 className="text-3xl font-bold font-display tracking-tight">Admin console</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold font-display tracking-tight">Admin console</h1>
           <p className="text-gray-500 mt-1">Platform health, people, analytics and the audit trail.</p>
         </div>
       </div>
@@ -291,7 +291,7 @@ function UsersTab() {
       </div>
       {isLoading ? <Spinner /> : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[40rem]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-white/[0.06]">
                 <th className="pb-2 pr-4">User</th>
@@ -517,7 +517,7 @@ function MeetingsTab() {
         <p className="text-xs text-gray-600 py-8 text-center">No meetings found.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[40rem]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-white/[0.06]">
                 <th className="pb-2 pr-4">Meeting</th><th className="pb-2 pr-4">Host</th><th className="pb-2 pr-4">Status</th>
@@ -593,7 +593,7 @@ function AuditTab({ userId, compact = false }) {
         <p className="text-xs text-gray-600 py-8 text-center">No activity matches these filters.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[40rem]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-white/[0.06]">
                 <th className="pb-2 pr-4">Time</th><th className="pb-2 pr-4">Actor</th><th className="pb-2 pr-4">Action</th>
@@ -718,7 +718,7 @@ function AdminsTab() {
         <button onClick={() => setForm({})} className="btn btn-primary !py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4" /> Add admin</button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm min-w-[40rem]">
           <thead>
             <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-white/[0.06]">
               <th className="pb-2 pr-4">Admin</th><th className="pb-2 pr-4">Role</th><th className="pb-2 pr-4">Last login</th><th className="pb-2">Actions</th>

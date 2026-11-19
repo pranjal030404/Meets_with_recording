@@ -187,10 +187,10 @@ const Calendar = () => {
           </div>
 
           {/* Calendar Grid */}
-          <div className="grid grid-cols-7 gap-2">
+          <div className="grid grid-cols-7 gap-1 sm:gap-2">
             {/* Day headers */}
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-              <div key={day} className="text-center text-xs font-semibold uppercase tracking-wider text-gray-500 py-2">
+              <div key={day} className="text-center text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-gray-500 py-1 sm:py-2">
                 {day}
               </div>
             ))}
@@ -205,7 +205,7 @@ const Calendar = () => {
                 <div
                   key={index}
                   onClick={() => day && !isPast && handleDateClick(day)}
-                  className={`group min-h-24 p-2 border rounded-xl transition-all duration-300 animate-scale-in ${
+                  className={`group min-h-14 sm:min-h-24 min-w-0 p-1 sm:p-2 border rounded-xl transition-all duration-300 animate-scale-in ${
                     day
                       ? isPast
                         ? 'bg-dark-300/30 cursor-not-allowed border-white/[0.03]'
@@ -221,7 +221,12 @@ const Calendar = () => {
                       } ${!isToday ? 'group-hover:text-white' : ''}`}>
                         {day.getDate()}
                       </div>
-                      <div className="space-y-1">
+                      {dayMeetings.length > 0 && (
+                        <div className="sm:hidden flex justify-center gap-0.5 mt-0.5">
+                          {dayMeetings.slice(0, 3).map(m => <span key={m._id} className="w-1.5 h-1.5 rounded-full bg-primary-400" />)}
+                        </div>
+                      )}
+                      <div className="hidden sm:block space-y-1">
                         {dayMeetings.slice(0, 2).map(meeting => (
                           <div
                             key={meeting._id}

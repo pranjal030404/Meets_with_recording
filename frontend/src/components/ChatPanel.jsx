@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Send, Smile, Paperclip, Reply, Loader2 } from 'lucide-react'
+import { X, Send, MessageSquare, Smile, Paperclip, Reply, Loader2 } from 'lucide-react'
 import { useChatStore } from '../store/chatStore'
 import { useAuthStore } from '../store/authStore'
 import { getSocket } from '../lib/socket'
@@ -119,10 +119,10 @@ export default function ChatPanel({ roomId, onClose }) {
   }
 
   return (
-    <div className="w-80 bg-dark-200 border-l border-dark-400 flex flex-col">
+    <div className="side-panel bg-dark-200 border-l border-white/[0.06]">
       {/* Header */}
-      <div className="p-4 border-b border-dark-400 flex items-center justify-between">
-        <h2 className="font-semibold">Chat</h2>
+      <div className="px-4 py-3.5 border-b border-white/[0.06] flex items-center justify-between">
+        <h2 className="font-semibold flex items-center gap-2.5"><span className="w-8 h-8 rounded-lg bg-primary-500/15 text-primary-400 flex items-center justify-center"><MessageSquare className="w-4 h-4" /></span> Chat</h2>
         <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
           <X className="w-5 h-5" />
         </button>
@@ -131,8 +131,9 @@ export default function ChatPanel({ roomId, onClose }) {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 ? (
-          <div className="text-center text-gray-400 text-sm py-8">
-            No messages yet. Start the conversation!
+          <div className="flex flex-col items-center text-center text-gray-400 text-sm py-12 gap-3">
+            <span className="w-12 h-12 rounded-full bg-dark-300 flex items-center justify-center"><MessageSquare className="w-5 h-5 text-gray-500" /></span>
+            No messages yet.<br />Start the conversation!
           </div>
         ) : (
           messages.map((message) => {
@@ -234,15 +235,15 @@ export default function ChatPanel({ roomId, onClose }) {
       )}
 
       {/* Input */}
-      <form onSubmit={handleSendMessage} className="p-3 border-t border-dark-400">
-        <div className="flex gap-2 items-end">
+      <form onSubmit={handleSendMessage} className="p-3 border-t border-white/[0.06]">
+        <div className="flex items-center gap-1 bg-dark-300 border border-white/[0.06] rounded-full pl-1.5 pr-1.5 py-1.5 focus-within:border-primary-500/70 transition-colors">
           <div className="relative" ref={emojiPickerRef}>
             <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="p-2 hover:bg-dark-400 rounded-lg transition-colors">
+              className="p-1.5 hover:bg-dark-400 rounded-full transition-colors" title="Emoji">
               <Smile className="w-5 h-5 text-gray-400" />
             </button>
             {showEmojiPicker && (
-              <div className="absolute bottom-full mb-2 left-0 bg-dark-300 rounded-lg shadow-xl p-2 grid grid-cols-5 gap-1 min-w-[180px] z-20">
+              <div className="absolute bottom-full mb-3 left-0 bg-dark-300 border border-white/[0.06] rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 min-w-[180px] z-20">
                 {CHAT_EMOJIS.map((emoji) => (
                   <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}
                     className="w-8 h-8 flex items-center justify-center text-lg hover:bg-dark-400 rounded transition-colors">
@@ -252,19 +253,9 @@ export default function ChatPanel({ roomId, onClose }) {
               </div>
             )}
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={onFileChange}
-          />
-          <button
-            type="button"
-            onClick={pick}
-            disabled={isUploading}
-            className="p-2 hover:bg-dark-400 rounded-lg transition-colors disabled:opacity-50"
-            title="Attach a file"
-          >
+          <input ref={fileInputRef} type="file" className="hidden" onChange={onFileChange} />
+          <button type="button" onClick={pick} disabled={isUploading}
+            className="p-1.5 hover:bg-dark-400 rounded-full transition-colors disabled:opacity-50" title="Attach a file">
             <Paperclip className="w-5 h-5 text-gray-400" />
           </button>
           <input
@@ -272,11 +263,12 @@ export default function ChatPanel({ roomId, onClose }) {
             value={newMessage}
             onChange={(e) => { setNewMessage(e.target.value); handleTyping() }}
             placeholder="Type a message..."
-            className="flex-1 bg-dark-300 border border-dark-400 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary-500"
+            className="flex-1 min-w-0 bg-transparent px-1 py-1 text-sm focus:outline-none placeholder:text-gray-500"
           />
-          <button type="submit" disabled={!newMessage.trim() && !pendingFile}
-            className="p-2 bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            <Send className="w-5 h-5" />
+          <button type="submit" disabled={(!newMessage.trim() && !pendingFile) || isUploading}
+            aria-label="Send message"
+            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-primary-700 hover:from-primary-400 hover:to-primary-600 text-white shadow-lg shadow-primary-600/30 transition-all disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed">
+            <Send className="w-4 h-4 -ml-0.5" />
           </button>
         </div>
       </form>

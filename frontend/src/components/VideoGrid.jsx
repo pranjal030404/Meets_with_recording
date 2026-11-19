@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from 'react'
 import { useMeetingStore } from '../store/meetingStore'
-import { MicOff, VideoOff, Pin, PinOff, Hand, Maximize2, User, Star } from 'lucide-react'
+import { Mic, MicOff, VideoOff, Pin, PinOff, Hand, Maximize2, User, Star } from 'lucide-react'
 
 const getUserId = (u) => u?.id || u?._id
 
@@ -190,9 +190,27 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
     }
   }, [stream, isVideoOff])
 
+  // Remote audio plays through a dedicated <audio> element that is always mounted. Previously the
+  // sound only came from the <video>, which isn't rendered while a camera is off -> no audio at all.
+  const audioRef = useRef(null)
+  useEffect(() => {
+    const el = audioRef.current
+    if (!el || isLocal || !stream) return
+    if (el.srcObject !== stream) el.srcObject = stream
+    el.play?.().catch(() => {})
+    // Re-attempt when tracks arrive later (audio producer is consumed after video) or after a gesture
+    const retry = () => el.play?.().catch(() => {})
+    stream.addEventListener('addtrack', retry)
+    document.addEventListener('click', retry, { once: true })
+    return () => { stream.removeEventListener('addtrack', retry); document.removeEventListener('click', retry) }
+  }, [stream, isLocal])
+
   const tileClasses = small
     ? 'min-w-40 lg:min-w-0 aspect-video bg-dark-300 rounded-xl relative overflow-hidden flex-shrink-0 transition-all duration-300'
     : 'video-container relative overflow-hidden transition-all duration-300'
+
+  const localSpeaking = useMeetingStore(st => st.isSpeaking)
+  const localLevel = useMeetingStore(st => st.audioLevel)
 
   if (isLocal && hideSelf && !isPinned) return null
 
@@ -215,12 +233,14 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
           ref={ref}
           autoPlay
           playsInline
-          muted={isLocal}
+          muted
           data-local={isLocal ? 'true' : 'false'}
           className="w-full h-full object-contain bg-dark-300"
           style={isLocal && mirrorSelf ? { transform: 'scaleX(-1)' } : {}}
         />
       )}
+
+      {!isLocal && <audio ref={audioRef} autoPlay playsInline />}
 
       {/* Gradient overlay */}
       <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
@@ -258,10 +278,12 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
           <span className="bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-lg text-sm font-medium text-white shadow-lg">
             {user?.name || 'Unknown'} {isLocal && '(You)'}
           </span>
-          {isMuted && (
-            <span className="bg-red-600 p-1.5 rounded-lg shadow-lg animate-pulse">
+          {isMuted ? (
+            <span className="bg-red-600 p-1.5 rounded-lg shadow-lg">
               <MicOff className="w-3.5 h-3.5 text-white" />
             </span>
+          ) : (
+            <MicActivity talking={isLocal ? localSpeaking : isActiveSpeaker} level={isLocal ? localLevel : 0.6} />
           )}
         </div>
         {isVideoOff && (
@@ -279,6 +301,25 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
   )
 }
 
+
+// Mic badge shown while unmuted: bars bounce with the voice level while talking.
+function MicActivity({ talking, level = 0.6 }) {
+  const bars = [0.5, 1, 0.7]
+  return (
+    <span className={`flex items-center gap-1 px-2 py-1.5 rounded-lg shadow-lg backdrop-blur-sm transition-colors ${talking ? 'bg-emerald-500/90' : 'bg-black/60'}`}
+      title={talking ? 'Speaking' : 'Mic on'}>
+      <Mic className="w-3.5 h-3.5 text-white" />
+      {talking && (
+        <span className="flex items-end gap-[2px] h-3">
+          {bars.map((b, i) => (
+            <span key={i} className="w-[3px] rounded-full bg-white transition-[height] duration-100"
+              style={{ height: `${Math.max(25, Math.min(100, level * 100 * b + 30))}%` }} />
+          ))}
+        </span>
+      )}
+    </span>
+  )
+}
 
 // Attaches the stream only when it changes. An inline ref callback re-ran on every parent render
 // (the meeting timer ticks each second), reloading the video and making the shared screen flicker.

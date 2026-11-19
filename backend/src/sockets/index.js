@@ -187,6 +187,19 @@ export const initializeSocketHandlers = (io) => {
           }
           if (meeting.settings?.waitingRoom) {
             if (!roomWaiting.has(roomId)) roomWaiting.set(roomId, new Map());
+            const queue = roomWaiting.get(roomId);
+            // waiting -> waiting is a no-op: a repeated knock (double click / reload) must not re-notify the hosts.
+            if (queue.has(socket.id)) { socket.emit('room:waiting-for-host', { roomId }); return; }
+            // Same person on a stale socket (old tab / reconnect): that earlier knock is superseded, so the
+            // hosts see one entry per user and admitting a dead socket can't strand the real one.
+            for (const [staleId, entry] of [...queue]) {
+              if (entry.user.id === socket.user.id) {
+                queue.delete(staleId);
+                for (const [, info] of roomParticipants.get(roomId) || []) {
+                  if (info.role === 'host' || info.role === 'co-host') io.to(info.socketId).emit('room:waiting-left', { socketId: staleId });
+                }
+              }
+            }
             roomWaiting.get(roomId).set(socket.id, { user: { id: socket.user.id, name: socket.user.name, email: socket.user.email, avatar: socket.user.avatar } });
             socket.emit('room:waiting-for-host', { roomId });
             // Tell the room's managers (they're in the socket room) that someone is at the door
@@ -329,6 +342,19 @@ export const initializeSocketHandlers = (io) => {
         callback({ success: true, transportParams });
       } catch (error) {
         console.error('Create transport error:', error);
+        callback({ success: false, error: error.message });
+      }
+    });
+
+    socket.on('mediasoup:restartIce', async ({ transportId }, callback) => {
+      try {
+        // Only the owner of a transport may restart it
+        const mine = userTransports.get(socket.id) || {};
+        if (transportId !== mine.send && transportId !== mine.recv) throw new Error('Not your transport');
+        const iceParameters = await mediasoupService.restartIce(transportId);
+        callback({ success: true, iceParameters });
+      } catch (error) {
+        console.error('Restart ICE error:', error);
         callback({ success: false, error: error.message });
       }
     });
@@ -621,7 +647,7 @@ export const initializeSocketHandlers = (io) => {
           return;
         }
 
-        if (!meeting.settings || !meeting.settings.allowChat) {
+        if (meeting.settings?.allowChat === false) {
           socket.emit('error', { message: 'Chat is disabled' });
           return;
         }
