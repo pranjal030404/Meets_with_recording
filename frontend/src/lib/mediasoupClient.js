@@ -18,6 +18,46 @@ class MediasoupClientService {
     this.consumers = new Map(); // Map<consumerId, Consumer>
     this.socket = null;
     this.roomId = null;
+    this.onLinkChange = null; // (state) => void, aggregated send+recv link health for the UI
+    this._linkStates = { send: 'new', recv: 'new' };
+    this._restarting = { send: false, recv: false };
+  }
+
+  /** Collapse the two transports into one link state (worst one wins). */
+  _reportLink(direction, state) {
+    this._linkStates[direction] = state;
+    const order = ['failed', 'disconnected', 'reconnecting', 'connecting', 'new', 'connected', 'closed'];
+    const states = Object.values(this._linkStates);
+    this.onLinkChange?.(order.find((s) => states.includes(s)) || state);
+  }
+
+  /** ICE restart: the fix for 'disconnected'/'failed' after a network change; media resumes without rejoining. */
+  async _recover(direction) {
+    const transport = direction === 'send' ? this.sendTransport : this.recvTransport;
+    if (!transport || transport.closed || this._restarting[direction]) return;
+    this._restarting[direction] = true;
+    this._reportLink(direction, 'reconnecting');
+    try {
+      const { iceParameters } = await this._socketRequest('mediasoup:restartIce', { transportId: transport.id });
+      await transport.restartIce({ iceParameters });
+    } catch (error) {
+      console.error(`ICE restart failed (${direction}):`, error);
+      this._reportLink(direction, 'failed');
+    } finally {
+      this._restarting[direction] = false;
+    }
+  }
+
+  _watchTransport(transport, direction) {
+    transport.on('connectionstatechange', (state) => {
+      console.log(`${direction} transport connection state:`, state);
+      this._reportLink(direction, state);
+      if (state === 'failed') this._recover(direction);
+      if (state === 'disconnected') {
+        // Give transient blips a few seconds to heal on their own before forcing a restart
+        setTimeout(() => { if (transport.connectionState === 'disconnected') this._recover(direction); }, 4000);
+      }
+    });
   }
 
   /**
@@ -84,12 +124,7 @@ class MediasoupClientService {
       }
     });
 
-    this.sendTransport.on('connectionstatechange', (state) => {
-      console.log('Send transport connection state:', state);
-      if (state === 'failed' || state === 'closed') {
-        console.error('Send transport connection failed');
-      }
-    });
+    this._watchTransport(this.sendTransport, 'send');
 
     console.log('✅ Send transport created');
     return this.sendTransport;
@@ -118,12 +153,7 @@ class MediasoupClientService {
       }
     });
 
-    this.recvTransport.on('connectionstatechange', (state) => {
-      console.log('Receive transport connection state:', state);
-      if (state === 'failed' || state === 'closed') {
-        console.error('Receive transport connection failed');
-      }
-    });
+    this._watchTransport(this.recvTransport, 'recv');
 
     console.log('✅ Receive transport created');
     return this.recvTransport;

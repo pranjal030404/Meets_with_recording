@@ -21,7 +21,7 @@ export default function ParticipantsList({
   const isHandRaised = (userId) => handRaisedUsers.some(h => h.userId === userId)
 
   return (
-    <div className="w-80 bg-dark-200 border-l border-dark-400 flex flex-col">
+    <div className="side-panel bg-dark-200 border-l border-white/[0.06]">
       {/* Header */}
       <div className="p-4 border-b border-dark-400 flex items-center justify-between">
         <h2 className="font-semibold">Participants ({participants.length + 1})</h2>

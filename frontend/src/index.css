@@ -12,7 +12,46 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
 }
+
+img, video, canvas, svg, iframe {
+  max-width: 100%;
+}
+
+img, video {
+  height: auto;
+}
+
+/* Keep long words / URLs from forcing horizontal scroll */
+p, h1, h2, h3, h4, li, td, th, label { overflow-wrap: anywhere; }
+
+/* Meeting side panels (chat, participants, polls, notes, ...): fixed rail on desktop,
+   full-height overlay drawer on tablets / phones so they never squeeze the video area. */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 20rem;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+}
+@media (max-width: 1023px) {
+  .side-panel {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: min(100%, 24rem);
+    z-index: 30;
+    box-shadow: -12px 0 40px rgba(0, 0, 0, 0.55);
+    animation: fadeIn 0.2s ease-out;
+  }
+}
+
+/* Scroll wrapper for wide tables so only the table scrolls, never the page */
+.aurora-bg { overflow-x: clip; } /* decorative blobs bleed past the edge; clip them at the wrapper */
+.table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll > table { min-width: 36rem; }
 
 body {
   font-family: 'Manrope', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -23,6 +62,7 @@ body {
   background-attachment: fixed;
   color: #ffffff;
   min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -157,10 +197,28 @@ h1, h2, h3, .font-display {
   grid-template-columns: repeat(7, 1fr);
 }
 
+@media (max-width: 1023px) {
+  .participants-grid.grid-cols-4,
+  .participants-grid.grid-cols-5,
+  .participants-grid.grid-cols-6,
+  .participants-grid.grid-cols-7 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
 @media (max-width: 768px) {
   .participants-grid {
     gap: 8px;
     padding: 8px;
+    overflow-y: auto;
+    grid-auto-rows: minmax(9rem, 1fr);
+  }
+
+  .participants-grid.grid-cols-4,
+  .participants-grid.grid-cols-5,
+  .participants-grid.grid-cols-6,
+  .participants-grid.grid-cols-7 {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .participants-grid.grid-2,
@@ -449,7 +507,9 @@ h1, h2, h3, .font-display {
 
   .modal-content {
     position: relative;
-    @apply bg-dark-200/95 backdrop-blur-xl rounded-2xl p-6 w-full max-w-md;
+    @apply bg-dark-200/95 backdrop-blur-xl rounded-2xl p-4 sm:p-6 w-full max-w-md;
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
     @apply border border-white/10;
     @apply animate-slide-up;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);

@@ -48,14 +48,14 @@ export default function MeetingHeader({
   }
 
   return (
-    <header className="glass border-b border-white/[0.06] px-4 py-2.5 flex items-center justify-between animate-fade-in-down">
-      <div className="flex items-center gap-4 min-w-0">
-        <div className="flex items-center gap-2.5 shrink-0">
+    <header className="glass border-b border-white/[0.06] px-2 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between gap-2 animate-fade-in-down">
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        <div className="hidden sm:flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center shadow-md shadow-primary-500/25">
             <Video className="w-4 h-4 text-white" />
           </div>
         </div>
-        <h1 className="text-base sm:text-lg font-semibold font-display truncate max-w-[180px] sm:max-w-[220px]">{title || 'Meeting'}</h1>
+        <h1 className="text-base sm:text-lg font-semibold font-display truncate max-w-[28vw] sm:max-w-[220px]">{title || 'Meeting'}</h1>
         <div className="flex items-center gap-2 text-gray-400 text-sm tabular-nums">
           {isBeingRecorded && (
             <span className="flex items-center gap-1.5 text-red-400 mr-1 bg-red-500/10 border border-red-400/25 rounded-full px-2.5 py-0.5">
@@ -69,7 +69,7 @@ export default function MeetingHeader({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-3">
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
         {/* Layout Selector */}
         {onLayoutChange && (
           <div className="hidden sm:flex items-center bg-dark-300/80 border border-white/[0.06] rounded-xl p-0.5">

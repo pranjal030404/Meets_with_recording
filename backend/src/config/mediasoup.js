@@ -1,5 +1,24 @@
 import os from 'os';
 
+// Browsers can't connect to a 0.0.0.0 ICE candidate. If MEDIASOUP_ANNOUNCED_IP isn't set, fall back to
+// this machine's first non-internal IPv4 address (fine for LAN/same-machine testing). For users on the
+// internet, MEDIASOUP_ANNOUNCED_IP must be the server's PUBLIC IP.
+const detectAnnouncedIp = () => {
+  if (process.env.MEDIASOUP_ANNOUNCED_IP && process.env.MEDIASOUP_ANNOUNCED_IP.trim()) {
+    return process.env.MEDIASOUP_ANNOUNCED_IP.trim();
+  }
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const a of addrs || []) {
+      if (a.family === 'IPv4' && !a.internal) {
+        console.warn(`⚠️  MEDIASOUP_ANNOUNCED_IP not set - using ${a.address}. Remote users will have NO audio/video unless this is your public IP.`);
+        return a.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+};
+const ANNOUNCED_IP = detectAnnouncedIp();
+
 /**
  * Mediasoup configuration for SFU media server
  * This replaces the P2P WebRTC architecture with a centralized media router
@@ -89,7 +108,7 @@ export const mediasoupConfig = {
     listenIps: [
       {
         ip: process.env.MEDIASOUP_LISTEN_IP || '0.0.0.0',
-        announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || null, // For production: public IP or domain
+        announcedIp: ANNOUNCED_IP,
       },
     ],
     enableUdp: true,
@@ -105,7 +124,7 @@ export const mediasoupConfig = {
   plainTransport: {
     listenIp: {
       ip: process.env.MEDIASOUP_LISTEN_IP || '0.0.0.0',
-      announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || null,
+      announcedIp: ANNOUNCED_IP,
     },
     maxSctpMessageSize: 262144,
   },

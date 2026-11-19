@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
+  ArrowLeft,
   Plus, Send, Paperclip, Smile, Hash, Users, Phone, X, BellOff, Bell,
   Pin, Bookmark, Forward, Pencil, Trash2, Reply, ListChecks,
   CheckCheck, Loader2, Search, CornerDownLeft
@@ -101,9 +102,9 @@ function ChatWorkspace() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-0px)] lg:h-screen">
+    <div className="flex h-[calc(100dvh-4rem)] lg:h-screen overflow-hidden">
       {/* Conversation list */}
-      <div className="w-full max-w-[300px] shrink-0 border-r border-white/[0.06] bg-dark-200/40 backdrop-blur-sm flex flex-col h-full mt-[60px] lg:mt-0">
+      <div className={`${active ? 'hidden md:flex' : 'flex'} w-full md:max-w-[300px] min-w-0 shrink-0 border-r border-white/[0.06] bg-dark-200/40 backdrop-blur-sm flex-col h-full`}>
         <div className="p-4 flex items-center justify-between">
           <h1 className="text-lg font-bold font-display">Chat</h1>
           <button onClick={() => setShowNewChat(true)} className="btn btn-primary !px-3 !py-2" title="New conversation">
@@ -145,7 +146,7 @@ function ChatWorkspace() {
       </div>
 
       {/* Conversation view */}
-      <div className="flex-1 flex flex-col min-w-0 mt-[60px] lg:mt-0">
+      <div className={`${active ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-w-0 h-full`}>
         {!active ? (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
             <Reply className="w-12 h-12 text-gray-700" />
@@ -365,7 +366,10 @@ function ConversationView({
   return (
     <>
       {/* Header */}
-      <div className="h-[68px] shrink-0 glass-strong border-b border-white/[0.06] flex items-center gap-3 px-5">
+      <div className="h-[68px] shrink-0 glass-strong border-b border-white/[0.06] flex items-center gap-2 sm:gap-3 px-3 sm:px-5">
+        <Link to="/chat" className="md:hidden p-2 -ml-1 text-gray-300 hover:text-white shrink-0" aria-label="Back to conversations">
+          <ArrowLeft className="w-5 h-5" />
+        </Link>
         <Avatar user={conversation.type === 'direct' ? conversation.partner : null} name={conversation.title} isGroup={conversation.type === 'group'} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -685,7 +689,7 @@ function ThreadPanel({ thread, user, onClose, onReply, onReact }) {
   }
 
   return (
-    <div className="w-full max-w-[380px] shrink-0 border-l border-white/[0.06] bg-dark-200/60 backdrop-blur-sm flex flex-col h-full mt-[60px] lg:mt-0">
+    <div className="fixed inset-0 z-40 lg:static lg:z-auto w-full lg:max-w-[380px] shrink-0 border-l border-white/[0.06] bg-dark-200 lg:bg-dark-200/60 backdrop-blur-sm flex flex-col h-full">
       <div className="h-[68px] shrink-0 flex items-center justify-between px-4 border-b border-white/[0.06]">
         <div>
           <h3 className="font-semibold font-display text-sm">Thread</h3>
@@ -944,7 +948,7 @@ function TaskFromMessageModal({ message, onClose }) {
           <label className="text-xs text-gray-500 mb-1 block">Task title</label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} className="input" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-xs text-gray-500 mb-1 block">Team (optional)</label>
             <select value={teamId} onChange={(e) => loadMembers(e.target.value)} className="input">

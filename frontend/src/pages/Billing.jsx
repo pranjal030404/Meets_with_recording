@@ -213,7 +213,7 @@ export default function Billing() {
               No payments yet. {isPaid ? '' : 'You are on the Free plan.'}
             </div>
           ) : (
-            <div className="glass rounded-2xl overflow-hidden">
+            <div className="glass rounded-2xl overflow-hidden table-scroll">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wider text-gray-400 border-b border-white/10">

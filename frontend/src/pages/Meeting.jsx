@@ -736,7 +736,7 @@ export default function Meeting() {
   }
 
   return (
-    <div className="h-screen bg-dark-100 flex flex-col overflow-hidden">
+    <div className="h-screen h-[100dvh] bg-dark-100 flex flex-col overflow-hidden">
       {/* Recording banner */}
       {isBeingRecorded && (
         <div className="bg-gradient-to-r from-red-600 via-red-500 to-red-600 text-white text-center py-1.5 text-sm font-medium flex items-center justify-center gap-2 animate-slide-down shadow-lg shadow-red-500/20">
@@ -777,7 +777,7 @@ export default function Meeting() {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Video Grid */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-w-0">
           <VideoGrid
             localStream={localStream}
             localVideoRef={localVideoRef}

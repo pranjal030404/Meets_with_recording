@@ -112,7 +112,7 @@ router.post('/:roomId/messages', protect, async (req, res) => {
       });
     }
 
-    if (!meeting.settings || !meeting.settings.allowChat) {
+    if (meeting.settings?.allowChat === false) {
       return res.status(403).json({
         success: false,
         message: 'Chat is disabled for this meeting'

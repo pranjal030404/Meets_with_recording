@@ -58,10 +58,10 @@ export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canMan
   )
 
   return (
-    <div className="w-80 bg-dark-200 border-l border-dark-400 flex flex-col">
-      <div className="p-4 border-b border-dark-400 flex items-center justify-between">
-        <h2 className="font-semibold flex items-center gap-2">
-          <Shield className="w-5 h-5" /> Host controls
+    <div className="side-panel bg-dark-200 border-l border-white/[0.06]">
+      <div className="px-4 py-3.5 border-b border-white/[0.06] flex items-center justify-between">
+        <h2 className="font-semibold flex items-center gap-2.5">
+          <span className="w-8 h-8 rounded-lg bg-primary-500/15 text-primary-400 flex items-center justify-center"><Shield className="w-4 h-4" /></span> Host controls
         </h2>
         <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
           <X className="w-5 h-5" />
@@ -71,7 +71,7 @@ export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canMan
       <div className="flex-1 overflow-y-auto">
         {manage ? (
           <>
-            <p className="p-4 text-sm text-gray-400">
+            <p className="px-4 pt-4 pb-1 text-xs leading-relaxed text-gray-400">
               Use these host settings to keep control of your meeting. Only hosts have access to these controls.
             </p>
 
@@ -153,8 +153,8 @@ export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canMan
 
 function Section({ title, children }) {
   return (
-    <div className="border-t border-dark-400 pb-2">
-      <h3 className="px-4 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wide">{title}</h3>
+    <div className="mx-3 my-3 rounded-2xl bg-dark-300/50 border border-white/[0.05] pb-2">
+      <h3 className="px-4 pt-3.5 pb-1 text-[11px] font-semibold text-primary-300/80 uppercase tracking-wider">{title}</h3>
       {children}
     </div>
   )
@@ -163,7 +163,7 @@ function Section({ title, children }) {
 function ActionButton({ onClick, icon, children }) {
   return (
     <button onClick={onClick}
-      className="w-[calc(100%-2rem)] mx-4 my-1 flex items-center gap-3 p-3 bg-dark-300 hover:bg-dark-400 rounded-lg transition-colors text-left">
+      className="w-[calc(100%-2rem)] mx-4 my-1 flex items-center gap-3 p-2.5 bg-dark-400/50 hover:bg-dark-400 border border-white/[0.04] rounded-xl transition-colors text-left">
       {icon}<span className="text-sm">{children}</span>
     </button>
   )
@@ -180,8 +180,8 @@ function ToggleRow({ label, description, icon, enabled, onToggle, disabled, inde
         </div>
       </div>
       <button onClick={onToggle} disabled={disabled} role="switch" aria-checked={enabled} aria-label={label}
-        className={`relative shrink-0 w-10 h-5 rounded-full transition-colors disabled:cursor-not-allowed ${enabled ? 'bg-primary-600' : 'bg-dark-500'}`}>
-        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white flex items-center justify-center transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'}`}>
+        className={`relative shrink-0 w-11 h-6 rounded-full transition-colors disabled:cursor-not-allowed ${enabled ? 'bg-primary-600' : 'bg-dark-500'}`}>
+        <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow flex items-center justify-center transition-transform ${enabled ? 'translate-x-[22px]' : 'translate-x-0.5'}`}>
           {enabled && <Check className="w-3 h-3 text-primary-600" />}
         </div>
       </button>

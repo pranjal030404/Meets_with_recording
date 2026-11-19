@@ -262,7 +262,7 @@ function CreateTaskModal({ teams, onClose }) {
         <div className="space-y-3">
           <input value={form.title} onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Task title" className="input" autoFocus />
           <textarea value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Description (optional)" rows={3} className="input resize-none" />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Team</label>
               <select value={form.teamId} onChange={(e) => loadMembers(e.target.value)} className="input">
@@ -365,7 +365,7 @@ function TaskDetailModal({ task, teams, onClose, onDelete }) {
         <div className="space-y-3">
           <input value={form.title} onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))} className="input font-semibold" />
           <textarea value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Description" rows={3} className="input resize-none" />
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Status</label>
               <select value={form.status} onChange={(e) => setForm(f => ({ ...f, status: e.target.value }))} className="input">
