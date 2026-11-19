@@ -15,7 +15,10 @@ const KEEPALIVE_INTERVAL = 20000
 
 export const initSocket = (token) => {
   // Reuse a live socket only if it belongs to the same user: after a login as someone else it must be replaced
-  if (socket?.connected && socket.auth?.token === token) {
+  // `active` is true while connecting / reconnecting too. Replacing a socket that is still connecting
+  // (e.g. the auth check calling initSocket right after the meeting page did) killed the instance the
+  // meeting page was holding: it never emitted room:join, so nobody could see anybody.
+  if (socket && socket.auth?.token === token && (socket.connected || socket.active)) {
     return socket
   }
 

@@ -220,8 +220,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
     ? 'min-w-40 lg:min-w-0 aspect-video bg-dark-300 rounded-xl relative overflow-hidden flex-shrink-0 transition-all duration-300'
     : 'video-container relative overflow-hidden transition-all duration-300'
 
-  const localSpeaking = useMeetingStore(st => st.isSpeaking)
-  const localLevel = useMeetingStore(st => st.audioLevel)
+  const voice = useVoiceActivity(stream, !isMuted)
 
   if (isLocal && hideSelf && !isPinned) return null
 
@@ -294,7 +293,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
               <MicOff className="w-3.5 h-3.5 text-white" />
             </span>
           ) : (
-            <MicActivity talking={isLocal ? localSpeaking : isActiveSpeaker} level={isLocal ? localLevel : 0.6} />
+            <MicActivity talking={voice.speaking} level={voice.level} />
           )}
         </div>
         {isVideoOff && (
@@ -313,13 +312,55 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
 }
 
 
+// One shared AudioContext for all tiles (browsers cap how many can exist)
+let sharedCtx = null
+const getCtx = () => {
+  if (!sharedCtx || sharedCtx.state === 'closed') sharedCtx = new (window.AudioContext || window.webkitAudioContext)()
+  sharedCtx.resume?.().catch(() => {})
+  return sharedCtx
+}
+
+/** Detects when someone is actually talking by listening to THEIR audio track (works for remote people too). */
+function useVoiceActivity(stream, active) {
+  const [state, setState] = useState({ speaking: false, level: 0 })
+  const trackId = stream?.getAudioTracks().find(t => t.readyState === 'live')?.id
+  useEffect(() => {
+    if (!active || !trackId) { setState(s => (s.speaking || s.level ? { speaking: false, level: 0 } : s)); return }
+    const track = stream.getAudioTracks().find(t => t.id === trackId)
+    if (!track) return
+    let source, analyser, timer
+    try {
+      const ctx = getCtx()
+      analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      source = ctx.createMediaStreamSource(new MediaStream([track]))
+      source.connect(analyser)
+      const samples = new Uint8Array(analyser.fftSize)
+      let holdUntil = 0
+      timer = setInterval(() => {
+        analyser.getByteTimeDomainData(samples)
+        let sum = 0
+        for (let i = 0; i < samples.length; i++) { const v = (samples[i] - 128) / 128; sum += v * v }
+        const rms = Math.sqrt(sum / samples.length)
+        const now = Date.now()
+        if (rms > 0.015) holdUntil = now + 350
+        const speaking = now < holdUntil
+        const level = Math.min(1, rms * 5)
+        setState(prev => (prev.speaking === speaking && Math.abs(prev.level - level) < 0.08 ? prev : { speaking, level }))
+      }, 100)
+    } catch (e) { console.warn('Voice activity unavailable:', e.message) }
+    return () => { clearInterval(timer); try { source?.disconnect() } catch {} }
+  }, [stream, trackId, active])
+  return state
+}
+
 // Mic badge shown while unmuted: bars bounce with the voice level while talking.
 function MicActivity({ talking, level = 0.6 }) {
   const bars = [0.5, 1, 0.7]
   return (
-    <span className={`flex items-center gap-1 px-2 py-1.5 rounded-lg shadow-lg backdrop-blur-sm transition-colors ${talking ? 'bg-emerald-500/90' : 'bg-black/60'}`}
+    <span className={`flex items-center gap-1 px-2 py-1.5 rounded-lg shadow-lg backdrop-blur-sm transition-colors ${talking ? 'bg-emerald-500 ring-2 ring-emerald-300/60 shadow-emerald-500/40' : 'bg-black/60'}`}
       title={talking ? 'Speaking' : 'Mic on'}>
-      <Mic className="w-3.5 h-3.5 text-white" />
+      <Mic className={`w-3.5 h-3.5 ${talking ? 'text-white' : 'text-emerald-300'}`} />
       {talking && (
         <span className="flex items-end gap-[2px] h-3">
           {bars.map((b, i) => (

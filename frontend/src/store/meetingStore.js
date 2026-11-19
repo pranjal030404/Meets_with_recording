@@ -8,6 +8,13 @@ import { canTransition, canMove, SCREEN_SHARE_TRANSITIONS, MEDIA_LINK_TRANSITION
 
 // Singleton mediasoup client
 let mediasoupClient = null
+let levelMonitor = null
+const stopLevelMonitor = () => {
+  if (!levelMonitor) return
+  clearInterval(levelMonitor.interval)
+  levelMonitor.audioCtx.close?.().catch?.(() => {})
+  levelMonitor = null
+}
 export const getMediasoupClient = () => mediasoupClient
 
 // Everything that belongs to ONE joined session. Used for the initial state AND the reset on leave,
@@ -169,6 +176,7 @@ export const useMeetingStore = create((set, get) => ({
     if (screenStream) screenStream.getTracks().forEach(t => t.stop())
 
     if (mediasoupClient) { mediasoupClient.closeAll(); mediasoupClient = null }
+    stopLevelMonitor()
 
     set({
       currentMeeting: null, participants: [], isHost: false, isCoHost: false, myRole: 'participant',
@@ -309,6 +317,7 @@ export const useMeetingStore = create((set, get) => ({
   },
 
   startAudioLevelMonitor: () => {
+    stopLevelMonitor() // one monitor at a time (they used to pile up on every unmute)
     const { localStream } = get()
     if (!localStream) return
     const audioTrack = localStream.getAudioTracks()[0]
@@ -316,22 +325,25 @@ export const useMeetingStore = create((set, get) => ({
 
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      audioCtx.resume?.()
       const analyser = audioCtx.createAnalyser()
-      analyser.fftSize = 256
-      const source = audioCtx.createMediaStreamSource(
-        new MediaStream([audioTrack])
-      )
-      source.connect(analyser)
-      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      analyser.fftSize = 512
+      audioCtx.createMediaStreamSource(new MediaStream([audioTrack])).connect(analyser)
+      const samples = new Uint8Array(analyser.fftSize)
+      let holdUntil = 0
 
       const interval = setInterval(() => {
-        analyser.getByteFrequencyData(dataArray)
-        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
-        const normalized = Math.min(avg / 128, 1)
-        set({ audioLevel: normalized, isSpeaking: normalized > 0.15 })
+        analyser.getByteTimeDomainData(samples)
+        let sum = 0
+        for (let i = 0; i < samples.length; i++) { const v = (samples[i] - 128) / 128; sum += v * v }
+        const rms = Math.sqrt(sum / samples.length)
+        const level = Math.min(1, rms * 5)
+        const now = Date.now()
+        if (rms > 0.015) holdUntil = now + 350 // short hold so the light doesn't flicker between words
+        set({ audioLevel: level, isSpeaking: now < holdUntil })
       }, 100)
 
-      return () => { clearInterval(interval); audioCtx.close() }
+      levelMonitor = { interval, audioCtx }
     } catch (e) {
       console.error('Audio level monitor error:', e)
     }
@@ -381,6 +393,7 @@ export const useMeetingStore = create((set, get) => ({
         await mediasoupClient.closeProducer('audio')
         set(s => ({ producers: { ...s.producers, audio: null } }))
       }
+      stopLevelMonitor()
       set({ isMuted: true, audioLevel: 0, isSpeaking: false })
       if (socket) socket.emit('media:toggle-mute', { isMuted: true })
     }
