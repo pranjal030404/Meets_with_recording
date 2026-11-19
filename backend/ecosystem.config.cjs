@@ -1,9 +1,16 @@
+// Backend: Express + Socket.IO + mediasoup (port comes from backend/.env PORT)
+// Start:  cd backend && pm2 start ecosystem.config.cjs --env production
+//
+// NOTE: fork mode with ONE instance on purpose. Socket.IO (without sticky
+// sessions) and mediasoup room state live in-process, so cluster mode breaks
+// meetings. mediasoup already spreads load over its own worker processes.
 module.exports = {
   apps: [{
-    name: 'meetclone-server',
+    name: 'meetclone-backend',
+    cwd: __dirname,
     script: 'src/index.js',
-    instances: process.env.NODE_ENV === 'production' ? -1 : 1,
-    exec_mode: 'cluster',
+    exec_mode: 'fork',
+    instances: 1,
     max_memory_restart: '1G',
     env: {
       NODE_ENV: 'development',
