@@ -117,7 +117,7 @@ export default function VideoGrid({
   // Screen share layout
   if (screenShareUser) {
     const isLocalScreenShare = user && screenShareUser.id === getUserId(user)
-    const screenSrcStream = isLocalScreenShare ? screenStream : screenShareEntry?.[1]?.stream
+    const screenSrcStream = isLocalScreenShare ? screenStream : screenShareEntry?.[1]?.screenStream
     const findParticipant = (id) => participants.find(p => getUserId(p.user) === id)
     return (
       <div className="h-full p-4 flex flex-col lg:flex-row gap-4">
@@ -188,7 +188,18 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
     if (ref.current && stream) {
       ref.current.srcObject = stream
     }
-  }, [stream, isVideoOff])
+  }, [stream, isVideoOff, stream?.getVideoTracks().length])
+
+  // A remote tile with no live video track (camera off / nothing received) shows the avatar, not a black box
+  const [, forceRender] = useState(0)
+  useEffect(() => {
+    if (!stream || isLocal) return
+    const bump = () => forceRender(n => n + 1)
+    stream.addEventListener('addtrack', bump)
+    stream.addEventListener('removetrack', bump)
+    return () => { stream.removeEventListener('addtrack', bump); stream.removeEventListener('removetrack', bump) }
+  }, [stream, isLocal])
+  const hasRemoteVideo = !!stream?.getVideoTracks().some(t => t.readyState === 'live')
 
   // Remote audio plays through a dedicated <audio> element that is always mounted. Previously the
   // sound only came from the <video>, which isn't rendered while a camera is off -> no audio at all.
@@ -220,7 +231,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {isVideoOff || !stream ? (
+      {isVideoOff || !stream || (!isLocal && !hasRemoteVideo) ? (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-dark-300 to-dark-400/60">
           <div className={`${small ? 'w-14 h-14' : 'w-24 h-24'} bg-gradient-to-br from-primary-500 to-accent-600 rounded-full flex items-center justify-center shadow-glow`}>
             <span className={`${small ? 'text-xl' : 'text-3xl'} font-semibold text-white`}>
