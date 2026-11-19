@@ -204,7 +204,7 @@ router.post('/translate', protect, requirePermission('ai.use'), async (req, res)
     if (!(await getLlm())) {
       return res.status(503).json({
         success: false,
-        message: 'Speech translation needs a language model: run Ollama locally (free) or set OPENAI_API_KEY'
+        message: 'Speech translation needs a local language model: install Ollama (free) and pull a model, e.g. `ollama pull qwen2.5:3b`'
       });
     }
 

@@ -107,7 +107,7 @@ With MeetClone, you get:
 | **Calendar View** | Monthly calendar with visual meeting badges |
 | **Automated Reminders** | Cron-based service sends notifications at 1 day, 1 hour, and 15 minutes before meetings |
 | **Meeting History** | Browse past meetings with filters (all, active, ended, scheduled) |
-| **Recording & Transcription** | WebM recording with OpenAI-powered transcription outputting JSON, TXT, SRT, VTT |
+| **Recording & Transcription** | WebM recording with free local-Whisper transcription outputting JSON, TXT, SRT, VTT |
 
 ### Host Controls
 
@@ -166,7 +166,7 @@ With MeetClone, you get:
 | bcryptjs | 2.4 | Password hashing |
 | node-cron | 3.0 | Scheduled reminders |
 | Multer | 1.4 | File upload handling |
-| OpenAI | 4.86 | AI transcription service |
+| Whisper (local) | - | Free offline transcription (no API key) |
 | ioredis | 5.9 | Redis client for Socket.IO scaling |
 
 ### Infrastructure
@@ -276,7 +276,7 @@ Meets_with_recording/
 │   │   ├── services/
 │   │   │   ├── reminderService.js        # Cron-based scheduled reminders
 │   │   │   ├── recordingService.js       # Recording file management
-│   │   │   └── transcriptionService.js   # OpenAI audio transcription
+│   │   │   └── transcriptionService.js   # Free local Whisper transcription
 │   │   ├── sockets/
 │   │   │   └── index.js                  # All Socket.IO event handlers
 │   │   └── scripts/
@@ -585,8 +585,7 @@ MEDIASOUP_ANNOUNCED_IP=   # Your public IP for production
 MEDIASOUP_MIN_PORT=40000
 MEDIASOUP_MAX_PORT=49999
 
-# OpenAI (for transcription — optional)
-OPENAI_API_KEY=sk-...
+# Transcription is free & local: run backend/scripts/setup-free-transcription.sh (no API key needed)
 
 # Redis (optional — for Socket.IO scaling)
 REDIS_URL=redis://localhost:6379
@@ -882,7 +881,7 @@ Server bandwidth (simplified): N × 1.5 Mbps × 2 (upload + download aggregate)
 - [ ] Cloud recording storage (AWS S3 / Azure Blob)
 - [ ] External calendar sync (Google Calendar, Outlook)
 - [ ] Speech-to-text improvements (Google Cloud Speech)
-- [ ] AI meeting summaries (OpenAI GPT-4)
+- [ ] AI meeting summaries (free local Ollama)
 - [ ] Analytics dashboard (attendance, duration, engagement)
 
 ### Phase 5 (Enterprise)
