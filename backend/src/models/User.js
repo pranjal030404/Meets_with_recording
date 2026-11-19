@@ -49,6 +49,19 @@ const User = sequelize.define('User', {
     type: DataTypes.BOOLEAN,
     defaultValue: true
   },
+  isEmailVerified: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  emailVerifyToken: {
+    type: DataTypes.STRING(64)
+  },
+  emailVerifyExpires: {
+    type: DataTypes.DATE
+  },
+  emailVerifySentAt: {
+    type: DataTypes.DATE
+  },
   customStatus: {
     type: DataTypes.STRING(100)
   },
@@ -94,6 +107,9 @@ User.prototype.comparePassword = async function(candidatePassword) {
 User.prototype.toJSON = function() {
   const values = { ...this.get() };
   delete values.password;
+  delete values.emailVerifyToken;
+  delete values.emailVerifyExpires;
+  delete values.emailVerifySentAt;
   values._id = values.id;
   return values;
 };

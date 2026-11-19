@@ -7,6 +7,7 @@ import { useAdminStore } from './store/adminStore'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import VerifyEmail from './pages/VerifyEmail'
 import Home from './pages/Home'
 import Meeting from './pages/Meeting'
 import JoinMeeting from './pages/JoinMeeting'
@@ -81,6 +82,7 @@ export default function App() {
           <Login />
         </PublicRoute>
       } />
+      <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/signup" element={
         <PublicRoute>
           <Signup />

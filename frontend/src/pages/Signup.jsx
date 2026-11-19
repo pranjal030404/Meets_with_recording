@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import api from '../lib/api'
 import { Link } from 'react-router-dom'
 import { User, Mail, Lock, Eye, EyeOff, Video, ShieldCheck, Sparkles, Radio, Globe, ArrowRight, Check } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
@@ -20,6 +21,20 @@ export default function Signup() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const { signup, isLoading, error } = useAuthStore()
+  const [pending, setPending] = useState(null) // set after signup when email verification is required
+  const [resending, setResending] = useState(false)
+
+  const resend = async () => {
+    setResending(true)
+    try {
+      await api.post('/auth/resend-verification', { email: pending.email })
+      toast.success('Verification email sent')
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not resend the email')
+    } finally {
+      setResending(false)
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -41,11 +56,33 @@ export default function Signup() {
 
     const result = await signup(name, email, password)
 
-    if (result.success) {
+    if (result.success && result.requiresVerification) {
+      setPending({ email: result.email, emailSent: result.emailSent })
+    } else if (result.success) {
       toast.success('Account created successfully!')
     } else {
       toast.error(result.message)
     }
+  }
+
+  if (pending) {
+    return (
+      <div className="relative min-h-screen overflow-hidden bg-dark-100 text-slate-100 aurora-bg noise flex items-center justify-center px-4">
+        <div className="relative w-full max-w-md rounded-3xl border border-white/10 bg-dark-200/80 p-8 text-center shadow-2xl backdrop-blur-xl">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-300"><Mail className="h-7 w-7" /></div>
+          <h1 className="text-2xl font-bold font-display">{pending.emailSent ? 'Check your inbox' : 'Account created'}</h1>
+          <p className="mt-3 text-sm text-slate-300">
+            {pending.emailSent
+              ? <>We sent a verification link to <span className="font-semibold text-white">{pending.email}</span>. Click it to activate your account (valid for 24 hours).</>
+              : <>We couldn't send the verification email to <span className="font-semibold text-white">{pending.email}</span>. Try resending below.</>}
+          </p>
+          <button onClick={resend} disabled={resending} className="btn btn-secondary mt-6 w-full py-3 disabled:opacity-50">
+            {resending ? 'Sending…' : 'Resend email'}
+          </button>
+          <Link to="/login" className="mt-4 inline-block text-sm text-primary-300 hover:text-primary-200">Go to sign in</Link>
+        </div>
+      </div>
+    )
   }
 
   return (

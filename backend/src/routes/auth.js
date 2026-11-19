@@ -1,10 +1,30 @@
 import express from 'express';
+import crypto from 'crypto';
 import { Op } from 'sequelize';
 import User from '../models/User.js';
 import { protect, generateToken } from '../middleware/auth.js';
 import { ensureSubscription, getSubscriptionDetails } from '../services/subscriptionService.js';
+import { getSetting } from '../services/settingsService.js';
+import { isSmtpConfigured, sendVerificationEmail } from '../services/mailService.js';
 
 const router = express.Router();
+
+const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+const RESEND_COOLDOWN_MS = 60 * 1000;
+const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
+
+// Verification is enforced only when an admin switched it on AND SMTP credentials exist.
+const verificationRequired = async () => (await getSetting('emailVerificationEnabled')) === true && isSmtpConfigured();
+
+// Issues a fresh token for the user and emails it. Throws if the email cannot be sent.
+async function issueVerification(user) {
+  const token = crypto.randomBytes(32).toString('hex');
+  user.emailVerifyToken = hashToken(token);
+  user.emailVerifyExpires = new Date(Date.now() + VERIFY_TTL_MS);
+  user.emailVerifySentAt = new Date();
+  await user.save();
+  await sendVerificationEmail(user, token);
+}
 
 router.post('/signup', async (req, res) => {
   try {
@@ -25,14 +45,35 @@ router.post('/signup', async (req, res) => {
       });
     }
 
+    const needsVerification = await verificationRequired();
+
+    // When verification is off, accounts are treated as verified so turning it on later never locks them out.
     const user = await User.create({
       name,
       email: email.toLowerCase(),
-      password
+      password,
+      isEmailVerified: !needsVerification
     });
 
     // Every new user starts on the Free plan
     const { subscription } = await getSubscriptionDetails(user.id);
+
+    if (needsVerification) {
+      let emailSent = true;
+      try {
+        await issueVerification(user);
+      } catch (mailError) {
+        emailSent = false;
+        console.error('Verification email failed:', mailError.message);
+      }
+      return res.status(201).json({
+        success: true,
+        message: emailSent
+          ? 'Account created. Check your email to verify your address.'
+          : 'Account created, but the verification email could not be sent. Use "Resend email" on the login page.',
+        data: { requiresVerification: true, emailSent, email: user.email }
+      });
+    }
 
     const token = generateToken(user.id);
 
@@ -94,6 +135,14 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    if (!user.isEmailVerified && await verificationRequired()) {
+      return res.status(403).json({
+        success: false,
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Please verify your email before signing in. Check your inbox or request a new link.'
+      });
+    }
+
     // isOnline is owned by the socket connect/disconnect handlers, not by login
     const token = generateToken(user.id);
 
@@ -112,6 +161,50 @@ router.post('/login', async (req, res) => {
       message: 'Error logging in',
       error: error.message
     });
+  }
+});
+
+router.post('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ success: false, message: 'Verification token is required' });
+    }
+    const user = await User.findOne({ where: { emailVerifyToken: hashToken(token) } });
+    if (!user || !user.emailVerifyExpires || user.emailVerifyExpires < new Date()) {
+      return res.status(400).json({ success: false, message: 'This verification link is invalid or has expired. Request a new one from the login page.' });
+    }
+    user.isEmailVerified = true;
+    user.emailVerifyToken = null;
+    user.emailVerifyExpires = null;
+    await user.save();
+    res.json({ success: true, message: 'Email verified. You can now sign in.' });
+  } catch (error) {
+    console.error('Verify email error:', error);
+    res.status(500).json({ success: false, message: 'Error verifying email' });
+  }
+});
+
+// Always answers the same way so it can't be used to discover which emails have accounts.
+router.post('/resend-verification', async (req, res) => {
+  const generic = { success: true, message: 'If that account exists and is not verified yet, a new verification email has been sent.' };
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+    if (!(await verificationRequired())) return res.json(generic);
+
+    const user = await User.findOne({ where: { email: String(email).toLowerCase() } });
+    if (user && !user.isEmailVerified && user.isActive !== false) {
+      const last = user.emailVerifySentAt ? user.emailVerifySentAt.getTime() : 0;
+      if (Date.now() - last < RESEND_COOLDOWN_MS) {
+        return res.status(429).json({ success: false, message: 'Please wait a minute before requesting another email.' });
+      }
+      await issueVerification(user);
+    }
+    res.json(generic);
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({ success: false, message: 'Could not send the verification email. Try again later.' });
   }
 });
 
