@@ -195,9 +195,16 @@ class MediasoupClientService {
     try {
       this.producers.audio = await this.sendTransport.produce({
         track,
+        // Speech tuned for clarity: mono (stereo only wastes bitrate on a voice), forward error correction so
+        // lost packets don't crackle, no DTX (it can clip the first syllable), 48 kHz wideband, 20 ms frames.
         codecOptions: {
-          opusStereo: true,
-          opusDtx: true,
+          opusStereo: false,
+          opusFec: true,
+          opusDtx: false,
+          opusNack: true,
+          opusMaxPlaybackRate: 48000,
+          opusMaxAverageBitrate: 64000,
+          opusPtime: 20,
         },
         appData: { mediaType: 'audio' },
       });
@@ -232,9 +239,9 @@ class MediasoupClientService {
       this.producers.video = await this.sendTransport.produce({
         track,
         encodings: [
-          { maxBitrate: 150000, scaleResolutionDownBy: 4 },  // Low: 180p
-          { maxBitrate: 500000, scaleResolutionDownBy: 2 },  // Med: 360p-540p
-          { maxBitrate: 2500000, scaleResolutionDownBy: 1 }, // High: 720p-1080p
+          { maxBitrate: 200000, scaleResolutionDownBy: 4, maxFramerate: 20 },  // Low: 180p (weak links)
+          { maxBitrate: 700000, scaleResolutionDownBy: 2, maxFramerate: 30 },  // Med: 360p
+          { maxBitrate: 2500000, scaleResolutionDownBy: 1, maxFramerate: 30 }, // High: 720p
         ],
         codecOptions: {
           videoGoogleStartBitrate: 1000,
@@ -269,9 +276,11 @@ class MediasoupClientService {
     }
 
     try {
+      // 'detail' tells the encoder this is text / slides: keep it sharp and trade frame rate if the link is tight
+      try { track.contentHint = 'detail'; } catch (e) { /* not supported everywhere */ }
       this.producers.screen = await this.sendTransport.produce({
         track,
-        encodings: [{ maxBitrate: 1500000 }],
+        encodings: [{ maxBitrate: 4000000, maxFramerate: 30 }],
         codecOptions: {
           videoGoogleStartBitrate: 1000,
         },

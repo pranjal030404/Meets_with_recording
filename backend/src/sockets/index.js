@@ -95,6 +95,7 @@ const clearRoomTools = (roomId) => {
   roomWaiting.delete(roomId);
   roomAdmitted.delete(roomId);
   roomRecorders.delete(roomId);
+  mediasoupService.closeRouter(roomId); // frees the worker slot; used to leak one router per meeting forever
 };
 
 const emitToolsState = (socket, roomId) => {

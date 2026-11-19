@@ -17,6 +17,19 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     define: { global: 'globalThis' },
+    build: {
+      target: 'es2020',
+      rollupOptions: {
+        output: {
+          // Long-lived vendor chunks cache across deploys; the heavy media library loads only in meetings
+          manualChunks: {
+            react: ['react', 'react-dom', 'react-router-dom'],
+            realtime: ['socket.io-client'],
+            icons: ['lucide-react'],
+          },
+        },
+      },
+    },
     server: {
       port: frontendPort,
       host: env.FRONTEND_HOST || undefined,
