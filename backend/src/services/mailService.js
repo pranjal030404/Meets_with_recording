@@ -93,6 +93,31 @@ export async function sendTeamInviteEmail({ to, inviterName, team, role, joined,
   });
 }
 
+/** Task assignment / reassignment notice for the new assignee. */
+export async function sendTaskAssignedEmail({ to, assigneeName, assignerName, task, teamName, isNew }) {
+  const name = APP_NAME();
+  const link = `${appUrl()}/tasks`;
+  const due = task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'No due date';
+  const priority = task.priority || 'medium';
+  const heading = isNew ? 'You have a new task' : 'A task was assigned to you';
+  const row = (k, v) => `<tr><td style="padding:6px 12px 6px 0;color:#6b7280;font-size:13px">${k}</td><td style="padding:6px 0;font-size:14px"><b>${v}</b></td></tr>`;
+  return sendMail({
+    to,
+    subject: `${assignerName} assigned you: ${task.title}`,
+    text: `Hi ${assigneeName},\n\n${assignerName} assigned you a task${teamName ? ` in ${teamName}` : ''}:\n\n${task.title}\n${task.description ? task.description + '\n' : ''}\nPriority: ${priority}\nDue: ${due}\n\nOpen it: ${link}`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#111">
+      <h2 style="margin:0 0 12px">${heading}</h2>
+      <p>Hi ${esc(assigneeName)}, <b>${esc(assignerName)}</b> assigned you a task${teamName ? ` in <b>${esc(teamName)}</b>` : ''} on ${esc(name)}.</p>
+      <div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:16px 0">
+        <p style="margin:0 0 6px;font-size:16px"><b>${esc(task.title)}</b></p>
+        ${task.description ? `<p style="margin:0 0 10px;color:#374151;font-size:14px;white-space:pre-wrap">${esc(String(task.description).slice(0, 500))}</p>` : ''}
+        <table style="border-collapse:collapse">${row('Priority', esc(priority))}${row('Due', esc(due))}</table>
+      </div>
+      <p style="margin:24px 0"><a href="${link}" style="background:#2563eb;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600">Open task</a></p>
+    </div>`
+  });
+}
+
 export async function sendTestEmail(to) {
   const name = APP_NAME();
   return sendMail({
