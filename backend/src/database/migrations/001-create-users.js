@@ -42,8 +42,7 @@ export async function up(queryInterface, Sequelize) {
       allowNull: false
     }
   });
-
-  await queryInterface.addIndex('Users', ['email']);
+  // No extra index on email: `unique: true` above already creates one.
 }
 
 export async function down(queryInterface) {
