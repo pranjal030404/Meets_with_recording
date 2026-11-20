@@ -260,6 +260,20 @@ router.post('/messages/:messageId/react', protect, async (req, res) => {
   }
 });
 
+// Channel keys: 'general' | 'meetings' | 'announcements' | 'custom:<channelId>'.
+// Custom channels share the 'custom' enum value in the DB and are told apart by channelName (= channel id).
+function resolveChannel(team, key) {
+  const raw = String(key || 'general');
+  if (raw.startsWith('custom:')) {
+    const id = raw.slice(7);
+    const ch = (team.channels || []).find(c => c.id === id);
+    if (!ch) return null;
+    return { channelType: 'custom', channelName: id, key: raw };
+  }
+  if (!['general', 'meetings', 'announcements'].includes(raw)) return null;
+  return { channelType: raw, channelName: null, key: raw };
+}
+
 router.get('/team/:teamId/messages', protect, async (req, res) => {
   try {
     const { limit = 100, before, channelType = 'general' } = req.query;
@@ -280,11 +294,17 @@ router.get('/team/:teamId/messages', protect, async (req, res) => {
       });
     }
 
+    const channel = resolveChannel(team, channelType);
+    if (!channel) {
+      return res.status(404).json({ success: false, message: 'Channel not found' });
+    }
+
     const whereClause = {
       teamId: team.id,
-      channelType,
+      channelType: channel.channelType,
       isDeleted: false
     };
+    if (channel.channelName) whereClause.channelName = channel.channelName;
 
     if (before) {
       whereClause.createdAt = { [Op.lt]: new Date(before) };
@@ -363,9 +383,15 @@ router.post('/team/:teamId/messages', protect, async (req, res) => {
 
     const mentions = [];
 
+    const channel = resolveChannel(team, channelType);
+    if (!channel) {
+      return res.status(404).json({ success: false, message: 'Channel not found' });
+    }
+
     const messageData = {
       teamId: team.id,
-      channelType,
+      channelType: channel.channelType,
+      ...(channel.channelName ? { channelName: channel.channelName } : {}),
       senderId: req.user.id,
       content: (content || '').trim() || (file ? file.originalName : ''),
       type: file ? 'file' : type,

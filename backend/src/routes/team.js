@@ -75,7 +75,7 @@ router.get('/:teamId', async (req, res) => {
   try {
     const team = await Team.findByPk(req.params.teamId);
 
-    if (!team) {
+    if (!team || !team.isActive) {
       return res.status(404).json({ message: 'Team not found' });
     }
 
@@ -339,10 +339,11 @@ router.put('/:teamId/members/:userId/notifications', async (req, res) => {
 
 router.post('/:teamId/channels', async (req, res) => {
   try {
-    const { name, description } = req.body;
     const team = await Team.findByPk(req.params.teamId);
+    const name = String(req.body.name || '').trim().replace(/^#+/, '').trim();
+    const description = req.body.description ? String(req.body.description).trim().slice(0, 200) : undefined;
 
-    if (!team) {
+    if (!team || !team.isActive) {
       return res.status(404).json({ message: 'Team not found' });
     }
 
@@ -350,7 +351,11 @@ router.post('/:teamId/channels', async (req, res) => {
       return res.status(403).json({ message: 'Only owners and admins can create channels' });
     }
 
-    const channels = team.channels || [];
+    if (!name || name.length > 40) {
+      return res.status(400).json({ message: 'Channel name is required (max 40 characters)' });
+    }
+
+    const channels = [...(team.channels || [])];
     if (channels.some(c => c.name.toLowerCase() === name.toLowerCase())) {
       return res.status(400).json({ message: 'Channel with this name already exists' });
     }
