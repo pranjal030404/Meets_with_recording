@@ -117,8 +117,10 @@ const TeamDetail = () => {
   const handleInviteMember = async (e) => {
     e.preventDefault();
     try {
-      await inviteMember(teamId, inviteEmail, inviteRole);
-      toast.success('Member invited successfully!');
+      const result = await inviteMember(teamId, inviteEmail, inviteRole);
+      if (result.pending) toast.success(`Invitation emailed to ${inviteEmail}`);
+      else if (result.emailed) toast.success(`Member added and notified by email`);
+      else toast.success(`Member added${result.emailError ? ` (email not sent: ${result.emailError})` : ''}`);
       setShowInviteModal(false);
       setInviteEmail('');
       setInviteRole('member');

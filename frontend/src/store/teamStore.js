@@ -112,12 +112,14 @@ const useTeamStore = create((set, get) => ({
     try {
       const response = await api.post(`/teams/${teamId}/invite`, { email, role });
       const updatedTeam = response.data.team;
-      
-      set(state => ({
-        teams: state.teams.map(t => t._id === teamId ? updatedTeam : t),
-        currentTeam: state.currentTeam?._id === teamId ? updatedTeam : state.currentTeam,
-        teamMembers: updatedTeam.members
-      }));
+      // No team in the reply = the person has no account yet; only an email went out
+      if (updatedTeam) {
+        set(state => ({
+          teams: state.teams.map(t => t._id === teamId ? updatedTeam : t),
+          currentTeam: state.currentTeam?._id === teamId ? updatedTeam : state.currentTeam,
+          teamMembers: updatedTeam.members
+        }));
+      }
       return response.data;
     } catch (error) {
       throw error;
