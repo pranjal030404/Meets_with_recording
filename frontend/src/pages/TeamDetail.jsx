@@ -3,14 +3,19 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Users, Hash, Copy, Check, UserPlus, ArrowLeft,
   Shield, Trash2, MessageSquare, Video, Send, Sparkles,
-  Paperclip, X, Loader2
+  Paperclip, X, Loader2, Plus, ListTodo, CalendarDays, AlertTriangle
 } from 'lucide-react';
+import { TasksPage } from './Tasks';
+import TeamCalendar from '../components/TeamCalendar';
 import toast from 'react-hot-toast';
 import useTeamStore from '../store/teamStore';
 import { useAuthStore } from '../store/authStore';
 import { getSocket } from '../lib/socket';
 import FileAttachment from '../components/FileAttachment';
 import useChatUpload from '../hooks/useChatUpload';
+
+// Messages are stored per channel key: built-in channels use their type, custom ones 'custom:<id>'
+const channelKey = (c) => (c.type === 'custom' ? `custom:${c.id || c._id}` : c.type);
 
 const TeamDetail = () => {
   const { teamId } = useParams();
@@ -27,7 +32,10 @@ const TeamDetail = () => {
     regenerateInviteCode,
     fetchTeamMessages,
     sendTeamMessage,
-    addTeamMessage
+    addTeamMessage,
+    deleteTeam,
+    createChannel,
+    deleteChannel
   } = useTeamStore();
 
   const [activeChannel, setActiveChannel] = useState('general');
@@ -37,6 +45,15 @@ const TeamDetail = () => {
   const [copiedCode, setCopiedCode] = useState(false);
   const [messageInput, setMessageInput] = useState('');
   const [showMembers, setShowMembers] = useState(true);
+  const [view, setView] = useState('chat'); // chat | tasks | calendar
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [showChannelModal, setShowChannelModal] = useState(false);
+  const [channelName, setChannelName] = useState('');
+  const [channelDesc, setChannelDesc] = useState('');
+  const [channelSaving, setChannelSaving] = useState(false);
+  const [channelToDelete, setChannelToDelete] = useState(null);
   const [accessDenied, setAccessDenied] = useState(false);
   const [teamFetched, setTeamFetched] = useState(false);
 
@@ -218,6 +235,49 @@ const TeamDetail = () => {
   )?.role === 'admin';
 
   const messages = teamMessages[`${teamId}-${activeChannel}`] || [];
+  const isOwner = currentTeam.members?.find(m => m.user._id === user._id)?.role === 'owner';
+
+  const handleCreateChannel = async (e) => {
+    e.preventDefault();
+    if (!channelName.trim()) return;
+    setChannelSaving(true);
+    try {
+      const created = await createChannel(teamId, channelName.trim(), channelDesc.trim());
+      toast.success(`#${created.name} created`);
+      setShowChannelModal(false);
+      setChannelName(''); setChannelDesc('');
+      if (created) setActiveChannel(channelKey(created));
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to create channel');
+    } finally {
+      setChannelSaving(false);
+    }
+  };
+
+  const handleDeleteChannel = async () => {
+    const ch = channelToDelete;
+    if (!ch) return;
+    try {
+      await deleteChannel(teamId, ch.id || ch._id);
+      toast.success(`#${ch.name} deleted`);
+      if (activeChannel === channelKey(ch)) setActiveChannel('general');
+      setChannelToDelete(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to delete channel');
+    }
+  };
+
+  const handleDeleteTeam = async () => {
+    setDeleting(true);
+    try {
+      await deleteTeam(teamId);
+      toast.success('Team deleted');
+      navigate('/teams');
+    } catch (e) {
+      toast.error(e.response?.data?.message || 'Failed to delete team');
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="h-screen flex flex-col bg-dark-100">
@@ -243,6 +303,14 @@ const TeamDetail = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex rounded-xl bg-dark-300/60 border border-white/[0.06] p-1">
+              {[['chat', 'Chat', MessageSquare], ['tasks', 'Tasks', ListTodo], ['calendar', 'Calendar', CalendarDays]].map(([key, label, Icon]) => (
+                <button key={key} onClick={() => setView(key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${view === key ? 'bg-primary-500/20 text-primary-200' : 'text-gray-400 hover:text-gray-200'}`}>
+                  <Icon className="w-4 h-4" /><span className="hidden sm:inline">{label}</span>
+                </button>
+              ))}
+            </div>
             {isOwnerOrAdmin && (
               <button onClick={() => setShowInviteModal(true)} className="btn btn-primary text-sm">
                 <UserPlus className="w-4 h-4" />
@@ -260,28 +328,51 @@ const TeamDetail = () => {
             >
               <Users className="w-5 h-5" />
             </button>
+            {isOwner && (
+              <button
+                onClick={() => { setDeleteConfirm(''); setShowDelete(true); }}
+                className="p-2.5 rounded-xl border bg-dark-300/80 border-white/[0.06] text-gray-400 hover:text-red-300 hover:border-red-500/40 hover:bg-red-500/10 transition-all duration-300"
+                title="Delete team"
+                aria-label="Delete team"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
         {/* Channels Sidebar */}
-        <div className="hidden md:block w-60 bg-dark-200/60 border-r border-white/[0.05] overflow-y-auto animate-slide-in-left">
+        <div className={`${view === 'chat' ? 'hidden md:block' : 'hidden'} w-60 bg-dark-200/60 border-r border-white/[0.05] overflow-y-auto animate-slide-in-left`}>
           <div className="p-3.5">
-            <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2.5 px-2">Channels</h3>
+            <div className="flex items-center justify-between mb-2.5 px-2">
+              <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Channels</h3>
+              {isOwnerOrAdmin && (
+                <button onClick={() => setShowChannelModal(true)} className="p-1 rounded-md text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-colors" title="Add channel" aria-label="Add channel">
+                  <Plus className="w-4 h-4" />
+                </button>
+              )}
+            </div>
             {currentTeam.channels?.map(channel => (
+              <div key={channel.id || channel._id} className="relative group/ch">
               <button
-                key={channel._id}
-                onClick={() => setActiveChannel(channel.type)}
+                onClick={() => setActiveChannel(channelKey(channel))}
                 className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left mb-1 transition-all duration-200 group ${
-                  activeChannel === channel.type
+                  activeChannel === channelKey(channel)
                     ? 'bg-gradient-to-r from-primary-600/25 to-primary-600/5 text-primary-200 border border-primary-500/25'
                     : 'hover:bg-dark-300/80 text-gray-400 hover:text-white border border-transparent'
                 }`}
               >
-                <Hash className={`w-4 h-4 transition-transform duration-200 group-hover:scale-110 ${activeChannel === channel.type ? 'text-primary-400' : ''}`} />
-                <span className="text-sm font-medium">{channel.name}</span>
+                <Hash className={`w-4 h-4 transition-transform duration-200 group-hover:scale-110 ${activeChannel === channelKey(channel) ? 'text-primary-400' : ''}`} />
+                <span className="text-sm font-medium truncate">{channel.name}</span>
               </button>
+              {isOwnerOrAdmin && channel.type === 'custom' && (
+                <button onClick={() => setChannelToDelete(channel)} className="absolute right-2 top-1/2 -translate-y-[60%] p-1 rounded-md text-gray-500 hover:text-red-300 hover:bg-red-500/10 opacity-0 group-hover/ch:opacity-100 focus:opacity-100 transition" title="Delete channel" aria-label={`Delete ${channel.name}`}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+              </div>
             ))}
 
             {/* Invite code card at bottom of sidebar */}
@@ -306,13 +397,20 @@ const TeamDetail = () => {
           </div>
         </div>
 
+        {view === 'tasks' && <div className="flex-1 overflow-y-auto bg-dark-100 min-w-0"><TasksPage teamId={teamId} /></div>}
+        {view === 'calendar' && <div className="flex-1 bg-dark-100 min-w-0 overflow-hidden"><TeamCalendar teamId={teamId} /></div>}
+
         {/* Chat Area */}
-        <div className="flex-1 flex flex-col bg-dark-100 min-w-0">
+        {view === 'chat' && <div className="flex-1 flex flex-col bg-dark-100 min-w-0">
           <div className="border-b border-white/[0.05] px-5 sm:px-6 py-3 bg-dark-200/60 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <Hash className="w-5 h-5 text-primary-400" />
-              <h2 className="font-semibold font-display">
-                {currentTeam.channels?.find(c => c.type === activeChannel)?.name || activeChannel}
+              <select value={activeChannel} onChange={(e) => setActiveChannel(e.target.value)}
+                className="md:hidden input !w-auto !py-1.5 text-sm" aria-label="Channel">
+                {currentTeam.channels?.map(c => <option key={c.id || c._id} value={channelKey(c)}>#{c.name}</option>)}
+              </select>
+              <h2 className="hidden md:block font-semibold font-display">
+                {currentTeam.channels?.find(c => channelKey(c) === activeChannel)?.name || activeChannel}
               </h2>
               <span className="hidden sm:inline text-xs text-gray-500 bg-dark-300/70 border border-white/[0.05] px-2.5 py-0.5 rounded-full">
                 {teamMembers.length} members
@@ -423,7 +521,7 @@ const TeamDetail = () => {
                   type="text"
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
-                  placeholder={`Message #${currentTeam.channels?.find(c => c.type === activeChannel)?.name || activeChannel}`}
+                  placeholder={`Message #${currentTeam.channels?.find(c => channelKey(c) === activeChannel)?.name || activeChannel}`}
                   className="input flex-1"
                 />
                 <button
@@ -438,6 +536,8 @@ const TeamDetail = () => {
             </form>
           </div>
         </div>
+
+        }
 
         {/* Members Sidebar */}
         {showMembers && (
@@ -559,6 +659,66 @@ const TeamDetail = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showChannelModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowChannelModal(false)} />
+          <form onSubmit={handleCreateChannel} className="relative glass-strong rounded-3xl border border-white/10 w-full max-w-md p-6 shadow-float">
+            <h3 className="text-lg font-bold font-display mb-4">Create channel</h3>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
+            <div className="relative mb-4">
+              <Hash className="w-4 h-4 text-gray-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input value={channelName} onChange={(e) => setChannelName(e.target.value)} maxLength={40} className="input !pl-10" placeholder="design-reviews" autoFocus required />
+            </div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Description <span className="text-gray-500 font-normal">(optional)</span></label>
+            <input value={channelDesc} onChange={(e) => setChannelDesc(e.target.value)} maxLength={200} className="input mb-6" placeholder="What is this channel for?" />
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setShowChannelModal(false)} className="btn btn-secondary flex-1">Cancel</button>
+              <button type="submit" disabled={channelSaving || !channelName.trim()} className="btn btn-primary flex-1 disabled:opacity-50">
+                {channelSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Create
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {channelToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setChannelToDelete(null)} />
+          <div className="relative glass-strong rounded-3xl border border-red-500/20 w-full max-w-sm p-6 shadow-float">
+            <h3 className="text-lg font-bold font-display mb-2">Delete #{channelToDelete.name}?</h3>
+            <p className="text-sm text-gray-400 mb-5">The channel is removed for everyone in the team.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setChannelToDelete(null)} className="btn btn-secondary flex-1">Cancel</button>
+              <button onClick={handleDeleteChannel} className="btn flex-1 bg-red-600 hover:bg-red-500 text-white"><Trash2 className="w-4 h-4" /> Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !deleting && setShowDelete(false)} />
+          <div className="relative glass-strong rounded-3xl border border-red-500/20 w-full max-w-md p-6 shadow-float">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="w-10 h-10 rounded-xl bg-red-500/15 text-red-300 flex items-center justify-center"><AlertTriangle className="w-5 h-5" /></span>
+              <h3 className="text-lg font-bold font-display">Delete team</h3>
+            </div>
+            <p className="text-sm text-gray-400 mb-4">
+              <span className="text-white font-medium">{currentTeam.name}</span> will be removed for all {teamMembers.length} members.
+              Its channels and invite code stop working. Type the team name to confirm.
+            </p>
+            <input value={deleteConfirm} onChange={(e) => setDeleteConfirm(e.target.value)} className="input mb-5" placeholder={currentTeam.name} autoFocus />
+            <div className="flex gap-3">
+              <button onClick={() => setShowDelete(false)} disabled={deleting} className="btn btn-secondary flex-1">Cancel</button>
+              <button onClick={handleDeleteTeam} disabled={deleting || deleteConfirm.trim() !== currentTeam.name}
+                className="btn flex-1 bg-red-600 hover:bg-red-500 text-white disabled:opacity-40 disabled:cursor-not-allowed">
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Delete team
+              </button>
+            </div>
           </div>
         </div>
       )}

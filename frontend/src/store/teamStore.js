@@ -72,6 +72,25 @@ const useTeamStore = create((set, get) => ({
     }
   },
 
+  // Channels (owner/admin only; enforced by the API)
+  createChannel: async (teamId, name, description) => {
+    const response = await api.post(`/teams/${teamId}/channels`, { name, description });
+    const channels = response.data.channels;
+    set(state => ({
+      currentTeam: state.currentTeam?._id === teamId ? { ...state.currentTeam, channels } : state.currentTeam
+    }));
+    return channels[channels.length - 1];
+  },
+
+  deleteChannel: async (teamId, channelId) => {
+    const response = await api.delete(`/teams/${teamId}/channels/${channelId}`);
+    const channels = response.data.channels;
+    set(state => ({
+      currentTeam: state.currentTeam?._id === teamId ? { ...state.currentTeam, channels } : state.currentTeam
+    }));
+    return channels;
+  },
+
   // Delete team
   deleteTeam: async (teamId) => {
     set({ loading: true, error: null });

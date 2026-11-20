@@ -31,11 +31,12 @@ export default function Tasks() {
   )
 }
 
-function TasksPage() {
+export function TasksPage({ teamId: fixedTeamId } = {}) {
   const { user } = useAuthStore()
   const { tasks, stats, teams, isLoading, fetchTasks, fetchStats, fetchTeams, updateTask, deleteTask } = useTaskStore()
-  const [scope, setScope] = useState('mine')
-  const [teamId, setTeamId] = useState('')
+  const embedded = !!fixedTeamId
+  const [scope, setScope] = useState(embedded ? 'team' : 'mine')
+  const [teamId, setTeamId] = useState(fixedTeamId || '')
   const [showCreate, setShowCreate] = useState(false)
   const [detailTask, setDetailTask] = useState(null)
 
@@ -56,12 +57,12 @@ function TasksPage() {
   }
 
   return (
-    <div className="relative max-w-6xl mx-auto px-4 sm:px-6 py-10 lg:py-14">
+    <div className={embedded ? 'relative p-5 sm:p-6' : 'relative max-w-6xl mx-auto px-4 sm:px-6 py-10 lg:py-14'}>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold font-display tracking-tight">Tasks</h1>
-          <p className="text-gray-500 mt-1">Personal and team work, in one board.</p>
+          <h1 className={`${embedded ? 'text-xl' : 'text-3xl'} font-bold font-display tracking-tight`}>{embedded ? 'Team tasks' : 'Tasks'}</h1>
+          <p className="text-gray-500 mt-1">{embedded ? 'Shared work for everyone in this team.' : 'Personal and team work, in one board.'}</p>
         </div>
         <button onClick={() => setShowCreate(true)} className="btn btn-primary">
           <Plus className="w-4 h-4" /> New Task
@@ -69,15 +70,15 @@ function TasksPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      {!embedded && <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="To do" value={stats.todo} icon={ListTodo} tone="text-gray-300" />
         <StatCard label="In progress" value={stats.inProgress} icon={Clock} tone="text-blue-300" />
         <StatCard label="Completed" value={stats.done} icon={CheckCircle2} tone="text-emerald-300" />
         <StatCard label="Overdue" value={stats.overdue} icon={AlertTriangle} tone="text-red-300" />
-      </div>
+      </div>}
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
+      {!embedded && <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex rounded-xl bg-dark-300/50 border border-white/[0.06] p-1">
           <button
             onClick={() => { setScope('mine'); setTeamId('') }}
@@ -98,7 +99,7 @@ function TasksPage() {
             {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
-      </div>
+      </div>}
 
       {/* Board */}
       {scope === 'team' && !teamId ? (
@@ -136,7 +137,7 @@ function TasksPage() {
         </div>
       )}
 
-      {showCreate && <CreateTaskModal teams={teams} onClose={() => setShowCreate(false)} />}
+      {showCreate && <CreateTaskModal teams={teams} presetTeamId={fixedTeamId} onClose={() => setShowCreate(false)} />}
       {detailTask && (
         <TaskDetailModal
           task={detailTask}
@@ -215,9 +216,9 @@ function TaskCard({ task, onClick, onMove }) {
   )
 }
 
-function CreateTaskModal({ teams, onClose }) {
+function CreateTaskModal({ teams, presetTeamId, onClose }) {
   const { createTask } = useTaskStore()
-  const [form, setForm] = useState({ title: '', description: '', teamId: '', assigneeId: '', dueDate: '', priority: 'medium' })
+  const [form, setForm] = useState({ title: '', description: '', teamId: presetTeamId || '', assigneeId: '', dueDate: '', priority: 'medium' })
   const [members, setMembers] = useState([])
   const [saving, setSaving] = useState(false)
 
@@ -234,6 +235,8 @@ function CreateTaskModal({ teams, onClose }) {
       setMembers(list)
     } catch { setMembers([]) }
   }
+
+  useEffect(() => { if (presetTeamId) loadMembers(presetTeamId) }, [presetTeamId])
 
   const submit = async () => {
     if (!form.title.trim()) return
@@ -265,7 +268,7 @@ function CreateTaskModal({ teams, onClose }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Team</label>
-              <select value={form.teamId} onChange={(e) => loadMembers(e.target.value)} className="input">
+              <select value={form.teamId} onChange={(e) => loadMembers(e.target.value)} className="input" disabled={!!presetTeamId}>
                 <option value="">Personal</option>
                 {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>

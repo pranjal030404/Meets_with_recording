@@ -536,7 +536,26 @@ export const useMeetingStore = create((set, get) => ({
     set({ screenSharePhase: 'requesting' })
     let screenStream = null
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }, audio: true })
+      if (typeof navigator.mediaDevices?.getDisplayMedia === 'function') {
+        const videoOpts = { cursor: 'always', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }
+        try {
+          screenStream = await navigator.mediaDevices.getDisplayMedia({ video: videoOpts, audio: true })
+        } catch (e) {
+          if (e.name === 'NotAllowedError' || e.name === 'AbortError') throw e
+          // Some browsers reject the audio / advanced constraints outright: retry with the bare minimum
+          screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+        }
+      } else if (navigator.mediaDevices?.getUserMedia) {
+        // Phones (Android Chrome, iOS Safari) cannot capture their own screen from a web page.
+        // Offer the rear camera as the shared content instead (documents, whiteboards, the room).
+        screenStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        })
+        toast('Phones can’t share their screen in a browser, so your rear camera is being shared instead.', { icon: '📷', id: 'share-camera-fallback', duration: 6000 })
+      } else {
+        throw new Error('Screen sharing isn’t supported in this browser. Use Chrome, Edge or Firefox on a computer.')
+      }
       const socket = getSocket()
       const screenVideoTrack = screenStream.getVideoTracks()[0]
 
@@ -557,6 +576,7 @@ export const useMeetingStore = create((set, get) => ({
       set({ screenStream: null, isScreenSharing: false, screenSharePhase: 'idle' })
       const message = error.name === 'NotAllowedError'
         ? 'Screen sharing permission denied'
+        : error.name === 'NotFoundError' ? 'No camera found to share'
         : error.message
       return { success: false, message }
     }
