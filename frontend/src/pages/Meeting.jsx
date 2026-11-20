@@ -321,6 +321,9 @@ export default function Meeting() {
           socket.emit('room:join', { roomId })
         }
         setIsJoining(false)
+        if (!viewOnly && useMeetingStore.getState().isMuted) {
+          toast('You joined with your mic off. Click the mic button so others can hear you.', { icon: '🎙️', id: 'joined-muted', duration: 6000 })
+        }
       } catch (error) {
         if (initCancelledRef.current) return
         console.error('Failed to initialize meeting:', error)

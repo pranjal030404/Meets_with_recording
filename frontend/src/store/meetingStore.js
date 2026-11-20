@@ -8,6 +8,11 @@ import { canTransition, canMove, SCREEN_SHARE_TRANSITIONS, MEDIA_LINK_TRANSITION
 // Singleton mediasoup client
 let mediasoupClient = null
 let levelMonitor = null
+// Producers being consumed right now / already consumed / closed mid-flight. Several people switching
+// cameras on at once means overlapping newProducer + existingProducers events for the same producer.
+const consumeInFlight = new Map() // producerId -> Promise<consumer>
+const consumedProducers = new Set()
+const closedProducers = new Set()
 
 // Recording mixer: one audio track containing EVERYONE (you + all remote voices + shared-tab audio),
 // so the recording has the whole meeting's sound, not just your microphone.
@@ -191,6 +196,7 @@ export const useMeetingStore = create((set, get) => ({
     if (localStream) localStream.getTracks().forEach(t => t.stop())
     if (screenStream) screenStream.getTracks().forEach(t => t.stop())
 
+    consumeInFlight.clear(); consumedProducers.clear(); closedProducers.clear()
     if (mediasoupClient) { mediasoupClient.closeAll(); mediasoupClient = null }
     stopLevelMonitor()
 
@@ -220,7 +226,7 @@ export const useMeetingStore = create((set, get) => ({
       mediasoupClient.onLinkChange = (state) => get().setMediaLink(state)
       mediasoupClient.onDiagnostic = (msg) => toast.error(msg, { id: 'media-diagnostic', duration: 20000 })
       await mediasoupClient.init(socket, roomId)
-      await Promise.all([mediasoupClient.createSendTransport(), mediasoupClient.createRecvTransport()])
+      await Promise.all([mediasoupClient._ensureSendTransport(), mediasoupClient._ensureRecvTransport()])
       set({ mediasoupReady: true })
       return { success: true }
     } catch (error) {
@@ -260,8 +266,23 @@ export const useMeetingStore = create((set, get) => ({
 
   consumeProducer: async (producerId, peerId, peerUser, mediaType) => {
     if (!mediasoupClient) return
+    if (consumedProducers.has(producerId)) return
+    if (consumeInFlight.has(producerId)) return consumeInFlight.get(producerId)
+    const job = get()._consumeProducer(producerId, peerId, peerUser, mediaType)
+      .finally(() => consumeInFlight.delete(producerId))
+    consumeInFlight.set(producerId, job)
+    return job
+  },
+
+  _consumeProducer: async (producerId, peerId, peerUser, mediaType) => {
     try {
-      const consumer = await mediasoupClient.consume(producerId)
+      closedProducers.delete(producerId)
+      // One retry: the producer can briefly be unknown to the SFU while many peers publish at once
+      let consumer
+      try { consumer = await mediasoupClient.consume(producerId) }
+      catch (e) { await new Promise(r => setTimeout(r, 400)); consumer = await mediasoupClient.consume(producerId) }
+      if (closedProducers.has(producerId)) { consumer.close(); closedProducers.delete(producerId); return }
+      consumedProducers.add(producerId)
       const { remoteStreams } = get()
       const newMap = new Map(remoteStreams)
       let entry = newMap.get(peerId) || {
@@ -287,15 +308,19 @@ export const useMeetingStore = create((set, get) => ({
   },
 
   removeConsumer: (producerId, peerId, mediaType) => {
+    consumedProducers.delete(producerId)
+    if (consumeInFlight.has(producerId)) closedProducers.add(producerId)
     const { remoteStreams } = get()
     const newMap = new Map(remoteStreams)
     const entry = newMap.get(peerId)
     if (!entry) return
-    if (mediaType === 'audio' && entry.audioConsumer) {
+    // Only remove the consumer that belongs to THIS producer (a newer one for the same kind may already exist)
+    const isMine = (c) => c && (!producerId || c.producerId === producerId)
+    if (mediaType === 'audio' && isMine(entry.audioConsumer)) {
       entry.stream.removeTrack(entry.audioConsumer.track); entry.audioConsumer.close(); entry.audioConsumer = null
-    } else if (mediaType === 'video' && entry.videoConsumer) {
+    } else if (mediaType === 'video' && isMine(entry.videoConsumer)) {
       entry.stream.removeTrack(entry.videoConsumer.track); entry.videoConsumer.close(); entry.videoConsumer = null
-    } else if (mediaType === 'screen' && entry.screenConsumer) {
+    } else if (mediaType === 'screen' && isMine(entry.screenConsumer)) {
       entry.screenConsumer.close(); entry.screenConsumer = null; entry.screenStream = null
     }
     if (!entry.audioConsumer && !entry.videoConsumer && !entry.screenConsumer) newMap.delete(peerId)
@@ -308,6 +333,7 @@ export const useMeetingStore = create((set, get) => ({
     const newMap = new Map(remoteStreams)
     const entry = newMap.get(peerId)
     if (entry) {
+      for (const c of [entry.audioConsumer, entry.videoConsumer, entry.screenConsumer]) if (c) consumedProducers.delete(c.producerId)
       if (entry.audioConsumer) entry.audioConsumer.close()
       if (entry.videoConsumer) entry.videoConsumer.close()
       if (entry.screenConsumer) entry.screenConsumer.close()
