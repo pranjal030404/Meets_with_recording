@@ -70,6 +70,29 @@ export async function sendVerificationEmail(user, token) {
   });
 }
 
+/** Team invitation. `joined` = the person already has an account and was added; otherwise they're asked to sign up. */
+export async function sendTeamInviteEmail({ to, inviterName, team, role, joined, inviteCode }) {
+  const name = APP_NAME();
+  const link = joined ? `${appUrl()}/teams/${team.id}` : `${appUrl()}/signup`;
+  const cta = joined ? 'Open team' : 'Create your account';
+  const codeText = !joined && inviteCode ? `\nAfter signing up, join with invite code: ${inviteCode}\n` : '';
+  const codeHtml = !joined && inviteCode
+    ? `<p>After signing up, choose <b>Join team</b> and enter this invite code:</p><p style="font-family:monospace;font-size:20px;letter-spacing:2px;background:#f3f4f6;padding:10px 14px;border-radius:8px;display:inline-block;margin:0">${esc(inviteCode)}</p>`
+    : '';
+  return sendMail({
+    to,
+    subject: `${inviterName} invited you to ${team.name} on ${name}`,
+    text: `${inviterName} invited you to join the team "${team.name}" on ${name} as ${role}.\n\n${cta}: ${link}\n${codeText}`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#111">
+      <h2 style="margin:0 0 12px">You're invited to ${esc(team.name)}</h2>
+      <p><b>${esc(inviterName)}</b> invited you to join the team <b>${esc(team.name)}</b> on ${esc(name)} as <b>${esc(role)}</b>.</p>
+      <p style="margin:24px 0"><a href="${link}" style="background:#2563eb;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600">${cta}</a></p>
+      ${codeHtml}
+      <p style="font-size:13px;color:#555;margin-top:20px">Or paste this link in your browser:<br><a href="${link}">${link}</a></p>
+    </div>`
+  });
+}
+
 export async function sendTestEmail(to) {
   const name = APP_NAME();
   return sendMail({

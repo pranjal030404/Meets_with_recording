@@ -6,6 +6,7 @@ import Notification from '../models/Notification.js';
 import { protect } from '../middleware/auth.js';
 
 import { requirePermission } from '../lib/permissions.js';
+import { isSmtpConfigured, sendTeamInviteEmail } from '../services/mailService.js';
 
 const router = express.Router();
 
@@ -157,10 +158,11 @@ router.delete('/:teamId', async (req, res) => {
 
 router.post('/:teamId/invite', async (req, res) => {
   try {
-    const { email, role = 'member' } = req.body;
+    const { role = 'member' } = req.body;
+    const email = String(req.body.email || '').trim().toLowerCase();
     const team = await Team.findByPk(req.params.teamId);
 
-    if (!team) {
+    if (!team || !team.isActive) {
       return res.status(404).json({ message: 'Team not found' });
     }
 
@@ -169,17 +171,45 @@ router.post('/:teamId/invite', async (req, res) => {
       return res.status(403).json({ message: 'You do not have permission to invite members' });
     }
 
-    const userToInvite = await User.findOne({ where: { email: email.toLowerCase() } });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ message: 'Enter a valid email address' });
+    }
+    // Never hand out ownership through an invite; only admins/owners can invite admins
+    if (!['member', 'admin', 'guest'].includes(role) || (role === 'admin' && !['owner', 'admin'].includes(userRole))) {
+      return res.status(400).json({ message: 'Invalid role' });
+    }
 
+    const userToInvite = await User.findOne({ where: { email } });
+
+    // Email notification: never blocks or fails the invite itself
+    const sendInviteEmail = async (joined) => {
+      if (!isSmtpConfigured()) return { emailed: false, emailError: 'Email is not configured on the server' };
+      try {
+        await sendTeamInviteEmail({
+          to: email, inviterName: req.user.name, team, role, joined,
+          inviteCode: team.inviteCode
+        });
+        return { emailed: true };
+      } catch (err) {
+        console.error('Team invite email failed:', err.message);
+        return { emailed: false, emailError: 'Could not send the email' };
+      }
+    };
+
+    // No account yet: email them a sign-up link + the team invite code
     if (!userToInvite) {
-      return res.status(404).json({ message: 'User not found with this email' });
+      const mail = await sendInviteEmail(false);
+      if (!mail.emailed) {
+        return res.status(404).json({ message: `No account exists for ${email}. ${mail.emailError}.` });
+      }
+      return res.json({ message: `Invitation emailed to ${email}`, pending: true, ...mail });
     }
 
     if (team.isMember(userToInvite.id)) {
       return res.status(400).json({ message: 'User is already a member of this team' });
     }
 
-    const members = team.members || [];
+    const members = [...(team.members || [])];
     members.push({
       id: uuidv4(),
       userId: userToInvite.id,
@@ -204,7 +234,8 @@ router.post('/:teamId/invite', async (req, res) => {
       priority: 'normal'
     });
 
-    res.json({ message: 'Member added successfully', team: team.toJSON() });
+    const mail = await sendInviteEmail(true);
+    res.json({ message: 'Member added successfully', team: team.toJSON(), ...mail });
   } catch (error) {
     console.error('Error inviting member:', error);
     res.status(500).json({ message: 'Failed to invite member', error: error.message });
