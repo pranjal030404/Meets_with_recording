@@ -3,6 +3,7 @@ import cron from 'node-cron';
 import Meeting from '../models/Meeting.js';
 import Notification from '../models/Notification.js';
 import Team from '../models/Team.js';
+import { runExclusive } from '../infrastructure/redis/lock.js';
 
 class ReminderService {
   constructor(io) {
@@ -14,13 +15,13 @@ class ReminderService {
     console.log('Starting reminder service...');
 
     const job = cron.schedule('* * * * *', async () => {
-      await this.checkReminders();
+      await runExclusive('job:reminders', 55000, () => this.checkReminders());
     });
 
     this.cronJobs.push(job);
 
     const startJob = cron.schedule('* * * * *', async () => {
-      await this.checkMeetingStarts();
+      await runExclusive('job:meeting-starts', 55000, () => this.checkMeetingStarts());
     });
 
     this.cronJobs.push(startJob);

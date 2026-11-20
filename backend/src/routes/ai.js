@@ -8,7 +8,10 @@ import { protect } from '../middleware/auth.js';
 import { enforceTranscriptionAllowed } from '../middleware/subscription.js';
 import logAudit from '../services/auditService.js';
 import { generateMinutes, salientText } from '../services/notesEngine.js';
+import { generateMeetingSummary } from '../services/summaryService.js';
+import { enqueue } from '../queues/index.js';
 import { chatJSON, getLlm } from '../services/llm.js';
+import { translate, providerStatus } from '../services/translator.js';
 
 const router = express.Router();
 
@@ -18,57 +21,6 @@ const UPLOAD_ROOT = path.resolve(__dirname, '../../uploads');
 
 const MAX_TRANSCRIPT_CHARS = 12000;
 
-
-// Build transcript text from the meeting's recordings (segments or txt artifacts)
-const buildTranscript = async (meeting) => {
-  if (meeting.completeTranscript && meeting.completeTranscript.text) {
-    return meeting.completeTranscript.text;
-  }
-  if (meeting.completeTranscript && Array.isArray(meeting.completeTranscript.segments) && meeting.completeTranscript.segments.length > 0) {
-    return meeting.completeTranscript.segments.map(s => s.text || '').join(' ');
-  }
-  const recordings = meeting.recordings || [];
-  for (let i = recordings.length - 1; i >= 0; i--) {
-    const rec = recordings[i];
-    const transcription = rec.transcription;
-    if (!transcription) continue;
-
-    if (Array.isArray(transcription.segments) && transcription.segments.length > 0) {
-      return transcription.segments
-        .map(s => `[${s.startTime ?? ''}] ${s.speaker ? s.speaker + ': ' : ''}${s.text}`)
-        .join('\n');
-    }
-    if (transcription.files?.txt?.url) {
-      try {
-        const txtPath = path.join(UPLOAD_ROOT, transcription.files.txt.url.replace('/uploads/', ''));
-        const text = await fs.readFile(txtPath, 'utf8');
-        if (text.trim()) return text;
-      } catch {}
-    }
-    if (transcription.txtUrl) {
-      try {
-        const txtPath = path.join(UPLOAD_ROOT, transcription.txtUrl.replace('/uploads/', ''));
-        const text = await fs.readFile(txtPath, 'utf8');
-        if (text.trim()) return text;
-      } catch {
-        // artifact missing, try older recording
-      }
-    }
-  }
-  return null;
-};
-
-
-
-const MINUTES_PROMPT = `You are a professional minute-taker. From the meeting transcript, write accurate, concise, business-ready minutes.
-Rules: use only what was actually said; never invent names, dates, owners, or decisions. Attribute to a person only when the transcript makes it clear. Use plain professional language in the transcript's language.
-Respond ONLY with JSON:
-{"summary": string (3-5 sentence executive summary),
-"topics": [{"title": string, "notes": string[] (1-4 short bullets)}] (max 8, in the order discussed),
-"keyPoints": string[] (max 6),
-"decisions": string[] (explicit decisions only, may be empty),
-"actionItems": [{"title": string (starts with a verb), "assigneeHint": string|null, "dueHint": string|null}] (max 10),
-"openQuestions": string[] (unresolved issues, may be empty)}`;
 
 // AI summary + action items for a meeting (from its transcript)
 router.post('/meetings/:roomId/summary', protect, enforceTranscriptionAllowed, async (req, res) => {
@@ -88,60 +40,17 @@ router.post('/meetings/:roomId/summary', protect, enforceTranscriptionAllowed, a
       return res.json({ success: true, data: { summary: meeting.aiSummary, cached: true } });
     }
 
-    const transcript = await buildTranscript(meeting);
-    if (!transcript) {
-      return res.status(400).json({
-        success: false,
-        message: 'No transcript available. Turn on live transcription during the meeting, or record it with a speech-to-text engine configured.'
-      });
+    const wantsAsync = req.query.async === '1' || req.body.async === true;
+    if (wantsAsync) {
+      // Heavy LLM work off the request path: 202 + poll GET /meetings/:roomId/summary. The default (sync) contract is unchanged.
+      const job = await enqueue('summary', { roomId: meeting.roomId, userId: req.user.id }, { jobId: `summary-${meeting.id}-${Date.now() - (Date.now() % 60000)}` });
+      return res.status(202).json({ success: true, data: { status: 'queued', jobId: job.id, mode: job.mode } });
     }
 
-    const participantNames = [...new Set((meeting.participants || []).map(p => p.user?.name).filter(Boolean))];
+    let aiSummary;
+    try { aiSummary = await generateMeetingSummary(meeting, req.user.id); }
+    catch (e) { if (e.status) return res.status(e.status).json({ success: false, message: e.message }); throw e; }
 
-    // 1) Free, offline, always works: extractive minutes (every line is something that was actually said).
-    let minutes = generateMinutes(transcript, { participants: participantNames, title: meeting.title });
-    let engine = 'extractive';
-    let modelName = null;
-
-    // 2) Optional upgrade when a model is available (local Ollama is free). Falls back silently.
-    const llm = await getLlm();
-    if (llm) {
-      try {
-        const parsed = await chatJSON({
-          system: MINUTES_PROMPT,
-          user: `Meeting title: ${meeting.title}\nParticipants: ${participantNames.join(', ') || 'unknown'}\n\nTranscript (key excerpts):\n${salientText(transcript, MAX_TRANSCRIPT_CHARS)}`
-        });
-        if (parsed && typeof parsed.summary === 'string' && parsed.summary.trim()) {
-          minutes = {
-            summary: parsed.summary,
-            topics: Array.isArray(parsed.topics) ? parsed.topics : minutes.topics,
-            keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints : minutes.keyPoints,
-            decisions: Array.isArray(parsed.decisions) ? parsed.decisions : minutes.decisions,
-            actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems : minutes.actionItems,
-            openQuestions: Array.isArray(parsed.openQuestions) ? parsed.openQuestions : minutes.openQuestions
-          };
-          engine = llm.name;
-          modelName = llm.model;
-        }
-      } catch (error) {
-        console.error('LLM minutes skipped, using extractive minutes:', error.message);
-      }
-    }
-
-    const aiSummary = {
-      summary: minutes.summary || '',
-      keyPoints: minutes.keyPoints || [],
-      decisions: minutes.decisions || [],
-      actionItems: minutes.actionItems || [],
-      topics: minutes.topics || [],
-      openQuestions: minutes.openQuestions || [],
-      engine,
-      model: modelName,
-      generatedAt: new Date().toISOString(),
-      generatedBy: req.user.id
-    };
-
-    await meeting.update({ aiSummary, summaryGeneratedAt: new Date() });
 
     logAudit({ actor: req.user, action: 'ai.meeting_summary', entityType: 'Meeting', entityId: meeting.id, metadata: { engine: aiSummary.engine, model: aiSummary.model }, req });
 
@@ -150,6 +59,16 @@ router.post('/meetings/:roomId/summary', protect, enforceTranscriptionAllowed, a
     console.error('AI meeting summary error:', error);
     res.status(500).json({ success: false, message: 'Error generating meeting summary', error: error.message });
   }
+});
+
+// Poll target for the async flow
+router.get('/meetings/:roomId/summary', protect, async (req, res) => {
+  const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
+  if (!meeting) return res.status(404).json({ success: false, message: 'Meeting not found' });
+  const ok = meeting.hostId === req.user.id || (meeting.participantIds || []).includes(req.user.id) || (meeting.inviteeIds || []).includes(req.user.id);
+  if (!ok) return res.status(403).json({ success: false, message: 'No access to this meeting' });
+  if (!meeting.aiSummary) return res.status(202).json({ success: true, data: { status: 'pending' } });
+  res.json({ success: true, data: { status: 'ready', summary: meeting.aiSummary } });
 });
 
 // Generic text summarization (threads, channels, notes)
@@ -183,46 +102,27 @@ router.post('/summarize', protect, requirePermission('ai.use'), async (req, res)
   }
 });
 
-// Live caption translation (Meet "Speech translation"). Short phrases only; cached per phrase.
-const translationCache = new Map();
-const MAX_CACHE_ENTRIES = 500;
+// Live caption translation (Meet "Speech translation"). Short phrases only; see services/translator.js for providers/limits.
 const MAX_TRANSLATE_CHARS = 600;
+
+router.get('/translate/status', protect, async (_req, res) => {
+  res.json({ success: true, data: await providerStatus() });
+});
 
 router.post('/translate', protect, requirePermission('ai.use'), async (req, res) => {
   try {
     const { text, targetLanguage } = req.body;
-    if (typeof text !== 'string' || !text.trim() || typeof targetLanguage !== 'string' || !/^[A-Za-z][A-Za-z -]{1,40}$/.test(targetLanguage)) {
+    if (typeof text !== 'string' || !text.trim() || typeof targetLanguage !== 'string' || !/^[A-Za-z][A-Za-z() -]{1,40}$/.test(targetLanguage)) {
       return res.status(400).json({ success: false, message: 'Provide text and a target language' });
     }
-
-    const input = text.trim().slice(0, MAX_TRANSLATE_CHARS);
-    const cacheKey = `${targetLanguage}\u0000${input}`;
-    if (translationCache.has(cacheKey)) {
-      return res.json({ success: true, data: { translation: translationCache.get(cacheKey) } });
-    }
-
-    if (!(await getLlm())) {
-      return res.status(503).json({
-        success: false,
-        message: 'Speech translation needs a local language model: install Ollama (free) and pull a model, e.g. `ollama pull qwen2.5:3b`'
-      });
-    }
-
-    const out = await chatJSON({
-      system: `Translate the user's message into ${targetLanguage}. If it is already in ${targetLanguage}, return it unchanged. Respond ONLY with JSON: {"translation": string}.`,
-      user: input,
-      timeoutMs: 30_000
-    });
-    const translation = String(out.translation || '').trim() || input;
-    if (translationCache.size >= MAX_CACHE_ENTRIES) {
-      translationCache.delete(translationCache.keys().next().value);
-    }
-    translationCache.set(cacheKey, translation);
-
+    const translation = await translate(text.trim().slice(0, MAX_TRANSLATE_CHARS), targetLanguage);
     res.json({ success: true, data: { translation } });
   } catch (error) {
-    console.error('AI translate error:', error);
-    res.status(500).json({ success: false, message: 'Error translating text', error: error.message });
+    if (error.status === 503 || error.status === 429) {
+      return res.status(error.status).json({ success: false, message: error.message, code: error.status === 429 ? 'TRANSLATION_BUSY' : 'TRANSLATION_UNAVAILABLE' });
+    }
+    console.error('AI translate error:', error.message);
+    res.status(502).json({ success: false, message: 'Translation failed', code: 'TRANSLATION_FAILED' });
   }
 });
 

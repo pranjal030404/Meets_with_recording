@@ -14,6 +14,9 @@ import { protect } from '../middleware/auth.js';
 import { requirePermission } from '../lib/permissions.js';
 import logAudit from '../services/auditService.js';
 
+import { moveToObjectStorage } from '../storage/mirror.js';
+import { getStorage } from '../storage/index.js';
+
 const router = express.Router();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -106,6 +109,9 @@ router.post('/upload', protect, requirePermission('files.upload'), upload.single
       req
     });
 
+    // Object storage (when STORAGE_DRIVER=s3): move the file off this node's disk
+    await moveToObjectStorage(`files/${req.user.id}/${req.file.filename}`, req.file.path, req.file.mimetype);
+
     const full = await FileEntry.findByPk(fileEntry.id, {
       include: [{ model: User, as: 'owner', attributes: ['id', 'name', 'avatar'] }]
     });
@@ -193,6 +199,11 @@ router.get('/:fileId/download', protect, async (req, res) => {
     }
 
     const filePath = path.join(UPLOAD_ROOT, fileEntry.ownerId, fileEntry.fileName);
+    if (!fs.existsSync(filePath) && getStorage().name === 's3') {
+      const url = await getStorage().getSignedDownloadUrl(`files/${fileEntry.ownerId}/${fileEntry.fileName}`, { expiresSec: 300, filename: fileEntry.originalName });
+      logAudit({ actor: req.user, action: 'file.download', entityType: 'File', entityId: fileEntry.id, req });
+      return res.redirect(url);
+    }
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ success: false, message: 'File missing from storage' });
     }

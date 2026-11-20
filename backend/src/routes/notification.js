@@ -1,6 +1,8 @@
 import express from 'express';
 import Notification from '../models/Notification.js';
 import { protect } from '../middleware/auth.js';
+import { Op } from 'sequelize';
+import { pageNewestFirst, ORDER_NEWEST_FIRST, clampLimit } from '../lib/cursor.js';
 
 const router = express.Router();
 
@@ -8,12 +10,29 @@ router.use(protect);
 
 router.get('/', async (req, res) => {
   try {
-    const { limit = 50, page = 1, unreadOnly = false } = req.query;
+    const { limit = 50, page = 1, unreadOnly = false, cursor } = req.query;
 
     const whereClause = { recipientId: req.user.id };
 
     if (unreadOnly === 'true') {
       whereClause.isRead = false;
+    }
+
+    // Cursor mode (?cursor= or ?cursor=start): keyset pagination, no COUNT(*) over the whole history.
+    // Without `cursor` the legacy page/offset response is unchanged.
+    if (cursor !== undefined) {
+      const size = clampLimit(limit);
+      const { rows, nextCursor } = await pageNewestFirst({
+        cursor: cursor === 'start' ? null : cursor,
+        limit: size,
+        query: (extra, n) => Notification.findAll({
+          where: extra ? { [Op.and]: [whereClause, extra] } : whereClause,
+          order: ORDER_NEWEST_FIRST,
+          limit: n,
+        }),
+      });
+      const unreadCount = await Notification.count({ where: { recipientId: req.user.id, isRead: false } });
+      return res.json({ success: true, data: { notifications: rows.map(n => n.toJSON()), unreadCount, nextCursor } });
     }
 
     const notifications = await Notification.findAll({

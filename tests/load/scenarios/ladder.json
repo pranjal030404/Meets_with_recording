@@ -1,0 +1,13 @@
+{
+  "note": "Progressive ladder. Each step must pass its gates before the next starts. Steps >= 5000 need a dedicated test environment and a distributed load-generator fleet. Never run against production without written authorization.",
+  "steps": [100, 500, 1000, 5000, 10000, 25000, 50000, 100000],
+  "gates": { "apiP95Ms": 1000, "apiP99Ms": 2500, "errorRate": 0.01, "socketConnectSuccess": 0.99, "webrtcConnectSuccess": 0.98, "packetLossP95": 0.02, "dbPoolWaiting": 0, "eventLoopLagP99Ms": 200 },
+  "scenarios": {
+    "audio-only":        { "meetingSize": 8,   "audioProducersPct": 100, "videoProducersPct": 0,   "screenSharePct": 0 },
+    "camera-meetings":   { "meetingSize": 8,   "audioProducersPct": 100, "videoProducersPct": 100, "screenSharePct": 0 },
+    "screen-sharing":    { "meetingSize": 12,  "audioProducersPct": 100, "videoProducersPct": 50,  "screenSharePct": 8 },
+    "webinar":           { "meetingSize": 1000, "presenters": 3, "audioProducersPct": 0.3, "videoProducersPct": 0.3 },
+    "mixed-interactive": { "meetingSize": 25,  "audioProducersPct": 30, "videoProducersPct": 60,  "screenSharePct": 4 }
+  },
+  "measure": ["api p50/p95/p99", "meeting join time", "socket connect success", "webrtc connect success", "audio/video quality (consumer score)", "packet loss", "jitter", "cpu", "memory", "bandwidth", "db latency/pool", "redis latency", "failure recovery time"]
+}

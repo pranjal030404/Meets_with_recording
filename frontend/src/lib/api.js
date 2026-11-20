@@ -5,7 +5,9 @@ const API_URL = import.meta.env.DEV
   : ''
 
 const api = axios.create({
-  baseURL: `${API_URL}/api`
+  baseURL: `${API_URL}/api`,
+  // Cross-origin dev setups (VITE_API_URL) need this for the HttpOnly /uploads access cookie to be stored; same-origin is unaffected
+  withCredentials: !!API_URL
 })
 
 // Add token to requests

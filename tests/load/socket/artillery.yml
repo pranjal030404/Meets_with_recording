@@ -1,0 +1,23 @@
+# Artillery Socket.IO test: connection establishment + presence + typing fan-out through the Redis adapter.
+#   BASE_URL=https://test.example.com USERS_FILE=users.json artillery run tests/load/socket/artillery.yml
+# Do NOT mistake this for a WebRTC test: it only exercises signaling/realtime (see tests/load/webrtc for media).
+config:
+  target: "{{ $processEnvironment.BASE_URL }}"
+  processor: "./processor.cjs"
+  socketio: { transports: ["websocket"] }
+  phases:
+    - { duration: 60,  arrivalRate: 10,  rampTo: 100, name: warmup }
+    - { duration: 300, arrivalRate: 100, name: steady }   # raise per ladder step (tests/load/scenarios/ladder.json)
+  ensure:
+    maxErrorRate: 1
+scenarios:
+  - name: connect-presence-typing
+    engine: socketio
+    beforeScenario: loginAndSetAuth
+    flow:
+      - emit: { channel: "net:ping" }
+      - think: 2
+      - loop:
+          - emit: { channel: "conversation:typing", data: { conversationId: "{{ conversationId }}", isTyping: true } }
+          - think: 3
+        count: 20

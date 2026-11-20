@@ -17,6 +17,7 @@ const DEFAULTS = {
   hostMustJoinFirst: false,
   accessType: 'trusted',
   allowLinkRequests: true,
+  webinar: false,
 }
 
 export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canManage, isMeetingLocked, onClose }) {
@@ -83,6 +84,12 @@ export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canMan
                 icon={isMeetingLocked ? <Unlock className="w-4 h-4 text-green-400" /> : <Lock className="w-4 h-4 text-yellow-400" />}>
                 {isMeetingLocked ? 'Unlock meeting' : 'Lock meeting'}
               </ActionButton>
+            </Section>
+
+            <Section title="Webinar mode">
+              <ToggleRow label="Webinar mode"
+                description="Only hosts and co-hosts present. Attendees are view-only and receive just the presenters (much lower server load for large meetings)."
+                enabled={settings.webinar} onToggle={() => updateSetting('webinar', !settings.webinar)} />
             </Section>
 
             <Section title="Meeting moderation">

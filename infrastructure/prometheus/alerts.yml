@@ -1,0 +1,72 @@
+# Thresholds are STARTING POINTS, not tuned values: adjust after load tests (docs/LOAD_TESTING.md).
+groups:
+- name: meetclone-critical
+  rules:
+  - alert: NodeDown
+    expr: up{job="meetclone-nodes"} == 0
+    for: 1m
+    labels: { severity: critical }
+    annotations: { summary: "Node {{ $labels.instance }} is down (its meetings must be re-placed; media sessions reconnect)" }
+  - alert: NoMediaWorkers
+    expr: sfu_workers == 0
+    for: 1m
+    labels: { severity: critical }
+    annotations: { summary: "{{ $labels.node }} has no mediasoup workers" }
+  - alert: SfuWorkerCrashes
+    expr: increase(sfu_worker_deaths_total[10m]) > 0
+    labels: { severity: warning }
+    annotations: { summary: "mediasoup worker died on {{ $labels.node }}" }
+  - alert: RedisDown
+    expr: app_redis_up == 0
+    for: 1m
+    labels: { severity: critical }
+    annotations: { summary: "{{ $labels.node }} cannot reach Redis: cross-node events, presence, queues and placement degraded" }
+  - alert: DbPoolSaturated
+    expr: db_pool_waiting > 0 and db_pool_using >= db_pool_max
+    for: 2m
+    labels: { severity: critical }
+    annotations: { summary: "DB pool exhausted on {{ $labels.node }}: queries are waiting for connections" }
+  - alert: HighApiLatencyP95
+    expr: histogram_quantile(0.95, sum by (le, node) (rate(http_request_duration_seconds_bucket[5m]))) > 1
+    for: 10m
+    labels: { severity: warning }
+    annotations: { summary: "API p95 > 1s on {{ $labels.node }}" }
+  - alert: HighApiErrorRate
+    expr: sum by (node) (rate(http_request_duration_seconds_count{status=~"5.."}[5m])) / sum by (node) (rate(http_request_duration_seconds_count[5m])) > 0.05
+    for: 5m
+    labels: { severity: critical }
+    annotations: { summary: "5xx rate > 5% on {{ $labels.node }}" }
+  - alert: EventLoopLag
+    expr: nodejs_eventloop_lag_p99_seconds > 0.2
+    for: 5m
+    labels: { severity: warning }
+    annotations: { summary: "Event loop p99 lag > 200ms on {{ $labels.node }}" }
+  - alert: SlowQueriesRising
+    expr: increase(db_slow_queries_total[10m]) > 20
+    labels: { severity: warning }
+    annotations: { summary: "Slow queries rising on {{ $labels.node }}" }
+  - alert: QueueFailures
+    expr: queue_jobs{state="failed"} > 10
+    for: 10m
+    labels: { severity: warning }
+    annotations: { summary: "Queue {{ $labels.queue }} has failed jobs (dead-letter set)" }
+  - alert: QueueBacklog
+    expr: queue_jobs{state="waiting"} > 100
+    for: 15m
+    labels: { severity: warning }
+    annotations: { summary: "Queue {{ $labels.queue }} backlog is not draining" }
+  - alert: PoorMediaQuality
+    expr: histogram_quantile(0.5, sum by (le, node) (rate(sfu_consumer_score_bucket[10m]))) < 6
+    for: 10m
+    labels: { severity: warning }
+    annotations: { summary: "Median video consumer score < 6 on {{ $labels.node }}" }
+  - alert: SubscriptionDenialsHigh
+    expr: sum by (node) (rate(sfu_subscription_denied_total[5m])) > 5
+    for: 10m
+    labels: { severity: info }
+    annotations: { summary: "Clients repeatedly hitting subscription limits on {{ $labels.node }} (client loop or budget too low)" }
+  - alert: SocketRateLimiting
+    expr: sum by (node) (rate(socketio_events_rate_limited_total[5m])) > 10
+    for: 10m
+    labels: { severity: warning }
+    annotations: { summary: "Sockets being rate limited on {{ $labels.node }} (abuse or runaway client)" }

@@ -3,6 +3,8 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { enableJsonLogs } from './observability/jsonLogs.js';
+enableJsonLogs();
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -24,6 +26,9 @@ import adminRoutes from './routes/admin.js';
 import activityLog from './middleware/activityLog.js';
 import { ensureSystemRoles } from './lib/permissions.js';
 import aiRoutes from './routes/ai.js';
+import storageRoutes from './routes/storage.js';
+import { createUploadsRouter } from './routes/uploads.js';
+import webrtcRoutes from './routes/webrtc.js';
 
 import { initializeSocketHandlers } from './sockets/index.js';
 
@@ -31,7 +36,21 @@ import ReminderService from './services/reminderService.js';
 import { recoverStuckTranscriptions } from './services/recordingService.js';
 import mediasoupService from './lib/mediasoup.js';
 
-import { connectDB, sequelize } from './database/index.js';
+import { connectDB, sequelize, poolStats, dbStats } from './database/index.js';
+import { getRedis, closeRedis, quitClient, redisEnabled } from './infrastructure/redis/redisClient.js';
+import { checkRedis } from './infrastructure/redis/redisHealth.js';
+import { runExclusive } from './infrastructure/redis/lock.js';
+import { attachSocketAdapter } from './realtime/socketAdapter.js';
+import { onlineUserIds } from './realtime/presenceManager.js';
+import { createRateLimiter } from './middleware/rateLimit.js';
+import { httpMetrics, attachCollectors, startMetricsServer } from './observability/metrics.js';
+import { queueCounts } from './queues/index.js';
+import { getMonitor } from './media/sfuManager.js';
+import { startSfuManager, drainSfu, stopSfuManager } from './media/sfuManager.js';
+import { startWorkers } from './workers/index.js';
+import './workers/handlers.js';
+import { closeQueues } from './queues/index.js';
+import { registerShutdown, state as lifecycle } from './lib/shutdown.js';
 import './models/associations.js';
 import User from './models/User.js';
 import { processExpiries } from './services/subscriptionService.js';
@@ -43,33 +62,7 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const PORT = parseInt(process.env.PORT) || 5000;
 
-// =============================================
-// REDIS ADAPTER (for Socket.IO horizontal scaling across PM2/multi-server)
-// =============================================
 let io;
-
-(async () => {
-  const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-  if (REDIS_URL) {
-    try {
-      const { createAdapter } = await import('@socket.io/redis-adapter');
-      const { default: Redis } = await import('ioredis');
-      const pubClient = new Redis(REDIS_URL, { lazyConnect: true, retryStrategy: null });
-      const subClient = new Redis(REDIS_URL, { lazyConnect: true, retryStrategy: null });
-      pubClient.on('error', () => {});
-      subClient.on('error', () => {});
-      await Promise.all([pubClient.connect(), subClient.connect()]);
-      if (io) {
-        io.adapter(createAdapter(pubClient, subClient));
-        console.log('Redis adapter connected for Socket.IO scaling');
-      }
-    } catch (e) {
-      try { pubClient?.disconnect(); } catch {}
-      try { subClient?.disconnect(); } catch {}
-      console.warn('Redis adapter unavailable, running single-instance:', e.message);
-    }
-  }
-})();
 
 // =============================================
 // APP SETUP
@@ -94,8 +87,9 @@ io = new Server(httpServer, {
   allowEIO3: true,
   pingInterval: 25000,
   pingTimeout: 20000,
-  maxHttpBufferSize: 1e8,
+  maxHttpBufferSize: parseInt(process.env.SOCKET_MAX_BUFFER_BYTES) || 1e6, // was 100 MB; uploads go over REST
 });
+const socketAdapter = attachSocketAdapter(io);
 
 // =============================================
 // MIDDLEWARE
@@ -107,32 +101,12 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// In-memory rate limiting (swap with Redis-based for multi-instance)
-const rateLimits = new Map();
-const RATE_LIMIT_WINDOW = 60000;
-const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX) || 100;
+// Redis-backed (shared by all instances); degrades to per-process counting if Redis is down
+app.use('/api', createRateLimiter({ windowMs: 60000, max: parseInt(process.env.RATE_LIMIT_MAX) || 100 }));
 
-app.use('/api', (req, res, next) => {
-  const ip = req.ip || req.connection.remoteAddress;
-  const now = Date.now();
-  if (!rateLimits.has(ip)) rateLimits.set(ip, []);
-  const timestamps = rateLimits.get(ip).filter(t => now - t < RATE_LIMIT_WINDOW);
-  timestamps.push(now);
-  rateLimits.set(ip, timestamps);
-  if (timestamps.length > RATE_LIMIT_MAX) {
-    return res.status(429).json({ success: false, message: 'Too many requests' });
-  }
-  next();
-});
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, ts] of rateLimits) {
-    const v = ts.filter(t => now - t < RATE_LIMIT_WINDOW);
-    if (v.length === 0) rateLimits.delete(ip); else rateLimits.set(ip, v);
-  }
-}, 60000);
-
-app.use('/uploads', express.static(path.resolve(__dirname, '../uploads'), { maxAge: '1d' }));
+app.use(httpMetrics);
+// Private files: authenticated + authorised per path (was a public express.static). See routes/uploads.js
+app.use('/uploads', createUploadsRouter());
 
 if (process.env.NODE_ENV === 'production') {
   const frontendDist = path.resolve(__dirname, '../../frontend/dist');
@@ -163,14 +137,34 @@ app.use('/api/files', fileRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/storage', storageRoutes);
+app.use('/api/webrtc', webrtcRoutes);
 
+// Liveness: process is up (never checks dependencies, so a DB blip doesn't restart-loop the pod)
+app.get('/healthz', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+
+// Readiness: should the balancer send traffic here? Fails while draining or if the DB is unreachable.
+// Redis down is reported but not fatal (non-meeting features degrade); set REDIS_REQUIRED=true to make it fatal.
+app.get('/readyz', async (req, res) => {
+  if (lifecycle.draining) return res.status(503).json({ status: 'draining' });
+  const checks = {};
+  try { await sequelize.query('SELECT 1'); checks.database = { ok: true }; } catch (e) { checks.database = { ok: false, error: e.message }; }
+  checks.redis = await checkRedis();
+  checks.socketAdapter = socketAdapter.status();
+  checks.media = { workers: mediasoupService.workers.length };
+  checks.dbPool = poolStats();
+  const redisRequired = process.env.REDIS_REQUIRED === 'true';
+  const ready = checks.database.ok && (!redisRequired || checks.redis.ok);
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', checks });
+});
+
+// Back-compat for existing monitors/deploy scripts
 app.get('/api/health', (req, res) => {
-  if (shuttingDown) return res.status(503).json({ status: 'draining' });
+  if (lifecycle.draining) return res.status(503).json({ status: 'draining' });
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     pid: process.pid,
-    memory: process.memoryUsage(),
     uptime: process.uptime(),
     mediasoup: mediasoupService.workers.length > 0 ? mediasoupService.getStats() : 'inactive',
   });
@@ -185,33 +179,55 @@ app.set('io', io);
 // =============================================
 // START
 // =============================================
+const timers = [];
+let reminderService;
+let queueWorkers = null;
+let stopCollectors = null;
+let metricsServer = null;
 const startServer = async () => {
   try {
     await connectDB();
     recoverStuckTranscriptions().then((n) => n && console.log(`Marked ${n} interrupted transcription(s) as failed (retry available)`)).catch((e) => console.error('Transcription recovery failed:', e.message));
     await sequelize.sync({ alter: false });
     console.log('Database tables synchronized');
-    // No sockets survive a restart, so nobody can still be online (a crash would otherwise leave stale flags)
-    await User.update({ isOnline: false }, { where: { isOnline: true } }).catch((e) => console.error('Presence reset failed:', e.message));
+    // Single-instance (no Redis): no sockets survive a restart, so nobody can still be online.
+    // With Redis other instances may hold live sockets, so we must NOT reset globally; the leader-elected
+    // reconcile below clears stale flags using the TTL-based presence set instead.
+    if (!redisEnabled()) await User.update({ isOnline: false }, { where: { isOnline: true } }).catch((e) => console.error('Presence reset failed:', e.message));
     await ensureSystemRoles();
 
     // Downgrade lapsed paid subscriptions to Free now and every hour
-    setInterval(() => {
-      processExpiries().catch((e) => console.warn('Subscription expiry check failed:', e.message));
-    }, 60 * 60 * 1000);
-    processExpiries().catch((e) => console.warn('Subscription expiry check failed:', e.message));
+    const expiries = () => runExclusive('job:subscription-expiry', 10 * 60 * 1000, processExpiries).catch((e) => console.warn('Subscription expiry check failed:', e.message));
+    timers.push(setInterval(expiries, 60 * 60 * 1000));
+    expiries();
+
+    // Clear stale DB isOnline flags (crashed instance) using the Redis presence TTL as truth
+    if (redisEnabled()) {
+      timers.push(setInterval(() => runExclusive('job:presence-reconcile', 50000, async () => {
+        const rows = await User.findAll({ where: { isOnline: true }, attributes: ['id'], limit: 5000, raw: true });
+        const live = await onlineUserIds(rows.map((r) => r.id));
+        const stale = rows.map((r) => r.id).filter((id) => !live.has(id));
+        if (stale.length) await User.update({ isOnline: false, lastSeen: new Date() }, { where: { id: stale } });
+      }).catch((e) => console.warn('Presence reconcile failed:', e.message)), 60000));
+    }
 
     try {
       await mediasoupService.init();
       console.log('Mediasoup SFU ready');
+      startSfuManager(mediasoupService);
+      stopCollectors = attachCollectors({ mediasoupService, poolStats, dbStats, checkRedis, queueCounts, getMonitor, io });
+      metricsServer = startMetricsServer();
     } catch (e) {
       console.warn('Mediasoup init failed, running without SFU:', e.message);
     }
 
     httpServer.listen(PORT, () => {
       console.log(`Server (pid:${process.pid}) running on port ${PORT}`);
+      if (process.env.REDIS_REQUIRED === 'true' && !getRedis()) { console.error('REDIS_REQUIRED=true but REDIS_URL is not set'); process.exit(1); }
       if (mediasoupService.workers.length > 0) console.log('Mediasoup SFU active');
-      const reminderService = new ReminderService(io);
+      // In-process workers by default; set WORKERS_IN_PROCESS=false when running dedicated `node src/workers/main.js` pods
+      if (process.env.WORKERS_IN_PROCESS !== 'false') queueWorkers = startWorkers();
+      reminderService = new ReminderService(io);
       reminderService.start();
     });
   } catch (error) {
@@ -220,18 +236,20 @@ const startServer = async () => {
   }
 };
 
-// Graceful shutdown: stop taking new connections and let the balancer drain this node (pm2 reload / deploys)
-let shuttingDown = false;
-const shutdown = (signal) => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`${signal} received: draining connections...`);
-  io?.close();
-  httpServer.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 10000).unref();
-};
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+// Graceful shutdown: fail /readyz first, let the balancer notice, stop accepting, drain, then close dependencies
+const SHUTDOWN_GRACE_MS = parseInt(process.env.SHUTDOWN_DRAIN_DELAY_MS) || 5000;
+registerShutdown([
+  ['sfu-drain', () => drainSfu()], // stop receiving NEW meetings; existing ones keep running until shutdown completes
+  ['lb-drain-delay', () => new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS))],
+  ['timers', () => { stopSfuManager(); stopCollectors?.(); metricsServer?.close(); timers.forEach(clearInterval); reminderService?.stop(); }],
+  // io.close() disconnects websocket clients (they auto-reconnect to another instance) and closes the HTTP
+  // server; in-flight HTTP requests finish before the callback fires (bounded by SHUTDOWN_TIMEOUT_MS).
+  ['http+socket.io', () => new Promise((resolve) => { io.close(() => resolve()); httpServer.closeIdleConnections?.(); })],
+  ['workers', async () => { await queueWorkers?.close(); await closeQueues(); }],
+  ['mediasoup', async () => { await mediasoupService.close?.(); }],
+  ['redis', async () => { await closeRedis(); await Promise.allSettled([quitClient(socketAdapter.pub), quitClient(socketAdapter.sub)]); }],
+  ['database', () => sequelize.close()],
+]);
 
 startServer();
 

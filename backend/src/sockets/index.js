@@ -11,9 +11,15 @@ import { canManageMeeting, isMeetingHost, getMeetingRole, contributorAllowed } f
 import { saveRuntime, loadRuntime, deleteRuntime } from '../services/roomRuntimeStore.js';
 import { endMeeting } from '../services/meetingLifecycle.js';
 import { persistLiveTranscript, scheduleTranscriptCheckpoint, cancelTranscriptCheckpoint } from '../services/liveTranscriptStore.js';
+import { socketConnections, socketDisconnects, socketEvents, socketRateLimited } from '../observability/metrics.js';
+import { createSocketLimiter } from '../lib/socketLimiter.js';
+import { sanitizeSettings } from '../lib/meetingSettings.js';
+import { modeFor, limitsFor, decideConsume } from '../media/subscriptionPolicy.js';
+import { trackState } from '../lib/stateRegistry.js';
+import { ownershipGuard, releaseMeeting } from '../media/sfuManager.js';
+import * as presence from '../realtime/presenceManager.js';
 import { parseBreakoutRoomId, resolveBreakoutAccess } from '../lib/breakoutRoomId.js';
 
-const connectedUsers = new Map();
 const roomParticipants = new Map();
 const meetingNotes = new Map(); // roomId -> shared notes text
 
@@ -32,14 +38,16 @@ const roomAdmitted = new Map(); // roomId -> Set<userId>
 const MAX_TIMER_SECONDS = 12 * 60 * 60;
 const MAX_TRANSCRIPT_LINES = 2000;
 const MAX_LINE_CHARS = 500;
+const RUNTIME_TRANSCRIPT_LINES = 500; // tail mirrored to Redis so a failover keeps the captions (full list is checkpointed to the DB)
 
-const restoredRooms = new Set(); // rooms whose saved state we've already looked for this process
+const restoredRooms = new Map(); // roomId -> Promise: saved state is looked up once per process; concurrent joiners await the same load
 
 const runtimeSnapshot = (roomId) => ({
   timer: roomTimers.get(roomId) || null,
   transcription: roomTranscription.get(roomId) || null,
   notes: meetingNotes.get(roomId) ?? null,
   stream: roomStreams.get(roomId) || null,
+  transcript: (roomTranscripts.get(roomId) || []).slice(-RUNTIME_TRANSCRIPT_LINES),
   admitted: [...(roomAdmitted.get(roomId) || [])]
 });
 const persistRuntime = (roomId) => {
@@ -47,11 +55,15 @@ const persistRuntime = (roomId) => {
 };
 
 // After a server restart the first person to reconnect brings the room's tools back.
-const restoreRuntime = async (roomId) => {
-  if (restoredRooms.has(roomId) || parseBreakoutRoomId(roomId)) return;
-  restoredRooms.add(roomId);
+const restoreRuntime = (roomId) => {
+  if (parseBreakoutRoomId(roomId)) return Promise.resolve();
+  if (!restoredRooms.has(roomId)) restoredRooms.set(roomId, applyRestore(roomId));
+  return restoredRooms.get(roomId);
+};
+const applyRestore = async (roomId) => {
   const saved = await loadRuntime(roomId);
   if (!saved) return;
+  if (Array.isArray(saved.transcript) && saved.transcript.length && !roomTranscripts.has(roomId)) roomTranscripts.set(roomId, saved.transcript);
   if (saved.timer && saved.timer.endsAt > Date.now() && !roomTimers.has(roomId)) roomTimers.set(roomId, saved.timer);
   if (saved.transcription && !roomTranscription.has(roomId)) roomTranscription.set(roomId, saved.transcription);
   if (typeof saved.notes === 'string' && !meetingNotes.has(roomId)) meetingNotes.set(roomId, saved.notes);
@@ -95,6 +107,9 @@ const clearRoomTools = (roomId) => {
   roomWaiting.delete(roomId);
   roomAdmitted.delete(roomId);
   roomRecorders.delete(roomId);
+  roomWebinar.delete(roomId);
+  roomMode.delete(roomId);
+  if (!parseBreakoutRoomId(roomId)) releaseMeeting(roomId).catch(() => {});
   mediasoupService.closeRouter(roomId); // frees the worker slot; used to leak one router per meeting forever
 };
 
@@ -112,9 +127,56 @@ const loadRoomMeeting = (roomId) => {
 };
 
 const userTransports = new Map();
+const userConsumers = new Map(); // socketId -> Map<consumerId, { kind, mediaType }>  (enforces subscription limits)
+const roomWebinar = new Map();   // roomId -> boolean (settings.webinar), cached for the owner node
+const roomMode = new Map();      // roomId -> last announced subscription mode
+const isManagerRole = (r) => r === 'host' || r === 'co-host';
+
+// Webinar switched on: close every non-manager's producers so attendees go view-only immediately
+const closeAttendeeProducers = (io, roomId) => {
+  for (const [userId, info] of roomParticipants.get(roomId) || []) {
+    if (isManagerRole(info.role)) continue;
+    const mine = userProducers.get(info.socketId);
+    if (!mine) continue;
+    for (const [mediaType, producerId] of Object.entries(mine)) {
+      mediasoupService.closeProducer(producerId);
+      delete mine[mediaType];
+      io.to(roomId).emit('mediasoup:producerClosed', { producerId, socketId: info.socketId });
+    }
+  }
+};
+
+const countConsumers = (socketId) => {
+  const c = { audio: 0, video: 0, screen: 0 };
+  for (const v of userConsumers.get(socketId)?.values() || []) c[v.mediaType === 'screen' ? 'screen' : v.kind]++;
+  return c;
+};
+const currentMode = (roomId) => modeFor({ participantCount: roomParticipants.get(roomId)?.size || 0, webinar: !!roomWebinar.get(roomId) });
+const policyPayload = (roomId) => { const mode = currentMode(roomId); return { roomId, mode, ...limitsFor(mode) }; };
+// Announce the policy to the room only when the mode actually changes (join/leave/webinar toggle).
+const refreshRoomMode = (io, roomId) => {
+  const mode = currentMode(roomId);
+  if (roomMode.get(roomId) !== mode) { roomMode.set(roomId, mode); io.to(roomId).emit('room:media-policy', policyPayload(roomId)); }
+};
 const userProducers = new Map();
 
+// Every per-process collection, named and scoped, exported as a gauge (see lib/stateRegistry.js).
+[['roomParticipants', roomParticipants, 'room'], ['meetingNotes', meetingNotes, 'room'], ['roomTimers', roomTimers, 'room'],
+ ['roomTranscription', roomTranscription, 'room'], ['roomTranscripts', roomTranscripts, 'room'], ['roomStreams', roomStreams, 'room'],
+ ['roomRecorders', roomRecorders, 'room'], ['roomWaiting', roomWaiting, 'room'], ['roomAdmitted', roomAdmitted, 'room'],
+ ['restoredRooms', restoredRooms, 'room'], ['roomClearTimers', roomClearTimers, 'room'], ['roomWebinar', roomWebinar, 'room'], ['roomMode', roomMode, 'room'],
+ ['userTransports', userTransports, 'socket'], ['userConsumers', userConsumers, 'socket'], ['userProducers', userProducers, 'socket']
+].forEach(([n, c, sc]) => trackState(n, c, sc));
+
 export const initializeSocketHandlers = (io) => {
+  // A dead worker takes its routers' transports with it; they cannot migrate. Tell the room so clients rebuild media.
+  mediasoupService.onActiveSpeakers = (roomId, speakers) => {
+    io.to(roomId).emit('media:active-speakers', { roomId, userIds: speakers.map((x) => x.userId).filter(Boolean), producerIds: speakers.map((x) => x.producerId) });
+  };
+  mediasoupService.onRoomsLost = (roomIds, reason) => {
+    for (const roomId of roomIds) io.to(roomId).emit('media:reconnect-required', { roomId, reason });
+  };
+
   io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
 
@@ -140,17 +202,30 @@ export const initializeSocketHandlers = (io) => {
   };
 
   io.on('connection', (socket) => {
-    console.log(`User connected: ${socket.user.name} (${socket.id})`);
-
-    connectedUsers.set(socket.user.id, {
-      socketId: socket.id,
-      user: socket.user
+    socketConnections.inc();
+    const limiter = createSocketLimiter();
+    socket.use(([event, ...args], next) => {
+      socketEvents.inc({ event: typeof event === 'string' && event.length < 40 ? event : 'other' });
+      const verdict = limiter.take();
+      if (verdict === 'ok') return next();
+      socketRateLimited.inc({ event: typeof event === 'string' && event.length < 40 ? event : 'other' });
+      const ack = args[args.length - 1];
+      if (typeof ack === 'function') ack({ success: false, error: 'Rate limit exceeded' });
+      if (verdict === 'kick') socket.disconnect(true);
+      // dropped: intentionally no next() => handler never runs
     });
+    console.log(`User connected: ${socket.user.name} (${socket.id})`);
 
     socket.join(`user:${socket.user.id}`);
 
-    // Mark user online for the workspace
-    User.update({ isOnline: true }, { where: { id: socket.user.id } }).catch(() => {});
+    // Cluster-wide presence (Redis, TTL'd, multi-tab aware). The DB flag is only a mirror, written on
+    // transitions (first socket in / last socket out), not on every connect.
+    presence.connect(socket.user.id, socket.id).then(({ wasOffline }) => {
+      if (wasOffline) User.update({ isOnline: true }, { where: { id: socket.user.id } }).catch(() => {});
+    });
+    const presenceTimer = setInterval(() => presence.heartbeat(socket.user.id, socket.id), 20000);
+    presenceTimer.unref?.();
+    socket.once('disconnect', () => clearInterval(presenceTimer));
 
     const handleRoomJoin = async ({ roomId }, { admitted = false } = {}) => {
       try {
@@ -175,6 +250,11 @@ export const initializeSocketHandlers = (io) => {
           socket.emit('error', { message: meeting.status === 'cancelled' ? 'This meeting was cancelled' : 'This meeting has ended' });
           return;
         }
+
+        // Meeting affinity: this meeting's state + media live on exactly one node. Anyone else is redirected.
+        const guard = await ownershipGuard(roomId);
+        if (guard?.redirect) { socket.emit('room:redirect', { roomId, ...guard.redirect }); return; }
+        if (guard?.error) { socket.emit('error', { message: guard.error }); return; }
 
         cancelRoomClear(roomId);
         await restoreRuntime(roomId);
@@ -239,6 +319,10 @@ export const initializeSocketHandlers = (io) => {
         const participants = Array.from(roomUsers.values()).filter(
           p => p.user.id !== socket.user.id
         );
+
+        roomWebinar.set(roomId, !!meeting.settings?.webinar);
+        socket.emit('room:media-policy', policyPayload(roomId));
+        refreshRoomMode(io, roomId);
 
         socket.emit('room:participants', {
           participants,
@@ -329,8 +413,20 @@ export const initializeSocketHandlers = (io) => {
       handleRoomLeave(socket, io);
     });
 
+    // Media operations are only valid on the owner node, for a meeting that exists and is not over.
+    // (Previously any authenticated socket could create a router/transport for an arbitrary roomId.)
+    const mediaGate = async (roomId) => {
+      if (typeof roomId !== 'string') return { error: 'roomId required' };
+      const meeting = await loadRoomMeeting(roomId);
+      if (!meeting || meeting.status === 'ended' || meeting.status === 'cancelled') return { error: 'Meeting not available' };
+      return ownershipGuard(roomId);
+    };
+
     socket.on('mediasoup:getRouterRtpCapabilities', async ({ roomId }, callback) => {
       try {
+        const gate = await mediaGate(roomId);
+        if (gate?.redirect) return callback({ success: false, redirect: gate.redirect });
+        if (gate?.error) return callback({ success: false, error: gate.error });
         const rtpCapabilities = await mediasoupService.getRouterRtpCapabilities(roomId);
         callback({ success: true, rtpCapabilities });
       } catch (error) {
@@ -341,6 +437,9 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('mediasoup:createWebRtcTransport', async ({ roomId, direction }, callback) => {
       try {
+        const gate = await mediaGate(roomId);
+        if (gate?.redirect) return callback({ success: false, redirect: gate.redirect });
+        if (gate?.error) return callback({ success: false, error: gate.error });
         const transportParams = await mediasoupService.createWebRtcTransport(roomId, direction);
 
         if (!userTransports.has(socket.id)) {
@@ -374,8 +473,11 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
+    const ownsTransport = (transportId) => { const m = userTransports.get(socket.id) || {}; return transportId === m.send || transportId === m.recv; };
+
     socket.on('mediasoup:connectTransport', async ({ transportId, dtlsParameters }, callback) => {
       try {
+        if (!ownsTransport(transportId)) throw new Error('Not your transport');
         await mediasoupService.connectTransport(transportId, dtlsParameters);
         callback({ success: true });
       } catch (error) {
@@ -386,6 +488,10 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('mediasoup:produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
       try {
+        if (!ownsTransport(transportId)) throw new Error('Not your transport');
+        if (roomWebinar.get(socket.roomId) && !isManagerRole(roomParticipants.get(socket.roomId)?.get(socket.user.id)?.role)) {
+          return callback({ success: false, code: 'WEBINAR_VIEW_ONLY', error: 'Webinar mode: only hosts and co-hosts can present' });
+        }
         const produceKey = { audio: 'allowMic', video: 'allowVideo', screen: 'allowScreenShare' }[appData?.mediaType || kind];
         if (produceKey && await isBlocked(socket.roomId, socket.user.id, produceKey)) {
           return callback({ success: false, error: 'The host has turned this off for participants' });
@@ -423,7 +529,7 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('mediasoup:consume', async ({ roomId, producerId, rtpCapabilities }, callback) => {
+    socket.on('mediasoup:consume', async ({ roomId, producerId, rtpCapabilities, priority }, callback) => {
       try {
         // Only people actually in the room (not waiting, not denied) may receive its media
         if (!socket.rooms.has(roomId)) return callback({ success: false, error: 'Not in this room' });
@@ -432,12 +538,35 @@ export const initializeSocketHandlers = (io) => {
           throw new Error('Receive transport not created');
         }
 
+        // Selective subscription: server-side enforcement so a modified client can't pull N^2 streams
+        const producer = mediasoupService.producers.get(producerId);
+        if (!producer) throw new Error('Producer not found');
+        const mediaType = producer.appData?.mediaType || producer.kind;
+        const roster = roomParticipants.get(roomId);
+        const ownerEntry = roster?.get(producer.appData?.userId);
+        const decision = decideConsume({
+          mode: currentMode(roomId), kind: producer.kind, mediaType,
+          current: countConsumers(socket.id),
+          requesterIsManager: isManagerRole(roster?.get(socket.user.id)?.role),
+          ownerIsManager: isManagerRole(ownerEntry?.role),
+          priority: priority === 'pinned' || mediasoupService.isActiveSpeaker(roomId, producerId),
+        });
+        if (!decision.allow) {
+          mediasoupService.subStats.denied[decision.reason] = (mediasoupService.subStats.denied[decision.reason] || 0) + 1;
+          return callback({ success: false, code: 'SUBSCRIPTION_LIMIT', reason: decision.reason, error: `Subscription not allowed: ${decision.reason}` });
+        }
+        mediasoupService.subStats.allowed++;
+
         const consumerParams = await mediasoupService.consume(
           roomId,
           transports.recv,
           producerId,
           rtpCapabilities
         );
+        if (!userConsumers.has(socket.id)) userConsumers.set(socket.id, new Map());
+        const mine = userConsumers.get(socket.id);
+        mine.set(consumerParams.id, { kind: producer.kind, mediaType });
+        mediasoupService.consumers.get(consumerParams.id)?.observer.once('close', () => mine.delete(consumerParams.id));
 
         callback({ success: true, consumerParams });
       } catch (error) {
@@ -446,8 +575,11 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
+    const ownsProducer = (producerId) => Object.values(userProducers.get(socket.id) || {}).includes(producerId);
+
     socket.on('mediasoup:resumeConsumer', async ({ consumerId }, callback) => {
       try {
+        if (!userConsumers.get(socket.id)?.has(consumerId)) throw new Error('Not your consumer');
         await mediasoupService.resumeConsumer(consumerId);
         callback({ success: true });
       } catch (error) {
@@ -456,8 +588,28 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
+    // Drop a subscription (tile scrolled away / over the video budget) - frees SFU CPU + egress
+    socket.on('mediasoup:closeConsumer', ({ consumerId }, callback) => {
+      try {
+        if (!userConsumers.get(socket.id)?.has(consumerId)) throw new Error('Not your consumer');
+        mediasoupService.closeConsumer(consumerId);
+        userConsumers.get(socket.id)?.delete(consumerId);
+        callback?.({ success: true });
+      } catch (error) { callback?.({ success: false, error: error.message }); }
+    });
+
+    // Thumbnails ask for the low simulcast layer; pinned/speaker ask for high
+    socket.on('mediasoup:setConsumerLayers', async ({ consumerId, spatialLayer, temporalLayer }, callback) => {
+      try {
+        if (!userConsumers.get(socket.id)?.has(consumerId)) throw new Error('Not your consumer');
+        await mediasoupService.setConsumerLayers(consumerId, spatialLayer, temporalLayer);
+        callback?.({ success: true });
+      } catch (error) { callback?.({ success: false, error: error.message }); }
+    });
+
     socket.on('mediasoup:pauseProducer', async ({ producerId }, callback) => {
       try {
+        if (!ownsProducer(producerId)) throw new Error('Not your producer');
         await mediasoupService.pauseProducer(producerId);
 
         if (socket.roomId) {
@@ -476,6 +628,7 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('mediasoup:resumeProducer', async ({ producerId }, callback) => {
       try {
+        if (!ownsProducer(producerId)) throw new Error('Not your producer');
         await mediasoupService.resumeProducer(producerId);
 
         if (socket.roomId) {
@@ -494,6 +647,7 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('mediasoup:closeProducer', ({ producerId }, callback) => {
       try {
+        if (!ownsProducer(producerId)) throw new Error('Not your producer');
         mediasoupService.closeProducer(producerId);
 
         const producers = userProducers.get(socket.id);
@@ -960,11 +1114,18 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:update-settings', async ({ roomId, settings }) => {
       try {
+        const clean = sanitizeSettings(settings); // unknown keys / wrong types are dropped
+        if (!Object.keys(clean).length) return;
         const meeting = await Meeting.findOne({ where: { roomId } });
         if (meeting && canManageMeeting(meeting, socket.user.id)) {
-          meeting.settings = { ...(meeting.settings || {}), ...settings };
+          meeting.settings = { ...(meeting.settings || {}), ...clean };
           await meeting.save();
-          io.to(roomId).emit('meeting:settings-updated', { settings });
+          io.to(roomId).emit('meeting:settings-updated', { settings: clean });
+          if ('webinar' in clean) {
+            roomWebinar.set(roomId, !!clean.webinar);
+            refreshRoomMode(io, roomId);
+            if (clean.webinar) closeAttendeeProducers(io, roomId); // attendees can no longer publish: stop what they already send
+          }
         }
       } catch (error) {
         console.error('Host update settings error:', error);
@@ -973,6 +1134,7 @@ export const initializeSocketHandlers = (io) => {
 
     // Latency probe for the in-call network-quality indicator
     socket.on('net:ping', (ack) => {
+      presence.heartbeat(socket.user.id, socket.id);
       if (typeof ack === 'function') ack();
     });
 
@@ -1069,7 +1231,7 @@ export const initializeSocketHandlers = (io) => {
       lines.push(line);
       if (lines.length > MAX_TRANSCRIPT_LINES) lines.shift();
       roomTranscripts.set(roomId, lines);
-      if (!parseBreakoutRoomId(roomId)) scheduleTranscriptCheckpoint(roomId, () => roomTranscripts.get(roomId));
+      if (!parseBreakoutRoomId(roomId)) { scheduleTranscriptCheckpoint(roomId, () => roomTranscripts.get(roomId)); persistRuntime(roomId); }
 
       io.to(roomId).emit('transcript:line', line);
       socket.to(roomId).emit('caption:text', { userId: line.userId, userName: line.userName, text: clean });
@@ -1127,9 +1289,8 @@ export const initializeSocketHandlers = (io) => {
         console.log(`${socket.user.name} joined team: ${team.name}`);
 
         // Share presence with the team
-        const onlineIds = [...connectedUsers.keys()];
         const teamMemberIds = (team.members || []).map(m => m.userId || m.id).filter(Boolean);
-        const onlineMembers = teamMemberIds.filter(id => onlineIds.includes(id));
+        const onlineMembers = [...await presence.onlineUserIds(teamMemberIds)];
 
         socket.to(`team:${teamId}`).emit('presence:online', {
           userId: socket.user.id,
@@ -1225,7 +1386,9 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnecting', () => { socket.data.leavingRooms = [...socket.rooms]; });
+    socket.on('disconnect', (reason) => {
+      socketDisconnects.inc({ reason: String(reason).slice(0, 40) });
       for (const waiting of roomWaiting.values()) waiting.delete(socket.id);
       console.log(`User disconnected: ${socket.user.name} (${socket.id})`);
 
@@ -1237,6 +1400,7 @@ export const initializeSocketHandlers = (io) => {
         userProducers.delete(socket.id);
       }
 
+      userConsumers.delete(socket.id);
       const transports = userTransports.get(socket.id);
       if (transports) {
         if (transports.send) mediasoupService.closeTransport(transports.send);
@@ -1246,23 +1410,15 @@ export const initializeSocketHandlers = (io) => {
 
       handleRoomLeave(socket, io);
 
-      // Only flip the user offline when their last socket closes
-      const stillConnected = Array.from(io.sockets.sockets.values())
-        .some(s => s !== socket && s.user && s.user.id === socket.user.id);
-
-      if (!stillConnected) {
-        connectedUsers.delete(socket.user.id);
-        User.update(
-          { isOnline: false, lastSeen: new Date() },
-          { where: { id: socket.user.id } }
-        ).catch(() => {});
-
-        for (const room of socket.rooms) {
-          if (room !== socket.id && room !== `user:${socket.user.id}`) {
-            io.to(room).emit('presence:offline', { userId: socket.user.id, name: socket.user.name });
-          }
-        }
-      }
+      // Only flip the user offline when their last socket (on ANY instance) is gone
+      const { id: userId, name: userName } = socket.user;
+      // socket.rooms is already empty by 'disconnect'; it is captured in 'disconnecting'
+      const rooms = (socket.data.leavingRooms || []).filter((room) => room !== socket.id && room !== `user:${userId}`);
+      presence.disconnect(userId, socket.id).then(({ nowOffline }) => {
+        if (!nowOffline) return;
+        User.update({ isOnline: false, lastSeen: new Date() }, { where: { id: userId } }).catch(() => {});
+        for (const room of rooms) io.to(room).emit('presence:offline', { userId, name: userName });
+      });
     });
   });
 };
@@ -1298,6 +1454,7 @@ function handleRoomLeave(socket, io) {
     }
 
     if (roomUsers && roomUsers.size === 0) scheduleRoomClear(roomId);
+    else refreshRoomMode(io, roomId);
 
     socket.leave(roomId);
     socket.roomId = null;

@@ -1,4 +1,5 @@
 import express from 'express';
+import { pageNewestFirst, ORDER_NEWEST_FIRST, clampLimit } from '../lib/cursor.js';
 import { Op, Sequelize } from 'sequelize';
 import Conversation from '../models/Conversation.js';
 import ConversationMember from '../models/ConversationMember.js';
@@ -233,13 +234,29 @@ router.get('/:conversationId/messages', protect, async (req, res) => {
       return res.status(403).json({ success: false, message: 'Not a member of this conversation' });
     }
 
-    const { limit = 50, before } = req.query;
+    const { limit = 50, before, cursor } = req.query;
     const whereClause = {
       conversationId: req.params.conversationId,
       isDeleted: false,
       // Only root messages; threads are fetched on demand
       threadRootId: null
     };
+    // ?cursor= (keyset, tie-safe) is preferred; ?before=<ISO> keeps working for existing clients.
+    if (cursor !== undefined) {
+      const { rows, nextCursor } = await pageNewestFirst({
+        cursor: cursor === 'start' ? null : cursor,
+        limit: clampLimit(limit),
+        query: (extra, n) => Message.findAll({
+          where: extra ? { [Op.and]: [whereClause, extra] } : whereClause,
+          include: [{ model: User, as: 'sender', attributes: USER_ATTRS }],
+          order: ORDER_NEWEST_FIRST,
+          limit: n,
+        }),
+      });
+      rows.reverse();
+      return res.json({ success: true, data: { messages: rows.map(m => m.toJSON()), nextCursor } });
+    }
+
     if (before) whereClause.createdAt = { [Op.lt]: new Date(before) };
 
     const messages = await Message.findAll({

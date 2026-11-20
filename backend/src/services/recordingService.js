@@ -22,13 +22,23 @@ const toPublicUrl = (...segments) => `/${path.posix.join(...segments)}`;
 // Older recordings have no `id`; their filename (without extension) is the same value.
 export const recordingIdOf = (r) => r.id || path.parse(r.filename || '').name;
 
-const locks = new Map(); // meetingId -> Promise tail
-const withMeetingLock = (meetingId, fn) => {
+import { redisEnabled } from '../infrastructure/redis/redisClient.js';
+import { enqueue } from '../queues/index.js';
+import { trackState } from '../lib/stateRegistry.js';
+import { getStorage } from '../storage/index.js';
+import fsSync from 'fs';
+import { withLock } from '../infrastructure/redis/lock.js';
+
+const locks = trackState('recordingLocks', new Map(), 'room'); // meetingId -> Promise tail
+const withLocalLock = (meetingId, fn) => {
   const run = (locks.get(meetingId) || Promise.resolve()).catch(() => {}).then(fn);
   locks.set(meetingId, run);
   run.finally(() => { if (locks.get(meetingId) === run) locks.delete(meetingId); }).catch(() => {});
   return run;
 };
+
+// In-process queue first (cheap), then a Redis mutex so concurrent instances can't lose each other's JSON updates
+const withMeetingLock = (meetingId, fn) => withLocalLock(meetingId, () => withLock(`meeting-recordings:${meetingId}`, 15000, fn));
 
 const updateRecording = (meetingId, recordingId, mutate) => withMeetingLock(meetingId, async () => {
   const meeting = await Meeting.findByPk(meetingId);
@@ -62,7 +72,7 @@ const setTranscriptionStatus = (meetingId, recordingId, to, patch = {}) =>
   });
 
 // ---- one transcription at a time: Whisper is CPU-heavy ----
-const queue = [];
+const queue = trackState('transcriptionLocalQueue', [], 'global');
 let running = false;
 const pump = async () => {
   if (running) return;
@@ -92,9 +102,32 @@ const buildTranscriptionRecord = (transcript, roomId, recordingId, duration) => 
   }]))
 });
 
-const runTranscription = async ({ meetingId, roomId, recording, language, context }) => {
+const keyFor = (rel) => path.relative(uploadsRoot, rel).split(path.sep).join('/');
+
+/** Copy a local file to object storage (S3 driver only); the local copy is kept until it has been processed. Never throws. */
+export const mirrorFile = async (absPath, contentType, storage = getStorage()) => {
+  if (storage.name !== 's3') return null;
+  try {
+    const key = keyFor(absPath);
+    await storage.putObject(key, fsSync.createReadStream(absPath), { contentType });
+    return key;
+  } catch (e) { console.error(`[storage] mirror of ${absPath} failed: ${e.message}`); return null; }
+};
+
+/** The worker may run on another node than the one that received the upload: fetch the recording from the bucket if it isn't on local disk. */
+export const ensureLocalRecording = async (recording, storage = getStorage()) => {
+  if (fsSync.existsSync(recording.path)) return recording.path;
+  if (storage.name === 's3' && recording.storageKey && storage.downloadToFile) {
+    await storage.downloadToFile(recording.storageKey, recording.path);
+    return recording.path;
+  }
+  throw new Error('Recording file is not available on this node');
+};
+
+export const runTranscription = async ({ meetingId, roomId, recording, language, context }, { throwOnError = false, final = true } = {}) => {
   try {
     await setTranscriptionStatus(meetingId, recording.id, 'processing', { startedAt: new Date().toISOString(), error: null });
+    await ensureLocalRecording(recording);
     const transcript = await generateTranscriptionArtifacts({
       recordingPath: recording.path,
       transcriptsDir: path.join(uploadsRoot, 'transcripts', roomId),
@@ -104,14 +137,26 @@ const runTranscription = async ({ meetingId, roomId, recording, language, contex
       context
     });
     const record = buildTranscriptionRecord(transcript, roomId, recording.id, recording.duration);
+    for (const ext of ['json', 'txt', 'srt', 'vtt']) if (transcript.files?.[ext]) await mirrorFile(transcript.files[ext], 'text/plain'); // so any node / the summary worker can read them
     await setTranscriptionStatus(meetingId, recording.id, record.status, record);
   } catch (error) {
     console.error('Transcription failed:', error.message);
-    await setTranscriptionStatus(meetingId, recording.id, 'failed', { error: error.message, finishedAt: new Date().toISOString() }).catch(() => {});
+    // With a durable queue a non-final attempt is retried by BullMQ: only mark `failed` (UI-visible) on the last one
+    if (!throwOnError || final) await setTranscriptionStatus(meetingId, recording.id, 'failed', { error: error.message, finishedAt: new Date().toISOString() }).catch(() => {});
+    if (throwOnError) throw error;
   }
 };
 
+/**
+ * Durable (BullMQ) when Redis is configured, otherwise the previous in-process queue.
+ * jobId makes the enqueue idempotent per recording.
+ */
 export const enqueueTranscription = (job) => {
+  if (redisEnabled()) {
+    enqueue('transcription', job, { jobId: `transcribe-${job.meetingId}-${job.recording.id}-${Date.now()}` })
+      .catch((e) => { console.error('Could not enqueue transcription:', e.message); queue.push(() => runTranscription(job)); pump(); });
+    return;
+  }
   queue.push(() => runTranscription(job));
   pump();
 };
@@ -139,9 +184,12 @@ export const saveMeetingRecording = async ({
     await fs.unlink(sourcePath).catch(() => {});
   }
 
+  const storageKey = await mirrorFile(recordingPath, mimeType || 'video/webm');
+
   return {
     recording: {
       id: recordingId,
+      ...(storageKey ? { storageKey } : {}),
       filename: recordingFileName,
       originalName: originalName || recordingFileName,
       url: toPublicUrl('uploads', 'recordings', roomId, recordingFileName),
@@ -175,6 +223,8 @@ export const retryTranscription = async ({ meeting, recordingId, language, conte
 
 /** On boot: anything left queued/processing by a crash can never finish by itself - mark failed so it can be retried. */
 export const recoverStuckTranscriptions = async () => {
+  // A durable queue resumes/retries stalled jobs itself; marking them failed here would also clobber other instances' live jobs
+  if (redisEnabled()) return 0;
   const meetings = await Meeting.findAll({ attributes: ['id', 'recordings'] });
   let fixed = 0;
   for (const m of meetings) {

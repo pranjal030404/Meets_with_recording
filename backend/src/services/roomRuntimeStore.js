@@ -1,6 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getRedis } from '../infrastructure/redis/redisClient.js';
+
+const RUNTIME_TTL_SEC = 24 * 3600; // mirrored to Redis so ANOTHER node can restore the room after a node failure
 
 /**
  * In-meeting tool state (timer, transcription on/off, shared notes, live stream, admitted guests) lives in
@@ -24,6 +27,10 @@ export const saveRuntime = (roomId, snapshotFn, delay = 1000) => {
   timers.set(roomId, setTimeout(async () => {
     timers.delete(roomId);
     try {
+      const redis = getRedis();
+      if (redis) { await redis.set(`runtime:${roomId}`, JSON.stringify(snapshotFn()), 'EX', RUNTIME_TTL_SEC); return; }
+    } catch (error) { console.error('Redis runtime save failed, using disk:', error.message); }
+    try {
       await fs.mkdir(DIR, { recursive: true });
       const tmp = `${file}.tmp`;
       await fs.writeFile(tmp, JSON.stringify(snapshotFn()), 'utf8');
@@ -38,6 +45,11 @@ export const loadRuntime = async (roomId) => {
   const file = fileFor(roomId);
   if (!file) return null;
   try {
+    const redis = getRedis();
+    const v = redis ? await redis.get(`runtime:${roomId}`) : null;
+    if (v) return JSON.parse(v);
+  } catch { /* fall back to disk */ }
+  try {
     return JSON.parse(await fs.readFile(file, 'utf8'));
   } catch {
     return null;
@@ -48,5 +60,6 @@ export const deleteRuntime = async (roomId) => {
   clearTimeout(timers.get(roomId));
   timers.delete(roomId);
   const file = fileFor(roomId);
+  await getRedis()?.del(`runtime:${roomId}`).catch(() => {});
   if (file) await fs.unlink(file).catch(() => {});
 };

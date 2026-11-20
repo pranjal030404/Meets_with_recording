@@ -45,9 +45,22 @@ export async function verifySmtpConnection() {
   return true;
 }
 
+import { redisEnabled } from '../infrastructure/redis/redisClient.js';
+
 export async function sendMail({ to, subject, html, text }) {
   const from = process.env.MAIL_FROM || process.env.SMTP_USER;
   return getTransporter().sendMail({ from, to, subject, html, text });
+}
+
+/**
+ * Non-critical mail (invites, task assignments): durable queue with retries/backoff when Redis is configured,
+ * otherwise sent inline as before. NOT used for verification mail, where the user needs the SMTP result immediately.
+ */
+export async function deliver(mail) {
+  if (!redisEnabled()) return sendMail(mail);
+  const { enqueue } = await import('../queues/index.js');
+  try { return await enqueue('email', mail); }
+  catch (e) { console.warn(`[mail] queue unavailable (${e.message}); sending inline`); return sendMail(mail); }
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -79,7 +92,7 @@ export async function sendTeamInviteEmail({ to, inviterName, team, role, joined,
   const codeHtml = !joined && inviteCode
     ? `<p>After signing up, choose <b>Join team</b> and enter this invite code:</p><p style="font-family:monospace;font-size:20px;letter-spacing:2px;background:#f3f4f6;padding:10px 14px;border-radius:8px;display:inline-block;margin:0">${esc(inviteCode)}</p>`
     : '';
-  return sendMail({
+  return deliver({
     to,
     subject: `${inviterName} invited you to ${team.name} on ${name}`,
     text: `${inviterName} invited you to join the team "${team.name}" on ${name} as ${role}.\n\n${cta}: ${link}\n${codeText}`,
@@ -101,7 +114,7 @@ export async function sendTaskAssignedEmail({ to, assigneeName, assignerName, ta
   const priority = task.priority || 'medium';
   const heading = isNew ? 'You have a new task' : 'A task was assigned to you';
   const row = (k, v) => `<tr><td style="padding:6px 12px 6px 0;color:#6b7280;font-size:13px">${k}</td><td style="padding:6px 0;font-size:14px"><b>${v}</b></td></tr>`;
-  return sendMail({
+  return deliver({
     to,
     subject: `${assignerName} assigned you: ${task.title}`,
     text: `Hi ${assigneeName},\n\n${assignerName} assigned you a task${teamName ? ` in ${teamName}` : ''}:\n\n${task.title}\n${task.description ? task.description + '\n' : ''}\nPriority: ${priority}\nDue: ${due}\n\nOpen it: ${link}`,

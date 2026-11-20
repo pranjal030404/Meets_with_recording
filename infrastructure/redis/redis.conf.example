@@ -1,0 +1,15 @@
+# Redis guidance for MeetClone (standalone primary + replica with Sentinel; the Socket.IO adapter in use is the
+# standard pub/sub adapter, which does NOT support sharded Redis Cluster).
+bind 127.0.0.1 <PRIVATE_IP>
+protected-mode yes
+requirepass <REDIS_PASSWORD>           # put in REDIS_URL=redis://:<password>@host:6379 ; use rediss:// with TLS in untrusted networks
+maxmemory <e.g. 2gb>                   # size from measurements of presence + queues + runtime snapshots
+# BullMQ requires that jobs are never evicted. Presence/runtime keys have TTLs, so noeviction is safe if memory is sized.
+maxmemory-policy noeviction
+appendonly yes                         # durable queues: AOF so queued/failed jobs survive a restart
+appendfsync everysec
+save ""                                # AOF only; add RDB snapshots if you want faster restarts
+timeout 0
+tcp-keepalive 60
+# Slow-log for diagnosing latency spikes
+slowlog-log-slower-than 10000
