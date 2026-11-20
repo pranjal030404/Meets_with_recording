@@ -129,7 +129,7 @@ export default function ChatPanel({ roomId, onClose }) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center text-center text-gray-400 text-sm py-12 gap-3">
             <span className="w-12 h-12 rounded-full bg-dark-300 flex items-center justify-center"><MessageSquare className="w-5 h-5 text-gray-500" /></span>
@@ -143,7 +143,7 @@ export default function ChatPanel({ roomId, onClose }) {
             
             return (
               <div key={message._id} className={`group flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] ${isOwn ? 'order-2' : ''}`}>
+                <div className={`flex flex-col min-w-0 max-w-[88%] ${isOwn ? 'items-end' : 'items-start'}`}>
                   {!isOwn && (
                     <div className="flex items-center gap-2 mb-1">
                       <img src={message.sender.avatar} alt={message.sender.name} className="w-5 h-5 rounded-full" />
@@ -161,7 +161,7 @@ export default function ChatPanel({ roomId, onClose }) {
                   )}
 
                   <div className="relative">
-                    <div className={`chat-message ${isOwn ? 'own' : 'other'}`}>
+                    <div className={`chat-message !max-w-full !mb-0 !px-3.5 !py-2.5 ${isOwn ? 'own' : 'other'}`}>
                       {message.type === 'file' && message.fileUrl ? (
                         <FileAttachment
                           fileUrl={message.fileUrl}
@@ -170,7 +170,7 @@ export default function ChatPanel({ roomId, onClose }) {
                           fileSize={message.fileSize}
                         />
                       ) : (
-                        <p className="text-sm break-words">
+                        <p className="text-[15px] leading-snug whitespace-pre-wrap [overflow-wrap:anywhere]">
                           {message.isDeleted ? (
                             <span className="italic text-gray-400">{message.content}</span>
                           ) : (
@@ -178,7 +178,7 @@ export default function ChatPanel({ roomId, onClose }) {
                           )}
                         </p>
                       )}
-                      <span className="text-xs text-gray-400 mt-1 block">{formatTime(message.createdAt)}</span>
+                      <span className={`text-[11px] mt-1 block text-right ${isOwn ? 'text-white/70' : 'text-gray-400'}`}>{formatTime(message.createdAt)}</span>
                     </div>
 
                     {/* Reply button on hover */}

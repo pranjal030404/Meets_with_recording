@@ -100,6 +100,7 @@ export default function MeetingControls({
             icon={isMuted ? <MicOff className="w-5 h-5" /> : <Mic className={`w-5 h-5 ${micTalking ? 'text-emerald-400' : ''}`} />}
             label={isMuted ? 'Unmute (Ctrl+D)' : 'Mute (Ctrl+D)'}
             ringLevel={!isMuted && micTalking ? Math.min(1, micLevel * 1.5) : 0}
+            attention={isMuted}
           />
         </div>
 
@@ -319,7 +320,7 @@ export default function MeetingControls({
   )
 }
 
-function ControlButton({ active, activeColor = 'default', onClick, icon, label, badge, ringLevel = 0 }) {
+function ControlButton({ active, activeColor = 'default', onClick, icon, label, badge, ringLevel = 0, attention = false }) {
   const getButtonClasses = () => {
     if (!active) {
       return 'bg-dark-400/70 hover:bg-dark-500/80 border border-white/[0.06] text-gray-200'
@@ -354,6 +355,9 @@ function ControlButton({ active, activeColor = 'default', onClick, icon, label, 
       aria-label={label}
       style={ringLevel > 0 ? { boxShadow: `0 0 0 ${2 + ringLevel * 4}px rgba(52, 211, 153, ${0.25 + ringLevel * 0.45})` } : undefined}
     >
+      {attention && (
+        <span className="absolute inset-0 rounded-full ring-2 ring-red-400/70 animate-ping pointer-events-none" aria-hidden="true" />
+      )}
       {icon}
       {badge != null && (
         <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-gradient-to-br from-primary-500 to-accent-600 rounded-full text-[10px] flex items-center justify-center px-1 font-bold text-white shadow-lg animate-pop">

@@ -110,6 +110,23 @@ class MediasoupClientService {
     console.log('✅ Mediasoup device loaded', this.device.rtpCapabilities);
   }
 
+  /** Concurrent callers (audio+video produce, several consumes) must share ONE transport, not race to create many. */
+  _ensureSendTransport() {
+    if (this.sendTransport) return Promise.resolve(this.sendTransport);
+    if (!this._sendPending) {
+      this._sendPending = this.createSendTransport().finally(() => { this._sendPending = null; });
+    }
+    return this._sendPending;
+  }
+
+  _ensureRecvTransport() {
+    if (this.recvTransport) return Promise.resolve(this.recvTransport);
+    if (!this._recvPending) {
+      this._recvPending = this.createRecvTransport().finally(() => { this._recvPending = null; });
+    }
+    return this._recvPending;
+  }
+
   /**
    * Create send transport (for producing media)
    */
@@ -188,9 +205,7 @@ class MediasoupClientService {
    * Produce audio track
    */
   async produceAudio(track) {
-    if (!this.sendTransport) {
-      await this.createSendTransport();
-    }
+    await this._ensureSendTransport();
 
     try {
       this.producers.audio = await this.sendTransport.produce({
@@ -231,9 +246,7 @@ class MediasoupClientService {
    * Produce video track
    */
   async produceVideo(track) {
-    if (!this.sendTransport) {
-      await this.createSendTransport();
-    }
+    await this._ensureSendTransport();
 
     try {
       this.producers.video = await this.sendTransport.produce({
@@ -271,9 +284,7 @@ class MediasoupClientService {
    * Produce screen share track
    */
   async produceScreen(track) {
-    if (!this.sendTransport) {
-      await this.createSendTransport();
-    }
+    await this._ensureSendTransport();
 
     try {
       // 'detail' tells the encoder this is text / slides: keep it sharp and trade frame rate if the link is tight
@@ -309,9 +320,7 @@ class MediasoupClientService {
    * Consume media from another peer
    */
   async consume(producerId) {
-    if (!this.recvTransport) {
-      await this.createRecvTransport();
-    }
+    await this._ensureRecvTransport();
 
     try {
       const { consumerParams } = await this._socketRequest('mediasoup:consume', {
@@ -377,12 +386,12 @@ class MediasoupClientService {
     const producer = this.producers[mediaType];
     if (producer) {
       producer.close();
-      
-      await this._socketRequest('mediasoup:closeProducer', {
-        producerId: producer.id,
-      });
-      
       this.producers[mediaType] = null;
+      try {
+        await this._socketRequest('mediasoup:closeProducer', { producerId: producer.id });
+      } catch (e) {
+        console.warn(`closeProducer(${mediaType}) not acknowledged:`, e.message);
+      }
       console.log(`✅ Producer closed: ${mediaType}`);
     }
   }
