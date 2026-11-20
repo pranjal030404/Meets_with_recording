@@ -4,7 +4,7 @@ import {
   ArrowLeft,
   Plus, Send, Paperclip, Smile, Hash, Users, Phone, X, BellOff, Bell,
   Pin, Bookmark, Forward, Pencil, Trash2, Reply, ListChecks,
-  CheckCheck, Loader2, Search, CornerDownLeft
+  Check, CheckCheck, Loader2, Search, CornerDownLeft
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useConversationStore } from '../store/conversationStore'
@@ -918,7 +918,7 @@ function TaskFromMessageModal({ message, onClose }) {
     try {
       const { default: api } = await import('../lib/api')
       const res = await api.get(`/teams/${id}`)
-      setTeamMembers((res.data.data.team?.members || res.data.data.members || []).map(m => ({
+      setTeamMembers((res.data?.members || res.data?.data?.team?.members || res.data?.data?.members || []).map(m => ({
         id: m.user?.id || m.userId, name: m.user?.name || m.user
       })).filter(m => m.id))
     } catch { setTeamMembers([]) }

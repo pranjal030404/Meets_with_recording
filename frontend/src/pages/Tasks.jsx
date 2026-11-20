@@ -228,7 +228,7 @@ function CreateTaskModal({ teams, presetTeamId, onClose }) {
     try {
       const { default: api } = await import('../lib/api')
       const res = await api.get(`/teams/${id}`)
-      const list = (res.data.data.team?.members || []).map(m => ({
+      const list = (res.data?.members || res.data?.data?.team?.members || []).map(m => ({
         id: m.user?.id || m.userId,
         name: m.user?.name || m.user
       })).filter(m => m.id)

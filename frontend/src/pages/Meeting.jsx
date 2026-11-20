@@ -27,6 +27,7 @@ import NotesPanel from '../components/NotesPanel'
 import MeetingToolsPanel from '../components/MeetingToolsPanel'
 import TimerBadge from '../components/TimerBadge'
 import ShortcutsModal from '../components/ShortcutsModal'
+import Whiteboard from '../components/Whiteboard'
 import { downloadAttendanceReport } from '../lib/attendance'
 
 export default function Meeting() {
