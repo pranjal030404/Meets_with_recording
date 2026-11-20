@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { Op } from 'sequelize';
 import User from '../models/User.js';
-import { protect, generateToken } from '../middleware/auth.js';
+import { protect, generateToken, clearAssetCookie, revokeToken } from '../middleware/auth.js';
 import { ensureSubscription, getSubscriptionDetails } from '../services/subscriptionService.js';
 import { getSetting } from '../services/settingsService.js';
 import { isSmtpConfigured, sendVerificationEmail } from '../services/mailService.js';
@@ -293,6 +293,9 @@ router.post('/logout', protect, async (req, res) => {
       { isOnline: false, lastSeen: new Date() },
       { where: { id: req.user.id } }
     );
+    clearAssetCookie(res);
+    const bearer = req.headers.authorization?.startsWith('Bearer') ? req.headers.authorization.split(' ')[1] : null;
+    if (bearer) await revokeToken(bearer); // logout now really ends the session on every node
 
     res.json({
       success: true,

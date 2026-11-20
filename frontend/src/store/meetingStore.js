@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import api from '../lib/api'
-import { getSocket } from '../lib/socket'
+import { getSocket, initSocket, setNodeUnreachableHandler } from '../lib/socket'
+import { preferredSpatialLayer } from '../lib/subscriptionPolicy'
 import toast from 'react-hot-toast'
 import { isBreakoutRoomId } from '../lib/breakout'
 import { canTransition, canMove, SCREEN_SHARE_TRANSITIONS, MEDIA_LINK_TRANSITIONS } from '../lib/sessionMachine'
@@ -13,6 +14,21 @@ let levelMonitor = null
 const consumeInFlight = new Map() // producerId -> Promise<consumer>
 const consumedProducers = new Set()
 const closedProducers = new Set()
+
+// ---- Selective subscription -------------------------------------------------------------------
+// Every producer the room announces lands in the catalog; the reconciler decides which ones we actually
+// consume (server enforces the same budget: backend/src/media/subscriptionPolicy.js).
+const producerCatalog = new Map() // producerId -> { peerId, user, mediaType, announcedAt, deniedAt }
+let mediaPolicy = { mode: 'small', maxVideo: 1e9, maxAudio: 1e9, maxScreen: 4 } // permissive until the server announces
+let activeSpeakerPeers = new Set()
+let reconcileTimer = null
+let reconciling = false
+let reconcileAgain = false
+const appliedLayers = new Map() // consumerId -> spatial layer last requested
+const DENY_COOLDOWN_MS = 3000
+const PRIORITY_EXTRA = 4
+let unsubscribeInterest = null
+let recovering = false
 
 // Recording mixer: one audio track containing EVERYONE (you + all remote voices + shared-tab audio),
 // so the recording has the whole meeting's sound, not just your microphone.
@@ -58,6 +74,7 @@ const sessionDefaults = () => ({
   remoteStreams: new Map(),
   producers: { audio: null, video: null, screen: null },
   mediasoupReady: false,
+  socketEpoch: 0, // bumps when failover replaces the socket (Meeting.jsx re-binds its listeners)
 
   handRaisedUsers: [],
   isHandRaised: false,
@@ -197,6 +214,9 @@ export const useMeetingStore = create((set, get) => ({
     if (screenStream) screenStream.getTracks().forEach(t => t.stop())
 
     consumeInFlight.clear(); consumedProducers.clear(); closedProducers.clear()
+    producerCatalog.clear(); appliedLayers.clear(); activeSpeakerPeers = new Set(); clearTimeout(reconcileTimer)
+    mediaPolicy = { mode: 'small', maxVideo: 1e9, maxAudio: 1e9, maxScreen: 4 }
+    unsubscribeInterest?.(); unsubscribeInterest = null; setNodeUnreachableHandler(null)
     if (mediasoupClient) { mediasoupClient.closeAll(); mediasoupClient = null }
     stopLevelMonitor()
 
@@ -226,15 +246,73 @@ export const useMeetingStore = create((set, get) => ({
       mediasoupClient.onLinkChange = (state) => get().setMediaLink(state)
       mediasoupClient.onDiagnostic = (msg) => toast.error(msg, { id: 'media-diagnostic', duration: 20000 })
       await mediasoupClient.init(socket, roomId)
+      unsubscribeInterest?.()
+      unsubscribeInterest = useMeetingStore.subscribe((st, prev) => {
+        if (st.pinnedUserId !== prev.pinnedUserId || st.spotlightUserId !== prev.spotlightUserId) get().reconcileSubscriptions()
+      })
+      setNodeUnreachableHandler(() => get().recoverMedia('node-unreachable'))
       await Promise.all([mediasoupClient._ensureSendTransport(), mediasoupClient._ensureRecvTransport()])
       set({ mediasoupReady: true })
       return { success: true }
     } catch (error) {
       console.error('Mediasoup init error:', error)
       mediasoupClient = null
+      if (error.redirect) setTimeout(() => get().recoverMedia('redirect'), 0) // meeting lives on another node
       set({ mediasoupReady: false })
       return { success: false, message: error.message }
     }
+  },
+
+  /**
+   * Failover: the media path is gone (worker crashed, node died, or the meeting is owned elsewhere).
+   * WebRTC transports cannot migrate, so: re-resolve the owner node, reconnect the socket if it changed,
+   * discard all local media state, rebuild transports, republish our tracks and re-join the room.
+   * Retries with backoff while the old node is still being declared dead (~heartbeat TTL).
+   */
+  recoverMedia: async (reason) => {
+    const { currentMeeting } = get()
+    if (recovering || !currentMeeting) return
+    recovering = true
+    set({ mediaLink: 'reconnecting' })
+    toast.loading('Reconnecting media…', { id: 'media-recover' })
+    try {
+      const roomId = currentMeeting.roomId
+      const token = getSocket()?.auth?.token
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (get().sessionPhase === 'leaving' || get().sessionPhase === 'idle') return
+        try {
+          const { data: placement } = await api.get(`/meetings/${encodeURIComponent(roomId)}/placement`)
+          let socket = getSocket()
+          const moved = (placement.url || '') !== ((socket?.__target ?? '') === '' ? '' : socket.__target) && placement.url
+          if (moved || !socket?.connected) {
+            // Same owner and still disconnected => it may simply be restarting: wait and retry
+            if (!moved && socket && !socket.connected && reason === 'node-unreachable') throw new Error('owner not reachable yet')
+            if (moved) { socket = initSocket(token, placement.url); set({ socketEpoch: get().socketEpoch + 1 }) }
+            await new Promise((res, rej) => { if (socket.connected) return res(); const t = setTimeout(() => rej(new Error('socket timeout')), 8000); socket.once('connect', () => { clearTimeout(t); res() }) })
+          }
+          // Tear down every piece of local media state tied to the dead transports
+          consumeInFlight.clear(); consumedProducers.clear(); closedProducers.clear(); producerCatalog.clear(); appliedLayers.clear()
+          for (const e of get().remoteStreams.values()) for (const c of [e.audioConsumer, e.videoConsumer, e.screenConsumer]) { try { c?.close() } catch { /* already closed */ } }
+          set({ remoteStreams: new Map(), producers: { audio: null, video: null, screen: null } })
+          if (mediasoupClient) { mediasoupClient.closeAll(); mediasoupClient = null }
+          const res = await get().initMediasoup(socket, roomId)
+          if (!res.success) throw new Error(res.message || 'media init failed')
+          const { localStream, screenStream, isMuted, isVideoOff, isScreenSharing } = get()
+          const a = localStream?.getAudioTracks()[0], v = localStream?.getVideoTracks()[0], sc = screenStream?.getVideoTracks()[0]
+          await Promise.all([
+            a && a.readyState === 'live' && !isMuted ? get().produceAudio(a) : null,
+            v && v.readyState === 'live' && !isVideoOff ? get().produceVideo(v) : null,
+            isScreenSharing && sc && sc.readyState === 'live' ? get().produceScreen(sc) : null,
+          ])
+          socket.emit('room:join', { roomId }) // server answers with participants + existing producers => normal consume path
+          toast.success('Media reconnected', { id: 'media-recover' })
+          return
+        } catch (e) {
+          await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** attempt, 8000)))
+        }
+      }
+      toast.error('Could not restore the media connection. Please rejoin the meeting.', { id: 'media-recover', duration: 15000 })
+    } finally { recovering = false }
   },
 
   produceAudio: async (track) => {
@@ -243,7 +321,7 @@ export const useMeetingStore = create((set, get) => ({
       const producer = await mediasoupClient.produceAudio(track)
       set(s => ({ producers: { ...s.producers, audio: producer } }))
       return producer
-    } catch (e) { console.error('Produce audio error:', e) }
+    } catch (e) { if (e?.code === 'WEBINAR_VIEW_ONLY') toast('Webinar mode: only hosts can present', { id: 'webinar-view-only', icon: '🎤' }); else console.error('Produce audio error:', e) }
   },
 
   produceVideo: async (track) => {
@@ -252,7 +330,7 @@ export const useMeetingStore = create((set, get) => ({
       const producer = await mediasoupClient.produceVideo(track)
       set(s => ({ producers: { ...s.producers, video: producer } }))
       return producer
-    } catch (e) { console.error('Produce video error:', e) }
+    } catch (e) { if (e?.code === 'WEBINAR_VIEW_ONLY') toast('Webinar mode: only hosts can present', { id: 'webinar-view-only', icon: '🎤' }); else console.error('Produce video error:', e) }
   },
 
   produceScreen: async (track) => {
@@ -261,26 +339,94 @@ export const useMeetingStore = create((set, get) => ({
       const producer = await mediasoupClient.produceScreen(track)
       set(s => ({ producers: { ...s.producers, screen: producer } }))
       return producer
-    } catch (e) { console.error('Produce screen error:', e) }
+    } catch (e) { if (e?.code === 'WEBINAR_VIEW_ONLY') toast('Webinar mode: only hosts can present', { id: 'webinar-view-only', icon: '🎤' }); else console.error('Produce screen error:', e) }
   },
 
+  // Announce a remote producer. Whether it is actually consumed is the reconciler's decision.
   consumeProducer: async (producerId, peerId, peerUser, mediaType) => {
     if (!mediasoupClient) return
-    if (consumedProducers.has(producerId)) return
-    if (consumeInFlight.has(producerId)) return consumeInFlight.get(producerId)
-    const job = get()._consumeProducer(producerId, peerId, peerUser, mediaType)
-      .finally(() => consumeInFlight.delete(producerId))
-    consumeInFlight.set(producerId, job)
-    return job
+    if (!producerCatalog.has(producerId)) producerCatalog.set(producerId, { peerId, user: peerUser, mediaType, announcedAt: Date.now(), deniedAt: 0 })
+    return get().reconcileSubscriptions()
   },
 
-  _consumeProducer: async (producerId, peerId, peerUser, mediaType) => {
+  forgetProducer: (producerId) => { producerCatalog.delete(producerId); get().reconcileSubscriptions() },
+
+  setMediaPolicy: (policy) => { mediaPolicy = { ...mediaPolicy, ...policy }; get().reconcileSubscriptions() },
+  setActiveSpeakers: (userIds) => { activeSpeakerPeers = new Set(userIds || []); get().reconcileSubscriptions() },
+
+  // Coalesces bursts (a room of 50 joining at once) into one pass
+  reconcileSubscriptions: () => new Promise((resolve) => {
+    clearTimeout(reconcileTimer)
+    reconcileTimer = setTimeout(() => { get()._reconcile().finally(resolve) }, 30)
+  }),
+
+  _reconcile: async () => {
+    if (!mediasoupClient) return
+    if (reconciling) { reconcileAgain = true; return }
+    reconciling = true
+    try {
+      do {
+        reconcileAgain = false
+        const { pinnedUserId, spotlightUserId } = get()
+        const now = Date.now()
+        const isPinned = (peerId) => peerId === pinnedUserId || peerId === spotlightUserId
+        const priorityOf = (e) => (isPinned(e.peerId) ? 0 : activeSpeakerPeers.has(e.peerId) ? 1 : 2)
+        const rank = (id, e) => [priorityOf(e), consumedProducers.has(id) ? 0 : 1, e.announcedAt]
+        const cmp = (a, b) => { const ra = rank(...a), rb = rank(...b); return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] }
+        const byType = (t) => [...producerCatalog].filter(([, e]) => e.mediaType === t).sort(cmp)
+        // Soft cap, plus bounded extra room for pinned/speaking peers (mirrors the server rule)
+        const pick = (list, max) => list.filter(([, e], i) => i < max || (priorityOf(e) < 2 && i < max + PRIORITY_EXTRA))
+        const desired = new Set([
+          ...byType('screen').slice(0, mediaPolicy.maxScreen ?? 4).map(([id]) => id),
+          ...pick(byType('video'), mediaPolicy.maxVideo).map(([id]) => id),
+          ...pick(byType('audio'), mediaPolicy.maxAudio).map(([id]) => id),
+        ])
+
+        // 1. drop what is no longer wanted (video/audio only; the SFU stops forwarding it)
+        for (const [id, e] of producerCatalog) {
+          if (consumedProducers.has(id) && !desired.has(id) && e.mediaType !== 'screen') get().removeConsumer(id, e.peerId, e.mediaType)
+        }
+        // 2. start what is wanted
+        const starts = []
+        for (const id of desired) {
+          const e = producerCatalog.get(id)
+          if (!e || consumedProducers.has(id) || consumeInFlight.has(id) || now - e.deniedAt < DENY_COOLDOWN_MS) continue
+          const job = get()._consumeProducer(id, e.peerId, e.user, e.mediaType, isPinned(e.peerId) ? 'pinned' : undefined)
+            .finally(() => consumeInFlight.delete(id))
+          consumeInFlight.set(id, job)
+          starts.push(job)
+        }
+        await Promise.all(starts)
+        // 3. quality: thumbnails low, pinned/speaker high
+        get()._applyLayers(isPinned)
+      } while (reconcileAgain)
+    } finally { reconciling = false }
+  },
+
+  _applyLayers: (isPinned) => {
+    if (!mediasoupClient) return
+    const entries = [...get().remoteStreams.values()].filter((e) => e.videoConsumer)
+    for (const e of entries) {
+      const c = e.videoConsumer
+      const peerId = e.user?._id || e.user?.id
+      const layer = preferredSpatialLayer({ mode: mediaPolicy.mode, pinned: isPinned(peerId), activeSpeaker: activeSpeakerPeers.has(peerId), tileCount: entries.length })
+      if (appliedLayers.get(c.id) === layer) continue
+      appliedLayers.set(c.id, layer)
+      mediasoupClient.setConsumerLayers(c.id, layer).catch(() => appliedLayers.delete(c.id))
+    }
+  },
+
+  _consumeProducer: async (producerId, peerId, peerUser, mediaType, priority) => {
     try {
       closedProducers.delete(producerId)
-      // One retry: the producer can briefly be unknown to the SFU while many peers publish at once
+      // One retry: the producer can briefly be unknown to the SFU while many peers publish at once.
+      // A subscription-limit denial is a decision, not a glitch: never retry it, back off instead.
       let consumer
-      try { consumer = await mediasoupClient.consume(producerId) }
-      catch (e) { await new Promise(r => setTimeout(r, 400)); consumer = await mediasoupClient.consume(producerId) }
+      try { consumer = await mediasoupClient.consume(producerId, { priority }) }
+      catch (e) {
+        if (e.code === 'SUBSCRIPTION_LIMIT') { const c = producerCatalog.get(producerId); if (c) c.deniedAt = Date.now(); return }
+        await new Promise(r => setTimeout(r, 400)); consumer = await mediasoupClient.consume(producerId, { priority })
+      }
       if (closedProducers.has(producerId)) { consumer.close(); closedProducers.delete(producerId); return }
       consumedProducers.add(producerId)
       const { remoteStreams } = get()
@@ -316,6 +462,7 @@ export const useMeetingStore = create((set, get) => ({
     if (!entry) return
     // Only remove the consumer that belongs to THIS producer (a newer one for the same kind may already exist)
     const isMine = (c) => c && (!producerId || c.producerId === producerId)
+    for (const c of [entry.audioConsumer, entry.videoConsumer, entry.screenConsumer]) if (isMine(c) && c.producerId === producerId) { appliedLayers.delete(c.id); mediasoupClient?.notifyConsumerClosed(c.id) }
     if (mediaType === 'audio' && isMine(entry.audioConsumer)) {
       entry.stream.removeTrack(entry.audioConsumer.track); entry.audioConsumer.close(); entry.audioConsumer = null
     } else if (mediaType === 'video' && isMine(entry.videoConsumer)) {
@@ -334,6 +481,7 @@ export const useMeetingStore = create((set, get) => ({
     const entry = newMap.get(peerId)
     if (entry) {
       for (const c of [entry.audioConsumer, entry.videoConsumer, entry.screenConsumer]) if (c) consumedProducers.delete(c.producerId)
+      for (const [id, e] of producerCatalog) if (e.peerId === peerId) producerCatalog.delete(id)
       if (entry.audioConsumer) entry.audioConsumer.close()
       if (entry.videoConsumer) entry.videoConsumer.close()
       if (entry.screenConsumer) entry.screenConsumer.close()

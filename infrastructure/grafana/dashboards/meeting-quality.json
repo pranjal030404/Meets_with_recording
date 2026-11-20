@@ -1,0 +1,108 @@
+{
+ "uid": "meeting-quality",
+ "title": "MeetClone - Meeting quality",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "30s",
+ "time": {
+  "from": "now-3h",
+  "to": "now"
+ },
+ "templating": {
+  "list": [
+   {
+    "name": "DS_PROMETHEUS",
+    "type": "datasource",
+    "query": "prometheus",
+    "label": "Prometheus"
+   }
+  ]
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "timeseries",
+   "title": "Video consumer score p10/p50",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "histogram_quantile(0.1, sum by (le)(rate(sfu_consumer_score_bucket[10m])))",
+     "legendFormat": "p10",
+     "refId": "A"
+    },
+    {
+     "expr": "histogram_quantile(0.5, sum by (le)(rate(sfu_consumer_score_bucket[10m])))",
+     "legendFormat": "p50",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "Producer packet loss p50/p95",
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "histogram_quantile(0.5, sum by (le)(rate(sfu_producer_packet_loss_ratio_bucket[10m])))",
+     "legendFormat": "p50",
+     "refId": "A"
+    },
+    {
+     "expr": "histogram_quantile(0.95, sum by (le)(rate(sfu_producer_packet_loss_ratio_bucket[10m])))",
+     "legendFormat": "p95",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "Producer jitter p95",
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "histogram_quantile(0.95, sum by (le)(rate(sfu_producer_jitter_bucket[10m])))",
+     "legendFormat": "p95",
+     "refId": "A"
+    }
+   ]
+  }
+ ],
+ "tags": [
+  "meetclone"
+ ]
+}

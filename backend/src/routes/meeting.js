@@ -19,6 +19,8 @@ import { requirePermission } from '../lib/permissions.js';
 import { inviteeMachine, StateTransitionError } from '../lib/stateMachines.js';
 import { startMeeting, endMeeting, cancelMeeting, presentParticipants } from '../services/meetingLifecycle.js';
 import { parseBreakoutRoomId, resolveBreakoutAccess } from '../lib/breakoutRoomId.js';
+import { sanitizeSettings } from '../lib/meetingSettings.js';
+import { resolveOwner } from '../media/meetingPlacementService.js';
 
 const router = express.Router();
 
@@ -96,7 +98,7 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
       teamId,
       scheduledAt,
       isInstant,
-      settings: settings || {},
+      settings: sanitizeSettings(settings),
       participants: [participantEntry],
       participantIds: [req.user.id],
       invitees: [],
@@ -284,6 +286,23 @@ router.get('/team/:teamId', protect, async (req, res) => {
       message: 'Error fetching team meetings',
       error: error.message
     });
+  }
+});
+
+// Which node owns this meeting's signaling + media? Clients connect their socket to `url` (empty = same origin).
+router.get('/:roomId/placement', protect, async (req, res) => {
+  try {
+    const roomId = parseBreakoutRoomId(req.params.roomId)?.parentRoomId || req.params.roomId;
+    const meeting = await Meeting.findOne({ where: { roomId }, attributes: ['id', 'status'] });
+    if (!meeting || meeting.status === 'ended' || meeting.status === 'cancelled') {
+      return res.status(404).json({ success: false, message: 'Meeting not available' });
+    }
+    const owner = await resolveOwner(roomId, { region: req.query.region });
+    if (!owner) return res.status(503).json({ success: false, message: 'No media capacity available' });
+    res.json({ success: true, nodeId: owner.nodeId, url: owner.url, self: owner.self });
+  } catch (error) {
+    console.error('Placement error:', error.message);
+    res.status(500).json({ success: false, message: 'Placement failed' });
   }
 });
 
@@ -515,7 +534,7 @@ router.put('/:roomId/settings', protect, async (req, res) => {
 
     if (title) meeting.title = title;
     if (settings) {
-      meeting.settings = { ...(meeting.settings || {}), ...settings };
+      meeting.settings = { ...(meeting.settings || {}), ...sanitizeSettings(settings) };
     }
 
     await meeting.save();

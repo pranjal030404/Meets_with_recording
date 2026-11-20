@@ -1,0 +1,15 @@
+# Prometheus (run as a systemd service on a PRIVATE host; never expose :9090 publicly).
+global: { scrape_interval: 15s, evaluation_interval: 15s }
+rule_files: [ /etc/prometheus/alerts.yml ]
+scrape_configs:
+  - job_name: meetclone-nodes            # backend/.env: METRICS_PORT=9460 METRICS_HOST=<private ip>  (default binds 127.0.0.1)
+    static_configs:
+      - targets: [ 'NODE_HOST_1:9460', 'NODE_HOST_2:9460' ]   # one target per PM2 node; with several nodes per host use 9460+i
+  - job_name: redis                      # redis_exporter (oliver006/redis_exporter) on the Redis host
+    static_configs: [ { targets: [ 'REDIS_HOST:9121' ] } ]
+  - job_name: mariadb                    # mysqld_exporter on the DB host
+    static_configs: [ { targets: [ 'DB_HOST:9104' ] } ]
+  - job_name: coturn                     # coturn `prometheus` option (port 9641), reachable privately only
+    static_configs: [ { targets: [ 'TURN_HOST:9641' ] } ]
+  - job_name: hosts                      # node_exporter: CPU, NIC bandwidth, disk
+    static_configs: [ { targets: [ 'NODE_HOST_1:9100', 'NODE_HOST_2:9100' ] } ]

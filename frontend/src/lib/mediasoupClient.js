@@ -1,4 +1,5 @@
 import * as mediasoupClient from 'mediasoup-client';
+import api from './api';
 
 /**
  * Mediasoup Client Service
@@ -22,6 +23,7 @@ class MediasoupClientService {
     this.onLinkChange = null; // (state) => void, aggregated send+recv link health for the UI
     this._linkStates = { send: 'new', recv: 'new' };
     this._restarting = { send: false, recv: false };
+    this.iceServers = []; // STUN/TURN from /api/webrtc/ice-servers (time-limited TURN credentials)
   }
 
   /** Collapse the two transports into one link state (worst one wins). */
@@ -101,6 +103,10 @@ class MediasoupClientService {
       throw error;
     }
 
+    // STUN/TURN for restrictive networks. Failure is non-fatal: direct UDP/TCP to the SFU still works.
+    try { this.iceServers = (await api.get('/webrtc/ice-servers')).data?.iceServers || []; }
+    catch (e) { console.warn('ICE server lookup failed, continuing without TURN:', e.message); }
+
     // Get router RTP capabilities from server
     const { rtpCapabilities } = await this._socketRequest('mediasoup:getRouterRtpCapabilities', { roomId });
 
@@ -137,7 +143,7 @@ class MediasoupClientService {
     });
 
     this._inspectCandidates(transportParams.iceCandidates, 'send');
-    this.sendTransport = this.device.createSendTransport(transportParams);
+    this.sendTransport = this.device.createSendTransport({ ...transportParams, iceServers: this.iceServers });
 
     this.sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
       try {
@@ -181,7 +187,7 @@ class MediasoupClientService {
     });
 
     this._inspectCandidates(transportParams.iceCandidates, 'recv');
-    this.recvTransport = this.device.createRecvTransport(transportParams);
+    this.recvTransport = this.device.createRecvTransport({ ...transportParams, iceServers: this.iceServers });
 
     this.recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
       try {
@@ -319,13 +325,14 @@ class MediasoupClientService {
   /**
    * Consume media from another peer
    */
-  async consume(producerId) {
+  async consume(producerId, { priority } = {}) {
     await this._ensureRecvTransport();
 
     try {
       const { consumerParams } = await this._socketRequest('mediasoup:consume', {
         roomId: this.roomId,
         producerId,
+        priority,
         rtpCapabilities: this.device.rtpCapabilities,
       });
 
@@ -351,7 +358,7 @@ class MediasoupClientService {
       console.log('✅ Consumer created', consumer.id);
       return consumer;
     } catch (error) {
-      console.error('Error consuming:', error);
+      if (error.code !== 'SUBSCRIPTION_LIMIT') console.error('Error consuming:', error);
       throw error;
     }
   }
@@ -399,6 +406,17 @@ class MediasoupClientService {
   /**
    * Close consumer
    */
+  /** Tell the SFU to stop forwarding this stream (frees its CPU + egress). Errors are harmless (already gone). */
+  notifyConsumerClosed(consumerId) {
+    try { this.socket?.emit('mediasoup:closeConsumer', { consumerId }, () => {}); } catch { /* socket gone */ }
+    this.consumers.delete(consumerId);
+  }
+
+  /** Ask for a simulcast layer (0 = lowest). */
+  setConsumerLayers(consumerId, spatialLayer, temporalLayer = 2) {
+    return this._socketRequest('mediasoup:setConsumerLayers', { consumerId, spatialLayer, temporalLayer });
+  }
+
   closeConsumer(consumerId) {
     const consumer = this.consumers.get(consumerId);
     if (consumer) {
@@ -468,10 +486,13 @@ class MediasoupClientService {
   _socketRequest(event, data = {}) {
     return new Promise((resolve, reject) => {
       this.socket.emit(event, data, (response) => {
-        if (response.success) {
+        if (response?.success) {
           resolve(response);
         } else {
-          reject(new Error(response.error || 'Request failed'));
+          // Carry the server's structured hints: redirect (meeting lives on another node) / subscription code
+          const err = new Error(response?.error || (response?.redirect ? 'Meeting is on another node' : 'Request failed'));
+          err.redirect = response?.redirect; err.code = response?.code; err.reason = response?.reason;
+          reject(err);
         }
       });
     });

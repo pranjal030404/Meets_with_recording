@@ -96,6 +96,12 @@ export default function Meeting() {
   const producerMapRef = useRef(new Map()) // Map<producerId, { peerId, mediaType }>
   const mountedRef = useRef(false)
   const [socketVersion, setSocketVersion] = useState(0)
+  const socketEpoch = useMeetingStore(s => s.socketEpoch)
+  useEffect(() => {
+    // Failover replaced the socket: follow it so every listener below is re-bound to the live one
+    const live = getSocket()
+    if (socketEpoch > 0 && live && live !== socketRef.current) { socketRef.current = live; setSocketVersion(v => v + 1) }
+  }, [socketEpoch])
   const initCancelledRef = useRef(false)
 
   // Sharing can end without the toolbar button (browser's "Stop sharing" bar, shared window closed).
@@ -177,7 +183,16 @@ export default function Meeting() {
 
     const initialize = async () => {
       try {
-        let socket = initSocket(token)
+        // Multi-node: the meeting's state and media live on ONE node. Ask which, and connect there
+        // (empty url = same origin, i.e. single-node deployments behave exactly as before).
+        let nodeUrl = ''
+        try {
+          const { data: placement } = await api.get(`/meetings/${encodeURIComponent(roomId)}/placement`)
+          nodeUrl = placement?.url || ''
+        } catch (placementError) {
+          console.warn('Placement lookup failed, using default node:', placementError?.message)
+        }
+        let socket = initSocket(token, nodeUrl)
         socketRef.current = socket
 
         // The socket handshake and the REST join don't depend on each other: run them together
@@ -407,11 +422,20 @@ export default function Meeting() {
     // Remote producer closed
     socket.on('mediasoup:producerClosed', ({ producerId, socketId }) => {
       const info = producerMapRef.current.get(producerId)
+      useMeetingStore.getState().forgetProducer(producerId)
       if (info) {
         removeConsumer(producerId, info.peerId, info.mediaType)
         producerMapRef.current.delete(producerId)
       }
     })
+
+    // Selective subscription: the server announces the meeting's budget and who is speaking
+    socket.on('room:media-policy', (policy) => useMeetingStore.getState().setMediaPolicy(policy))
+    socket.on('media:active-speakers', ({ userIds }) => useMeetingStore.getState().setActiveSpeakers(userIds))
+
+    // Failover: worker crashed / meeting owned by another node
+    socket.on('media:reconnect-required', () => useMeetingStore.getState().recoverMedia('worker-died'))
+    socket.on('room:redirect', () => useMeetingStore.getState().recoverMedia('redirect'))
 
     // User joined
     socket.on('room:user-joined', ({ user: joinedUser, socketId }) => {
@@ -577,9 +601,11 @@ export default function Meeting() {
         try {
           text = await translateText(text, target)
         } catch (error) {
-          // Don't spam: say why once, then fall back to the original captions
-          toast.error(`${error.message}. Showing original captions.`, { id: 'translate-error' })
-          tools.setTranslateTo('')
+          // Only a missing engine turns translation off; a busy/failed single line just shows the original caption
+          if (error.code === 'TRANSLATION_UNAVAILABLE') {
+            toast.error(`${error.message}. Showing original captions.`, { id: 'translate-error' })
+            tools.setTranslateTo('')
+          }
         }
       }
       addCaption(userId, userName, text)
@@ -627,6 +653,7 @@ export default function Meeting() {
         'room:participants', 'room:user-joined', 'room:user-left',
         'mediasoup:existingProducers', 'mediasoup:newProducer', 'mediasoup:producerPaused',
         'mediasoup:producerResumed', 'mediasoup:producerClosed',
+        'room:media-policy', 'media:active-speakers', 'media:reconnect-required', 'room:redirect',
         'media:user-muted', 'media:user-video', 'media:screen-share',
         'host:force-mute', 'host:force-video-off', 'host:request-unmute',
         'host:removed', 'meeting:ended', 'host:spotlight', 'host:meeting-locked',

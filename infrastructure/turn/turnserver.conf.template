@@ -1,0 +1,52 @@
+# coturn (systemd service, no containers). Copy to /etc/turnserver.conf and replace every <PLACEHOLDER>.
+# The shared secret must equal TURN_SECRET in backend/.env. Never commit the real file.
+
+listening-port=3478
+tls-listening-port=5349          # or 443 if you need to traverse firewalls that only allow HTTPS (then nothing else may use 443 on this IP)
+listening-ip=<PRIVATE_IP>
+relay-ip=<PRIVATE_IP>
+external-ip=<PUBLIC_IP>/<PRIVATE_IP>   # required behind NAT (all cloud VMs)
+realm=<TURN_REALM e.g. turn.example.com>
+server-name=<TURN_REALM>
+
+# Time-limited credentials issued by GET /api/webrtc/ice-servers (HMAC REST scheme)
+use-auth-secret
+static-auth-secret=<TURN_SECRET>
+
+# TLS (certbot certificate for the TURN hostname)
+cert=/etc/letsencrypt/live/<TURN_HOST>/fullchain.pem
+pkey=/etc/letsencrypt/live/<TURN_HOST>/privkey.pem
+no-tlsv1
+no-tlsv1_1
+
+fingerprint
+no-multicast-peers
+stale-nonce=600
+
+# Relay port range = UDP ports that must be open in the firewall/security group
+min-port=50000
+max-port=59999
+
+# Abuse / resource limits (tune with load tests; these are conservative starting points, not measured values)
+total-quota=1000
+user-quota=12
+bps-capacity=0
+max-bps=0
+
+# SSRF/abuse protection: do not let relays reach private ranges
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+# If your SFU is on a private IP of the SAME network, allow exactly that address (allowed-peer-ip wins over denied):
+# allowed-peer-ip=<SFU_PRIVATE_IP>
+
+# Monitoring: Prometheus metrics on localhost only (scrape via node-local agent / SSH tunnel, never public)
+prometheus
+# metrics are served on 9641 by default; firewall it.
+no-cli
+log-file=/var/log/turnserver/turn.log
+simple-log

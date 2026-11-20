@@ -54,3 +54,27 @@ export const chatJSON = async ({ system, user, timeoutMs = 120_000 }) => {
   if (!res.ok) throw new Error(`Ollama ${res.status}`);
   return JSON.parse((await res.json()).message?.content || '{}');
 };
+
+/**
+ * Fast plain-text completion for short, latency-sensitive jobs (live-caption translation).
+ * Small context + capped output + keep_alive keeps the model resident, which is what makes a 3B model usable in real time.
+ */
+export const chatText = async ({ system, user, timeoutMs = 20_000, maxTokens = 256, numCtx = 1024 }) => {
+  const llm = await getLlm();
+  if (!llm) throw new Error('No LLM available');
+  const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
+    body: JSON.stringify({
+      model: llm.model, stream: false, keep_alive: process.env.OLLAMA_KEEP_ALIVE || '30m',
+      options: { temperature: 0, num_ctx: numCtx, num_predict: maxTokens },
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
+    })
+  });
+  if (!res.ok) throw new Error(`Ollama ${res.status}`);
+  return String((await res.json()).message?.content || '').trim();
+};
+
+/** Drop connection-state caches so a freshly started Ollama is noticed immediately. */
+export const resetLlmCache = () => { ollamaCache = { at: 0, model: null }; };

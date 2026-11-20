@@ -1,9 +1,20 @@
+import { useEffect, useState } from 'react'
 import { Languages } from 'lucide-react'
+import { translationStatus } from '../../lib/translate'
 import { LANGUAGES } from '../../lib/languages'
 import { selectClass } from './ui'
 
 export default function TranslationTool({ tools, captionsEnabled, onToggleCaptions }) {
   const { translateTo, setTranslateTo } = tools
+  const [status, setStatus] = useState(null)
+
+  // Tell the user up front if the translation engine isn't running, instead of failing caption by caption
+  useEffect(() => {
+    if (!translateTo) { setStatus(null); return }
+    let cancelled = false
+    translationStatus().then(s => { if (!cancelled) setStatus(s) })
+    return () => { cancelled = true }
+  }, [translateTo])
 
   const change = (value) => {
     setTranslateTo(value)
@@ -27,6 +38,12 @@ export default function TranslationTool({ tools, captionsEnabled, onToggleCaptio
           {LANGUAGES.map(l => <option key={l.label} value={l.label}>{l.label}</option>)}
         </select>
       </label>
+
+      {status && !status.available && (
+        <p className="text-xs rounded-xl bg-red-500/10 text-red-300 p-3">
+          Translation engine is not running. {status.hint}
+        </p>
+      )}
 
       <p className="text-xs text-gray-500">
         Captions are produced while live transcription is on. Ask the host to start <span className="text-gray-300">Transcribe</span> if nothing appears.

@@ -27,7 +27,7 @@ const ANNOUNCED_IP = detectAnnouncedIp();
 export const mediasoupConfig = {
   // Number of workers (typically number of CPU cores)
   numWorkers: Math.min(
-    parseInt(process.env.MEDIASOUP_NUM_WORKERS) || Object.keys(os.cpus()).length,
+    parseInt(process.env.MEDIASOUP_NUM_WORKERS) || (os.availableParallelism?.() ?? os.cpus().length), // in containers set MEDIASOUP_NUM_WORKERS to the CPU limit (availableParallelism ignores CFS quotas)
     8 // Cap at 8 workers per process to avoid port exhaustion
   ),
 
