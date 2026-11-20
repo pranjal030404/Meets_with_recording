@@ -75,6 +75,13 @@ let io;
 // APP SETUP
 // =============================================
 const app = express();
+// Behind nginx/Apache/a cloud balancer: trust X-Forwarded-* so req.ip, secure cookies and logs see the real client.
+// TRUST_PROXY=1 (one hop, default in production), a number of hops, or 'false' to disable.
+if (process.env.TRUST_PROXY !== 'false') {
+  const hops = parseInt(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isFinite(hops) ? hops : (process.env.NODE_ENV === 'production' ? 1 : false));
+}
+
 const httpServer = createServer(app);
 
 io = new Server(httpServer, {
@@ -158,6 +165,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/ai', aiRoutes);
 
 app.get('/api/health', (req, res) => {
+  if (shuttingDown) return res.status(503).json({ status: 'draining' });
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -211,6 +219,19 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
+// Graceful shutdown: stop taking new connections and let the balancer drain this node (pm2 reload / deploys)
+let shuttingDown = false;
+const shutdown = (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received: draining connections...`);
+  io?.close();
+  httpServer.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 10000).unref();
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 startServer();
 

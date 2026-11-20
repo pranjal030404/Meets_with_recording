@@ -34,8 +34,11 @@ export const useTaskStore = create((set, get) => ({
   fetchTeams: async () => {
     try {
       const res = await api.get('/teams');
-      set({ teams: res.data.data.teams || res.data.data });
-    } catch { /* non-fatal */ }
+      // /teams returns a bare array; tolerate the wrapped shapes too
+      const body = res.data;
+      const list = Array.isArray(body) ? body : (body?.data?.teams || body?.teams || body?.data || []);
+      set({ teams: Array.isArray(list) ? list : [] });
+    } catch (e) { console.warn('Could not load teams for tasks:', e.message); }
   },
 
   createTask: async (payload) => {

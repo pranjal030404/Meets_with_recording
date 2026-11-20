@@ -48,3 +48,25 @@ git pull
 (cd backend && npm i && pm2 restart meetclone-backend)
 (cd frontend && npm i && npm run build && pm2 restart meetclone-frontend)
 ```
+
+## Load balancer / nginx (alternative to Apache)
+`deploy/nginx/meet.arthvex.co.in.conf` is a ready config: HTTPS, HTTP->HTTPS, WebSocket upgrade for
+Socket.IO, sticky routing (`ip_hash`), `/healthz` probe and upload size limits.
+```bash
+sudo cp deploy/nginx/meet.arthvex.co.in.conf /etc/nginx/sites-available/
+sudo ln -s ../sites-available/meet.arthvex.co.in.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+Set `TRUST_PROXY=1` in `backend/.env` (default in production) so the app sees real client IPs
+(rate limiting is per IP). Use ONE of Apache or nginx on 80/443, not both.
+
+`GET /api/health` returns 200 normally and **503 while the node is draining** (pm2 reload / SIGTERM),
+so a balancer stops sending new users to it. Media (UDP/TCP 40000-49999) bypasses the balancer.
+
+### Scaling out (more than one backend node)
+Do NOT just add nodes: mediasoup rooms live in one process's memory, so everyone in a meeting must
+land on the node that owns it. Before adding a second `server` line in the upstream:
+1. Run Redis and set `REDIS_URL` on every node (Socket.IO then relays events between nodes).
+2. Give each node its own `MEDIASOUP_ANNOUNCED_IP` and open its media port range.
+3. Route a room to one node (e.g. hash on the room id) rather than by client IP.
+Until then, keep a single backend and scale by raising `MEDIASOUP_NUM_WORKERS` (uses more CPU cores).
