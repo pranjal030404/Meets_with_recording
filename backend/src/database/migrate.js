@@ -15,6 +15,21 @@ async function runMigrations() {
 
     const queryInterface = sequelize.getQueryInterface();
 
+    // Make re-runs safe: createTable is IF NOT EXISTS, so on an existing DB
+    // addIndex would fail with ER_DUP_KEYNAME. Treat that as already-applied.
+    const origAddIndex = queryInterface.addIndex.bind(queryInterface);
+    queryInterface.addIndex = async (...args) => {
+      try {
+        return await origAddIndex(...args);
+      } catch (err) {
+        if (err?.original?.code === 'ER_DUP_KEYNAME') {
+          console.log(`  index already exists, skipping (${err.original.sqlMessage})`);
+          return;
+        }
+        throw err;
+      }
+    };
+
     // Optional: `node src/database/migrate.js 012` runs only migrations >= 012
     const from = process.argv[2] || '';
     const migrationFiles = readdirSync(migrationsDir)
