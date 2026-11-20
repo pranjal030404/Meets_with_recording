@@ -8,6 +8,7 @@ import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import { protect } from '../middleware/auth.js';
 import logAudit from '../services/auditService.js';
+import { isSmtpConfigured, sendTaskAssignedEmail } from '../services/mailService.js';
 import { requirePermission } from '../lib/permissions.js';
 import { Sequelize } from 'sequelize';
 
@@ -48,6 +49,29 @@ const notifyAssignee = async (task, actor, isNew) => {
     data: { taskId: task.id, teamId: task.teamId, link: '/tasks' },
     priority: task.priority === 'urgent' ? 'urgent' : task.priority === 'high' ? 'high' : 'normal'
   });
+
+  // Email the assignee. Fire-and-forget: a mail problem must never fail or slow the task request.
+  if (isSmtpConfigured()) {
+    (async () => {
+      try {
+        const [assignee, team] = await Promise.all([
+          User.findByPk(task.assigneeId, { attributes: ['id', 'name', 'email'] }),
+          task.teamId ? Team.findByPk(task.teamId, { attributes: ['id', 'name'] }) : null
+        ]);
+        if (!assignee?.email) return;
+        await sendTaskAssignedEmail({
+          to: assignee.email,
+          assigneeName: assignee.name,
+          assignerName: actor.name,
+          task,
+          teamName: team?.name,
+          isNew
+        });
+      } catch (err) {
+        console.error('Task assignment email failed:', err.message);
+      }
+    })();
+  }
 };
 
 // List tasks
@@ -204,7 +228,7 @@ router.put('/:taskId', protect, async (req, res) => {
     await task.save();
 
     if (task.assigneeId && task.assigneeId !== prevAssignee) {
-      await notifyAssignee(task, req.user, true);
+      await notifyAssignee(task, req.user, false);
     }
 
     logAudit({ actor: req.user, action: 'task.update', entityType: 'Task', entityId: task.id, metadata: { status: task.status, priority: task.priority }, req });

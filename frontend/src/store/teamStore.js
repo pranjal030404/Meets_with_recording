@@ -222,12 +222,8 @@ const useTeamStore = create((set, get) => ({
       const message = response.data.data.message;
       const key = `${teamId}-${channelType}`;
       
-      set(state => ({
-        teamMessages: {
-          ...state.teamMessages,
-          [key]: [...(state.teamMessages[key] || []), message]
-        }
-      }));
+      // The socket broadcast can arrive before or after this response: add it only once
+      get().addTeamMessage(teamId, channelType, message);
       return message;
     } catch (error) {
       throw error;
@@ -237,12 +233,12 @@ const useTeamStore = create((set, get) => ({
   // Add message to store (from socket)
   addTeamMessage: (teamId, channelType, message) => {
     const key = `${teamId}-${channelType}`;
-    set(state => ({
-      teamMessages: {
-        ...state.teamMessages,
-        [key]: [...(state.teamMessages[key] || []), message]
-      }
-    }));
+    const idOf = (m) => m?._id || m?.id;
+    set(state => {
+      const list = state.teamMessages[key] || [];
+      if (idOf(message) && list.some(m => idOf(m) === idOf(message))) return state;
+      return { teamMessages: { ...state.teamMessages, [key]: [...list, message] } };
+    });
   },
 
   // Regenerate invite code
