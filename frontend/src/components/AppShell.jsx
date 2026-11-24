@@ -186,7 +186,7 @@ export default function AppShell({ children, wide = false }) {
       {/* User + status */}
       <div className="p-3 border-t border-white/[0.06] relative" ref={statusRef}>
         {statusOpen && (
-          <div className="absolute bottom-full left-3 right-3 mb-2 glass-strong rounded-2xl border border-white/10 shadow-float z-50 animate-fade-in">
+          <div className="absolute bottom-full left-3 right-3 mb-2 lg:bottom-3 lg:left-full lg:right-auto lg:mb-0 lg:ml-3 lg:w-80 glass-strong rounded-2xl border border-white/10 shadow-float z-50 animate-fade-in">
             {/* who am I + edit profile */}
             <div className="flex items-center gap-3 p-3 border-b border-white/[0.06]">
               <Avatar user={user} size="md" />
