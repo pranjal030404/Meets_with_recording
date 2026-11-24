@@ -166,14 +166,10 @@ const Calendar = () => {
         {/* Header */}
         <div className="flex flex-wrap justify-between items-end gap-6 mb-10 animate-fade-in-up">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-400/25 bg-primary-500/10 px-3.5 py-1.5 text-xs font-semibold text-primary-200 mb-4">
-              <Sparkles className="h-3.5 w-3.5" />
-              Never miss a meeting
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-bold font-display tracking-tight">
-              Meeting <span className="gradient-text">Calendar</span>
+<h1 className="text-3xl sm:text-4xl font-bold font-display tracking-tight">
+              Calendar
             </h1>
-            <p className="text-gray-400 mt-2">Schedule and manage meetings</p>
+            <p className="text-gray-400 mt-2">Meetings and task deadlines</p>
           </div>
           <button onClick={() => setShowScheduleModal(true)} className="btn btn-primary">
             <Plus className="w-5 h-5" />

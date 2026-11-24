@@ -224,7 +224,7 @@ function ParticipantItem({ participant, isCurrentUser, isHost, isCoHost, canCont
 
       {/* Hand raise indicator */}
       {isHandRaised && (
-        <span className="text-lg animate-bounce" title="Hand raised">✋</span>
+        <span className="text-lg" title="Hand raised">✋</span>
       )}
 
       {/* Status indicators */}

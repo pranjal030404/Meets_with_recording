@@ -148,16 +148,16 @@ export default function AppShell({ children, wide = false }) {
       <div className="px-4 pb-3">
         <button
           onClick={() => { navigate('/search'); setSidebarOpen(false) }}
-          className="w-full flex items-center gap-2.5 rounded-xl bg-dark-300/60 border border-white/[0.06] px-3.5 py-2.5 text-sm text-gray-400 hover:border-primary-500/40 hover:text-gray-200 transition-all"
+          className="w-full flex items-center gap-2.5 rounded-lg bg-dark-300 border border-white/[0.08] px-3 py-2 text-sm text-gray-400 hover:border-white/20 hover:text-gray-200 transition-colors"
         >
           <Search className="w-4 h-4" />
-          Search everything
+          Search
           <span className="ml-auto text-[10px] font-mono text-gray-600">/</span>
         </button>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-3 space-y-1">
+      <nav className="flex-1 overflow-y-auto px-3 space-y-0.5">
         {NAV_ITEMS.map(item => {
           const active = isActive(item)
           return (
@@ -165,13 +165,13 @@ export default function AppShell({ children, wide = false }) {
               key={item.to}
               to={item.to}
               onClick={() => setSidebarOpen(false)}
-              className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative ${
+              className={`flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors duration-150 group relative ${
                 active
-                  ? 'bg-primary-500/15 text-primary-200 border border-primary-500/30'
+                  ? 'bg-white/[0.08] text-white border border-white/10'
                   : 'text-gray-400 hover:text-gray-100 hover:bg-white/[0.04] border border-transparent'
               }`}
             >
-              <item.icon className={`w-[18px] h-[18px] ${active ? 'text-primary-300' : 'text-gray-500 group-hover:text-gray-300'}`} />
+              <item.icon className={`w-[18px] h-[18px] ${active ? 'text-gray-100' : 'text-gray-500 group-hover:text-gray-300'}`} />
               {item.label}
               {item.badge === 'unread' && totalUnread > 0 && (
                 <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center">

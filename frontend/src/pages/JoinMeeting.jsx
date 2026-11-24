@@ -311,7 +311,7 @@ export default function JoinMeeting() {
               {/* Mute on entry notice */}
               {meeting?.settings?.muteOnEntry && (
                 <div className="absolute top-4 left-4 glass-strong bg-yellow-500/20 border-yellow-400/30 px-3 py-1.5 rounded-xl text-xs font-medium text-yellow-200 animate-slide-down">
-                  🔇 You'll be muted when you join
+                  You'll be muted when you join
                 </div>
               )}
             </div>
@@ -415,13 +415,8 @@ export default function JoinMeeting() {
 
           {/* Join Form */}
           <div className="flex flex-col justify-center animate-fade-in-up stagger-2">
-            <div className="inline-flex items-center gap-2 self-start rounded-full border border-primary-400/25 bg-primary-500/10 px-3.5 py-1.5 text-xs font-semibold text-primary-200 mb-5">
-              <Sparkles className="h-3.5 w-3.5" />
-              Pre-join check
-            </div>
-
-            <h1 className="text-3xl sm:text-4xl font-bold font-display tracking-tight mb-3">
-              Ready to <span className="gradient-text">join?</span>
+<h1 className="text-3xl sm:text-4xl font-bold font-display tracking-tight mb-3">
+              Ready to join?
             </h1>
             <p className="text-gray-400 mb-8">
               {meeting
@@ -477,7 +472,7 @@ export default function JoinMeeting() {
                     {meeting.status === 'active' ? 'Meeting in progress' : 'Ready to start'}
                   </div>
                   {meeting.settings?.muteOnEntry && (
-                    <p className="text-xs text-yellow-400/90 mt-2.5 bg-yellow-500/10 border border-yellow-400/20 rounded-lg px-3 py-1.5 inline-block">🔇 Participants are muted on entry</p>
+                    <p className="text-xs text-yellow-400/90 mt-2.5 bg-yellow-500/10 border border-yellow-400/20 rounded-lg px-3 py-1.5 inline-block">Participants are muted on entry</p>
                   )}
                 </div>
 

@@ -96,14 +96,9 @@ export default function Signup() {
         <div className="grid w-full gap-8 lg:grid-cols-[1fr_1.1fr]">
           {/* Brand panel */}
           <section className="hidden lg:flex flex-col justify-center animate-fade-in-up stagger-1">
-            <div className="inline-flex items-center gap-2 self-start rounded-full border border-primary-400/30 bg-primary-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary-200 animate-fade-in stagger-2">
-              <Sparkles className="h-4 w-4" />
-              Join {branding.appName}
-            </div>
-
-            <h1 className="mt-6 text-4xl font-bold leading-tight text-white font-display animate-fade-in-up stagger-2 xl:text-5xl">
+<h1 className="mt-6 text-4xl font-bold leading-tight text-white font-display animate-fade-in-up stagger-2 xl:text-5xl">
               Create your account and{' '}
-              <span className="gradient-text">start meeting in seconds</span>
+              start meeting in seconds
             </h1>
 
             <p className="mt-5 max-w-md text-sm leading-relaxed text-slate-300/90 sm:text-base animate-fade-in-up stagger-3">

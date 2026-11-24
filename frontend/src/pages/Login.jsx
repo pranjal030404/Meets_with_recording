@@ -60,16 +60,9 @@ export default function Login() {
           <section className="animate-fade-in-up stagger-1 rounded-3xl border border-white/10 bg-gradient-to-br from-dark-200/90 via-dark-200/60 to-dark-300/60 p-8 shadow-2xl shadow-black/50 backdrop-blur-xl lg:p-10 relative overflow-hidden">
             <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-primary-500/10 blur-3xl" />
 
-            <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-primary-400/30 bg-primary-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary-200 animate-fade-in stagger-2">
-              <Sparkles className="h-4 w-4" />
-              Real-Time Collaboration Hub
-            </div>
-
-            <h1 className="text-4xl font-bold leading-tight text-white font-display animate-fade-in-up stagger-2 sm:text-5xl">
+<h1 className="text-4xl font-bold leading-tight text-white font-display animate-fade-in-up stagger-2 sm:text-5xl">
               {branding.appName}
-              <span className="block mt-2 gradient-text">
-                Built for focused conversations
-              </span>
+              <span className="block mt-2 text-primary-300">Built for focused conversations</span>
             </h1>
 
             <p className="mt-5 max-w-xl text-sm leading-relaxed text-slate-300/90 sm:text-base animate-fade-in-up stagger-3">

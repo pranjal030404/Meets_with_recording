@@ -84,12 +84,8 @@ export default function Pricing() {
 
       {/* Hero */}
       <section className="relative max-w-3xl mx-auto px-4 sm:px-6 pt-16 pb-10 text-center">
-        <div className="inline-flex items-center gap-2 rounded-full border border-primary-400/25 bg-primary-500/10 px-4 py-1.5 text-xs font-semibold text-primary-200 mb-6 animate-fade-in">
-          <Sparkles className="h-4 w-4" />
-          Pricing
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-bold font-display leading-tight animate-fade-in-up">
-          Plans that scale with <span className="gradient-text">your meetings</span>
+<h1 className="text-4xl sm:text-5xl font-bold font-display leading-tight animate-fade-in-up">
+          Plans that scale with your meetings
         </h1>
         <p className="text-gray-400 mt-5 max-w-xl mx-auto animate-fade-in-up stagger-1">
           Start free, upgrade when you need recording, transcription, and bigger rooms.
