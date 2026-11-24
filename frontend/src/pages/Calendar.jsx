@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Clock, Users, Video, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Clock, Users, Video, Sparkles, CheckSquare } from 'lucide-react';
+import api from '../lib/api';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useMeetingStore } from '../store/meetingStore';
@@ -16,6 +17,7 @@ const Calendar = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState('month'); // month, week, day
   const [meetings, setMeetings] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
@@ -35,7 +37,15 @@ const Calendar = () => {
   useEffect(() => {
     fetchTeams();
     fetchMeetings();
+    api.get('/tasks', { params: { scope: 'mine' } })
+      .then(res => setTasks((res.data?.data?.tasks || []).filter(t => t.dueDate)))
+      .catch(() => {});
   }, []);
+
+  const getTasksForDate = (date) => {
+    if (!date) return [];
+    return tasks.filter(t => new Date(t.dueDate).toDateString() === date.toDateString());
+  };
 
   const fetchMeetings = async () => {
     setLoading(true);
@@ -198,6 +208,7 @@ const Calendar = () => {
             {/* Calendar days */}
             {days.map((day, index) => {
               const dayMeetings = day ? getMeetingsForDate(day) : [];
+              const dayTasks = day ? getTasksForDate(day) : [];
               const isToday = day && day.toDateString() === new Date().toDateString();
               const isPast = day && day < new Date(new Date().setHours(0, 0, 0, 0));
 
@@ -221,9 +232,10 @@ const Calendar = () => {
                       } ${!isToday ? 'group-hover:text-white' : ''}`}>
                         {day.getDate()}
                       </div>
-                      {dayMeetings.length > 0 && (
+                      {(dayMeetings.length + dayTasks.length) > 0 && (
                         <div className="sm:hidden flex justify-center gap-0.5 mt-0.5">
                           {dayMeetings.slice(0, 3).map(m => <span key={m._id} className="w-1.5 h-1.5 rounded-full bg-primary-400" />)}
+                          {dayTasks.slice(0, 3).map(t => <span key={t.id} className="w-1.5 h-1.5 rounded-full bg-amber-400" />)}
                         </div>
                       )}
                       <div className="hidden sm:block space-y-1">
@@ -247,6 +259,21 @@ const Calendar = () => {
                                 minute: '2-digit'
                               })}
                             </div>
+                          </div>
+                        ))}
+                        {dayTasks.slice(0, 2).map(task => (
+                          <div
+                            key={task.id}
+                            onClick={(e) => { e.stopPropagation(); navigate('/tasks'); }}
+                            className={`text-xs border px-2 py-1 rounded-lg truncate flex items-center gap-1 transition-all duration-200 hover:scale-[1.03] ${
+                              task.status === 'done'
+                                ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-200 line-through'
+                                : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                            }`}
+                            title={`Task: ${task.title}`}
+                          >
+                            <CheckSquare className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{task.title}</span>
                           </div>
                         ))}
                         {dayMeetings.length > 2 && (
