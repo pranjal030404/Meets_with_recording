@@ -42,6 +42,17 @@ const Calendar = () => {
       .catch(() => {});
   }, []);
 
+  const isTaskOverdue = (t) => t.status !== 'done' && new Date(t.dueDate) < new Date(new Date().setHours(0, 0, 0, 0));
+
+  // color follows progress: todo = slate, in progress = amber, done = green, overdue = red
+  const taskChip = (t) => {
+    if (t.status === 'done') return 'bg-emerald-500/10 border-emerald-500/25 text-emerald-200 line-through';
+    if (isTaskOverdue(t)) return 'bg-red-500/15 border-red-500/40 text-red-300';
+    if (t.status === 'in_progress') return 'bg-amber-500/10 border-amber-500/30 text-amber-200';
+    return 'bg-slate-500/15 border-slate-400/30 text-slate-200';
+  };
+  const taskDot = (t) => t.status === 'done' ? 'bg-emerald-400' : isTaskOverdue(t) ? 'bg-red-400' : t.status === 'in_progress' ? 'bg-amber-400' : 'bg-slate-400';
+
   const getTasksForDate = (date) => {
     if (!date) return [];
     return tasks.filter(t => new Date(t.dueDate).toDateString() === date.toDateString());
@@ -235,7 +246,7 @@ const Calendar = () => {
                       {(dayMeetings.length + dayTasks.length) > 0 && (
                         <div className="sm:hidden flex justify-center gap-0.5 mt-0.5">
                           {dayMeetings.slice(0, 3).map(m => <span key={m._id} className="w-1.5 h-1.5 rounded-full bg-primary-400" />)}
-                          {dayTasks.slice(0, 3).map(t => <span key={t.id} className="w-1.5 h-1.5 rounded-full bg-amber-400" />)}
+                          {dayTasks.slice(0, 3).map(t => <span key={t.id} className={`w-1.5 h-1.5 rounded-full ${taskDot(t)}`} />)}
                         </div>
                       )}
                       <div className="hidden sm:block space-y-1">
@@ -265,11 +276,7 @@ const Calendar = () => {
                           <div
                             key={task.id}
                             onClick={(e) => { e.stopPropagation(); navigate('/tasks'); }}
-                            className={`text-xs border px-2 py-1 rounded-lg truncate flex items-center gap-1 transition-all duration-200 hover:scale-[1.03] ${
-                              task.status === 'done'
-                                ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-200 line-through'
-                                : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
-                            }`}
+                            className={`text-xs border px-2 py-1 rounded-lg truncate flex items-center gap-1 transition-all duration-200 hover:scale-[1.03] ${taskChip(task)}`}
                             title={`Task: ${task.title}`}
                           >
                             <CheckSquare className="w-3 h-3 shrink-0" />
