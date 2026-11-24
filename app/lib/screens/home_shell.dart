@@ -9,6 +9,7 @@ import 'notifications_screen.dart';
 import 'search_screen.dart';
 import 'tasks_screen.dart';
 import 'teams_screen.dart';
+import '../widgets/common.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -57,7 +58,7 @@ class _HomeShellState extends State<HomeShell> {
     ];
     return Scaffold(
       appBar: AppBar(
-        title: Text(_titles[_tab], style: const TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(_titles[_tab]),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
@@ -79,7 +80,7 @@ class _HomeShellState extends State<HomeShell> {
               builder: (_, __) => InkWell(
                 customBorder: const CircleBorder(),
                 onTap: () => setState(() => _tab = 4),
-                child: CircleAvatar(radius: 16, child: Text(Session.instance.name.isEmpty ? '?' : Session.instance.name[0].toUpperCase())),
+                child: UserAvatar(name: Session.instance.name, radius: 16),
               ),
             ),
           ),

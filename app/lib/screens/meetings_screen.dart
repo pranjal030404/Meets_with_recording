@@ -157,7 +157,7 @@ class MeetingCard extends StatelessWidget {
             Container(
               width: 46,
               height: 46,
-              decoration: BoxDecoration(color: live ? Colors.green.withOpacity(.15) : cs.primaryContainer, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(color: live ? const Color(0xFF34D399).withOpacity(.15) : cs.primaryContainer, borderRadius: BorderRadius.circular(12)),
               child: Icon(live ? Icons.sensors : Icons.videocam, color: live ? Colors.green : cs.onPrimaryContainer),
             ),
             const SizedBox(width: 12),

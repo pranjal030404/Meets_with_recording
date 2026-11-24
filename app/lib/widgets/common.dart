@@ -11,6 +11,7 @@ void toast(BuildContext context, String msg, {bool error = false}) {
     content: Text(msg),
     behavior: SnackBarBehavior.floating,
     backgroundColor: error ? Theme.of(context).colorScheme.error : null,
+    showCloseIcon: false,
   ));
 }
 
@@ -216,7 +217,7 @@ class SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(4, 16, 4, 6),
-        child: Text(text, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w700)),
+        child: Text(text, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.outline, fontWeight: FontWeight.w600)),
       );
 }
 

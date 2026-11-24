@@ -4,7 +4,7 @@ import '../widgets/common.dart';
 
 const _statuses = ['todo', 'in_progress', 'done'];
 const _statusLabel = {'todo': 'To do', 'in_progress': 'In progress', 'done': 'Done'};
-const _priorityColor = {'low': Colors.blueGrey, 'medium': Colors.blue, 'high': Colors.orange, 'urgent': Colors.red};
+const _priorityColor = {'low': Color(0xFF94A3B8), 'medium': Color(0xFF60A5FA), 'high': Color(0xFFF59E0B), 'urgent': Color(0xFFF87171)};
 
 /// Task board: personal tasks (scope "mine"/"assigned") or a team's shared board.
 class TasksScreen extends StatelessWidget {
