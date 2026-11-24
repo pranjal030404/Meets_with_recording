@@ -1,6 +1,6 @@
-# MeetClone mobile (Flutter)
+# Minutes mobile (Flutter)
 
-Android + iOS client for the MeetClone backend in `../backend`. It talks to the same REST API and
+Android + iOS client for the Minutes backend in `../backend`. It talks to the same REST API and
 Socket.IO / mediasoup SFU as the web app, so accounts, meetings, chats and files are shared.
 
 ## Features

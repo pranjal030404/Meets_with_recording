@@ -1,4 +1,4 @@
-# MeetClone — Enterprise-Grade Video Collaboration Platform
+# Minutes — Enterprise-Grade Video Collaboration Platform
 
 > A Google Meet + Microsoft Teams-inspired video conferencing and team collaboration platform built for organizations that want full control over their communication infrastructure. Self-hosted, scalable, and feature-complete.
 
@@ -38,9 +38,9 @@ Modern organizations rely on video communication, but the dominant solutions —
 
 ### Our Solution
 
-**MeetClone** is a full-stack, self-hosted video collaboration platform that delivers feature parity with Google Meet and Microsoft Teams while giving organizations complete ownership of their data and infrastructure.
+**Minutes** is a full-stack, self-hosted video collaboration platform that delivers feature parity with Google Meet and Microsoft Teams while giving organizations complete ownership of their data and infrastructure.
 
-With MeetClone, you get:
+With Minutes, you get:
 
 - **HD video conferencing** with up to 49 simultaneous participant tiles
 - **SFU-based media routing** (mediasoup) for scalable, low-latency multi-party video
@@ -222,7 +222,7 @@ With MeetClone, you get:
 | **MCU** (Multipoint Control Unit) | Single composited stream to each client | High CPU, introduces latency, complex |
 | **SFU** (mediasoup) | Server forwards only selected streams — each client uploads 1 stream, downloads N-1. Scales to 50+. Low latency. | Requires server bandwidth (linear with participants) |
 
-MeetClone uses **mediasoup SFU** with:
+Minutes uses **mediasoup SFU** with:
 - **Simulcast**: 3 adaptive quality layers per video stream (low/medium/high)
 - **Forwarding**: Each participant receives only the streams they need (active speakers + pinned)
 - **Round-robin workers**: Distributes meeting routers across available CPU cores
@@ -398,8 +398,8 @@ A mid-sized EdTech company running online coding bootcamps with 500+ active stud
 - Needed breakout rooms for group exercises, polls for quizzes, and recording for review
 - Instructors needed host controls to mute disruptive students and manage waiting rooms
 
-**Solution with MeetClone:**
-Deployed MeetClone on private cloud infrastructure in two regions (EU and APAC). MySQL database handles student/classroom data, mediasoup workers route media within each region.
+**Solution with Minutes:**
+Deployed Minutes on private cloud infrastructure in two regions (EU and APAC). MySQL database handles student/classroom data, mediasoup workers route media within each region.
 
 **Results:**
 - **85% cost reduction** — eliminated per-seat licensing ($24K → $3.5K infrastructure)
@@ -423,7 +423,7 @@ A 200-attorney law firm handling high-value litigation with strict client confid
 - Needed document sharing, recording for case files, and transcript generation for discovery
 - Multiple practice groups needed isolated team workspaces
 
-**Solution with MeetClone:**
+**Solution with Minutes:**
 Deployed on-premise behind the firm's firewall with:
 - JWT authentication integrated with existing Active Directory
 - All media encrypted end-to-end within the firm's network
@@ -437,7 +437,7 @@ Deployed on-premise behind the firm's firewall with:
 - **Discovery preparation time reduced by 60%** — transcripts were searchable and timestamped
 - **$0 licensing fees** vs. $40K/year for comparable enterprise Teams plan
 
-**Key Takeaway:** Complete data sovereignty was the non-negotiable requirement, and MeetClone delivered it without sacrificing features.
+**Key Takeaway:** Complete data sovereignty was the non-negotiable requirement, and Minutes delivered it without sacrificing features.
 
 ---
 
@@ -453,8 +453,8 @@ A 120-person fully remote startup with teams spread across 15 countries.
 - Real-time collaboration on whiteboarding during design sprints
 - Wanted to reduce tool sprawl (Zoom + Slack + Miro + Google Calendar = 4 tools)
 
-**Solution with MeetClone:**
-Unified all communication into MeetClone:
+**Solution with Minutes:**
+Unified all communication into Minutes:
 - All-hands meetings using the 49-tile grid with active speaker focus
 - Team channels (Engineering, Design, Product, Marketing) for daily chat
 - Calendar view for sprint planning and standup scheduling
@@ -484,7 +484,7 @@ A regional healthcare network with 3 hospitals and 15 outpatient clinics serving
 - Recording and transcription for medical records
 - Integration with existing scheduling systems
 
-**Solution with MeetClone:**
+**Solution with Minutes:**
 Deployed on HIPAA-compliant cloud infrastructure with:
 - Waiting room for patient admission control
 - Recorded consultations with AI transcription for EHR integration
@@ -499,7 +499,7 @@ Deployed on HIPAA-compliant cloud infrastructure with:
 - **Automated transcription** saved clinicians 20 minutes per day on documentation
 - **Patient satisfaction score of 4.8/5** — waiting room and ease of use were top-rated
 
-**Key Takeaway:** MeetClone's waiting room, recording, and role-based access made it a natural fit for healthcare without the premium pricing of specialized telemedicine platforms.
+**Key Takeaway:** Minutes's waiting room, recording, and role-based access made it a natural fit for healthcare without the premium pricing of specialized telemedicine platforms.
 
 ---
 
@@ -515,7 +515,7 @@ An international non-profit with 300 staff and 1,000+ volunteers across 30 count
 - Budget constraints made per-seat licensing impossible
 - Many volunteers had limited technical literacy — needed simple UI
 
-**Solution with MeetClone:**
+**Solution with Minutes:**
 Deployed on a single $40/month VPS server:
 - Unlimited meeting duration — no 40-minute cutoff
 - Scheduling system for recurring volunteer training sessions
@@ -530,7 +530,7 @@ Deployed on a single $40/month VPS server:
 - **One-click join** reduced support tickets by 90% compared to previous Zoom setup
 - **Scaled from 50 to 1,300 users** without any infrastructure changes
 
-**Key Takeaway:** MeetClone's efficiency on modest infrastructure made enterprise-grade video collaboration accessible to a budget-constrained non-profit.
+**Key Takeaway:** Minutes's efficiency on modest infrastructure made enterprise-grade video collaboration accessible to a budget-constrained non-profit.
 
 ---
 
@@ -803,7 +803,7 @@ REDIS_URL=redis://localhost:6379
 ```nginx
 server {
     listen 443 ssl;
-    server_name meetclone.yourdomain.com;
+    server_name minutes.yourdomain.com;
 
     ssl_certificate /etc/ssl/certs/yourdomain.crt;
     ssl_certificate_key /etc/ssl/private/yourdomain.key;
@@ -897,11 +897,11 @@ Server bandwidth (simplified): N × 1.5 Mbps × 2 (upload + download aggregate)
 
 ## Pitch Summary
 
-### Why MeetClone?
+### Why Minutes?
 
-For organizations that have outgrown free tiers but don't want to pay per-seat licensing for enterprise plans, MeetClone offers a compelling alternative:
+For organizations that have outgrown free tiers but don't want to pay per-seat licensing for enterprise plans, Minutes offers a compelling alternative:
 
-| Factor | Google Meet / Teams | MeetClone |
+| Factor | Google Meet / Teams | Minutes |
 |--------|-------------------|-----------|
 | **Pricing** | $6–$30/user/month | No per-seat fees |
 | **100 users** | $6,000–$30,000/year | Infrastructure only (~$2,000–$12,000/year) |
@@ -918,7 +918,7 @@ Google Workspace Enterprise:    200 × $20/user/month × 12 = $48,000/year
 Microsoft Teams E3:             200 × $23/user/month × 12 = $55,200/year
 Zoom Business:                  200 × $19/user/month × 12 = $45,600/year
 
-MeetClone (self-hosted):
+Minutes (self-hosted):
   Server (8 CPU, 16 GB, 250 Mbps):  $300/month × 12 = $3,600/year
   Maintenance (20% of server):                        $720/year
   Total:                                              $4,320/year
@@ -930,7 +930,7 @@ Annual Savings vs. Zoom Business:       $41,280 (90%)
 
 *Infrastructure costs vary by provider and region. Estimates based on typical cloud VPS pricing.*
 
-### When to Choose MeetClone
+### When to Choose Minutes
 
 - You need **data sovereignty** and cannot use third-party services
 - You have **100+ users** and per-seat licensing is a significant cost
@@ -952,6 +952,6 @@ MIT — free to use, modify, and distribute.
 
 ---
 
-*MeetClone was built with React 18, Node.js/Express, mediasoup SFU, Socket.IO, MySQL (Sequelize), and Tailwind CSS.*
+*Minutes was built with React 18, Node.js/Express, mediasoup SFU, Socket.IO, MySQL (Sequelize), and Tailwind CSS.*
 
 *For questions, deployment assistance, or custom development, please reach out.*

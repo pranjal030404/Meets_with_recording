@@ -11,7 +11,7 @@ Future<void> showServerDialog(BuildContext context) async {
     builder: (ctx) => AlertDialog(
       title: const Text('Server address'),
       content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Address of your MeetClone backend (without /api).'),
+        const Text('Address of your Minutes backend (without /api).'),
         const SizedBox(height: 12),
         TextField(
           controller: c,

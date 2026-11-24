@@ -47,7 +47,7 @@ class MoreScreen extends StatelessWidget {
             },
           ),
           const SizedBox(height: 24),
-          Center(child: Text('MeetClone mobile 1.0.0', style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12))),
+          Center(child: Text('Minutes mobile 1.0.0', style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12))),
         ]);
       },
     );

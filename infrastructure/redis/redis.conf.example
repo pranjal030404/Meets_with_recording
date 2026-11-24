@@ -1,4 +1,4 @@
-# Redis guidance for MeetClone (standalone primary + replica with Sentinel; the Socket.IO adapter in use is the
+# Redis guidance for Minutes (standalone primary + replica with Sentinel; the Socket.IO adapter in use is the
 # standard pub/sub adapter, which does NOT support sharded Redis Cluster).
 bind 127.0.0.1 <PRIVATE_IP>
 protected-mode yes

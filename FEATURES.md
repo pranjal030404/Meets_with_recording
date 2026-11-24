@@ -1,4 +1,4 @@
-# MeetClone — Features
+# Minutes — Features
 
 A Slack + Zoom/Meet style workspace: video meetings, team chat, tasks, calendar, files and an admin console in one app.
 Stack: React + Vite + Tailwind (frontend), Node/Express + Socket.IO + Sequelize/MySQL + mediasoup SFU (backend).

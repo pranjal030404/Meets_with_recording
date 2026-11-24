@@ -8,17 +8,17 @@ import 'screens/home_shell.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Config.init();
-  runApp(const MeetCloneApp());
+  runApp(const MinutesApp());
   Session.instance.boot();
 }
 
-class MeetCloneApp extends StatelessWidget {
-  const MeetCloneApp({super.key});
+class MinutesApp extends StatelessWidget {
+  const MinutesApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MeetClone',
+      title: 'Minutes',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.build(Brightness.light),
       darkTheme: AppTheme.build(Brightness.dark),
