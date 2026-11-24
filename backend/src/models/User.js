@@ -79,6 +79,15 @@ const User = sequelize.define('User', {
   },
   department: {
     type: DataTypes.STRING(100)
+  },
+  phone: {
+    type: DataTypes.STRING(30)
+  },
+  bio: {
+    type: DataTypes.STRING(300)
+  },
+  location: {
+    type: DataTypes.STRING(100)
   }
 }, {
   tableName: 'Users',

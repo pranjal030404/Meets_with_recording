@@ -5,6 +5,7 @@ import path from 'path';
  *   recordings/<roomId>/*, transcripts/<roomId>/*  -> meeting host/co-host, or a participant of that meeting
  *   files/<ownerId>/<name>                         -> owner; or via its FileEntry: team member / conversation member /
  *                                                     meeting host or participant; (soft-deleted => owner only)
+ *   avatars/<userId>/<name>                       -> any authenticated user (profile photos)
  *   anything else (tmp/, runtime/, unknown)         -> nobody (served by no route)
  * Returns { ok:true, file } with the sanitised relative path, or { ok:false, status, reason }.
  */
@@ -31,6 +32,8 @@ export const createUploadAuthorizer = (deps) => async (user, rawPath) => {
     if (deps.canManageMeeting(meeting, user.id) || (meeting.participantIds || []).includes(user.id)) return allow;
     return deny;
   }
+
+  if (p.kind === 'avatars') return allow;                        // profile photos: any signed-in user (img tags need it)
 
   if (p.kind === 'files') {
     if (p.scope === user.id) return allow;                       // owner

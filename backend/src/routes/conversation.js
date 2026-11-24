@@ -12,7 +12,7 @@ import logAudit from '../services/auditService.js';
 
 const router = express.Router();
 
-const USER_ATTRS = ['id', 'name', 'email', 'avatar', 'customStatus', 'statusEmoji', 'isOnline', 'lastSeen'];
+const USER_ATTRS = ['id', 'name', 'email', 'avatar', 'customStatus', 'statusEmoji', 'statusExpiresAt', 'title', 'isOnline', 'lastSeen'];
 
 const memberInclude = () => ({
   model: ConversationMember,

@@ -1,0 +1,61 @@
+import { useState, useEffect } from 'react'
+
+const SIZES = {
+  xs: 'w-6 h-6 text-[9px]',
+  sm: 'w-8 h-8 text-[11px]',
+  md: 'w-10 h-10 text-xs',
+  lg: 'w-12 h-12 text-sm',
+  xl: 'w-20 h-20 text-xl',
+  '2xl': 'w-28 h-28 text-3xl',
+}
+const DOTS = { xs: 'w-2 h-2', sm: 'w-2.5 h-2.5', md: 'w-3 h-3', lg: 'w-3.5 h-3.5', xl: 'w-4 h-4', '2xl': 'w-5 h-5' }
+const PALETTE = [
+  'from-sky-500 to-blue-700', 'from-violet-500 to-purple-700', 'from-emerald-500 to-teal-700',
+  'from-rose-500 to-pink-700', 'from-amber-500 to-orange-700', 'from-cyan-500 to-indigo-700',
+]
+
+export const initialsOf = (name = '?') =>
+  String(name).trim().split(/\s+/).map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+
+const colorOf = (key = '') => {
+  let h = 0
+  for (const c of String(key)) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return PALETTE[h % PALETTE.length]
+}
+
+/**
+ * One avatar for the whole app. Shows the photo when it loads, otherwise coloured initials
+ * (a missing/broken image never shows the browser's broken-image icon + alt text).
+ * `online` = true/false draws a presence dot, undefined draws none.
+ */
+export default function Avatar({ user, name, src, size = 'md', online, ring = false, className = '' }) {
+  const label = name || user?.name || '?'
+  const url = src !== undefined ? src : user?.avatar
+  const [failed, setFailed] = useState(false)
+  useEffect(() => { setFailed(false) }, [url])
+  const showImg = !!url && !failed
+  const presence = online !== undefined ? online : undefined
+
+  return (
+    <div className={`relative shrink-0 ${className}`}>
+      {showImg ? (
+        <img
+          src={url}
+          alt=""
+          onError={() => setFailed(true)}
+          className={`${SIZES[size]} rounded-full object-cover bg-dark-300 ${ring ? 'ring-2 ring-primary-500/40' : ''}`}
+        />
+      ) : (
+        <div
+          aria-label={label}
+          className={`${SIZES[size]} rounded-full flex items-center justify-center font-bold text-white bg-gradient-to-br ${colorOf(user?.id || label)} ${ring ? 'ring-2 ring-primary-500/40' : ''}`}
+        >
+          {initialsOf(label)}
+        </div>
+      )}
+      {presence !== undefined && (
+        <span className={`absolute -bottom-0.5 -right-0.5 ${DOTS[size]} rounded-full border-2 border-dark-200 ${presence ? 'bg-green-400' : 'bg-gray-600'}`} />
+      )}
+    </div>
+  )
+}

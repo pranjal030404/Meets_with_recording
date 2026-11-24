@@ -10,8 +10,11 @@ import { useAuthStore } from '../store/authStore'
 import { useConversationStore } from '../store/conversationStore'
 import { useTaskStore } from '../store/taskStore'
 import { useMeetingStore } from '../store/meetingStore'
-import { usePresenceStore } from '../store/presenceStore'
+import { usePresenceStore, getActiveStatus } from '../store/presenceStore'
 import AppShell from '../components/AppShell'
+import UserAvatar from '../components/Avatar'
+import EmojiPicker from '../components/EmojiPicker'
+import ProfileCard from '../components/ProfileCard'
 import FileAttachment from '../components/FileAttachment'
 import useChatUpload from '../hooks/useChatUpload'
 import toast from 'react-hot-toast'
@@ -52,6 +55,17 @@ function ChatWorkspace() {
   const [taskFromMessage, setTaskFromMessage] = useState(null)
   const [showPinned, setShowPinned] = useState(false)
   const [pinnedMessages, setPinnedMessages] = useState([])
+  const [listQuery, setListQuery] = useState('')
+  const [listFilter, setListFilter] = useState('all')
+  const statuses = usePresenceStore(st => st.statuses)
+
+  const unreadTotal = conversations.filter(c => c.unreadCount > 0).length
+  const visibleConversations = conversations.filter(c => {
+    if (listFilter === 'unread' && !(c.unreadCount > 0)) return false
+    if (listFilter === 'groups' && c.type !== 'group') return false
+    const q = listQuery.trim().toLowerCase()
+    return !q || (c.title || '').toLowerCase().includes(q) || (c.lastMessagePreview || '').toLowerCase().includes(q)
+  })
 
   useEffect(() => {
     if (conversations.length === 0) fetchConversations()
@@ -105,11 +119,30 @@ function ChatWorkspace() {
     <div className="flex h-[calc(100dvh-4rem)] lg:h-screen overflow-hidden">
       {/* Conversation list */}
       <div className={`${active ? 'hidden md:flex' : 'flex'} w-full md:max-w-[300px] min-w-0 shrink-0 border-r border-white/[0.06] bg-dark-200/40 backdrop-blur-sm flex-col h-full`}>
-        <div className="p-4 flex items-center justify-between">
+        <div className="px-4 pt-4 pb-2 flex items-center justify-between">
           <h1 className="text-lg font-bold font-display">Chat</h1>
-          <button onClick={() => setShowNewChat(true)} className="btn btn-primary !px-3 !py-2" title="New conversation">
+          <button onClick={() => setShowNewChat(true)} className="btn btn-primary !px-3 !py-2" title="New conversation" aria-label="New conversation">
             <Plus className="w-4 h-4" />
           </button>
+        </div>
+        <div className="px-3 pb-2 space-y-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+            <input value={listQuery} onChange={(e) => setListQuery(e.target.value)} placeholder="Search chats" className="input !py-2 !pl-9 text-sm" />
+          </div>
+          <div className="flex gap-1">
+            {[['all', 'All'], ['unread', 'Unread'], ['groups', 'Groups']].map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setListFilter(id)}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  listFilter === id ? 'bg-primary-500/20 border-primary-500/40 text-primary-100' : 'border-white/[0.08] text-gray-400 hover:text-gray-200 hover:bg-white/[0.04]'
+                }`}
+              >
+                {label}{id === 'unread' && unreadTotal > 0 ? ` · ${unreadTotal}` : ''}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-3 space-y-0.5">
           {conversations.length === 0 && !isLoading && (
@@ -117,27 +150,37 @@ function ChatWorkspace() {
               No conversations yet.<br />Start one with a teammate.
             </div>
           )}
-          {conversations.map(conv => {
+          {conversations.length > 0 && visibleConversations.length === 0 && (
+            <p className="text-center text-sm text-gray-500 px-4 py-10">No chats match.</p>
+          )}
+          {visibleConversations.map(conv => {
             const isActive = conv.id === activeId
+            const unread = conv.unreadCount > 0
+            const st = conv.type === 'direct' ? getActiveStatus(statuses[conv.partner?.id] || conv.partner) : null
             return (
               <button
                 key={conv.id}
                 onClick={() => openConv(conv)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all ${
-                  isActive ? 'bg-primary-500/15 border border-primary-500/30' : 'hover:bg-white/[0.04] border border-transparent'
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all border ${
+                  isActive ? 'bg-primary-500/15 border-primary-500/30' : 'hover:bg-white/[0.04] border-transparent'
                 }`}
               >
                 <Avatar user={conv.type === 'direct' ? conv.partner : null} name={conv.title} isGroup={conv.type === 'group'} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className={`text-sm font-medium truncate ${isActive ? 'text-primary-100' : 'text-gray-200'}`}>{conv.title}</p>
-                    {conv.unreadCount > 0 && (
-                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                        {conv.unreadCount}
+                    <p className={`text-sm truncate ${unread ? 'font-semibold text-white' : 'font-medium'} ${isActive ? 'text-primary-100' : unread ? '' : 'text-gray-200'}`}>
+                      {conv.title}{st && <span className="ml-1.5" title={st.customStatus}>{st.statusEmoji}</span>}
+                    </p>
+                    <span className={`text-[10px] shrink-0 ${unread ? 'text-primary-300 font-semibold' : 'text-gray-600'}`}>{relTime(conv.lastMessageAt)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className={`text-xs truncate ${unread ? 'text-gray-300' : 'text-gray-500'}`}>{conv.lastMessagePreview || 'No messages yet'}</p>
+                    {unread && (
+                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-primary-500 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                        {conv.unreadCount > 99 ? '99+' : conv.unreadCount}
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500 truncate">{conv.lastMessagePreview || 'No messages yet'}</p>
                 </div>
               </button>
             )
@@ -281,6 +324,8 @@ function ConversationView({
   const [editDraft, setEditDraft] = useState('')
   const [reactionFor, setReactionFor] = useState(null)
   const [menuFor, setMenuFor] = useState(null)
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const inputRef = useRef(null)
   const scrollRef = useRef(null)
   const typingTimeoutRef = useRef(null)
   const { statuses } = usePresenceStore()
@@ -310,10 +355,28 @@ function ConversationView({
     typingTimeoutRef.current = setTimeout(() => onTyping(conversation.id, false), 2500)
   }
 
+  const insertEmoji = (emoji) => {
+    const el = inputRef.current
+    const start = el?.selectionStart ?? draft.length
+    const end = el?.selectionEnd ?? draft.length
+    const next = draft.slice(0, start) + emoji + draft.slice(end)
+    setDraft(next)
+    requestAnimationFrame(() => { el?.focus(); const pos = start + emoji.length; el?.setSelectionRange(pos, pos) })
+  }
+
+  // grow the textarea with its content (up to max-h)
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 128)}px`
+  }, [draft])
+
   const handleSend = async () => {
     const content = draft.trim()
     if (!content) return
     setDraft('')
+    setEmojiOpen(false)
     onTyping(conversation.id, false)
     const res = await onSend({ content })
     if (!res.success) toast.error(res.message)
@@ -360,7 +423,9 @@ function ConversationView({
     groups[groups.length - 1].items.push(m)
   }
 
-  const partnerStatus = conversation.partner ? statuses[conversation.partner.id] : null
+  const partnerStatus = conversation.partner ? getActiveStatus(statuses[conversation.partner.id] || conversation.partner) : null
+  const partnerOnline = usePresenceStore(st => !!conversation.partner && st.onlineUserIds.includes(conversation.partner.id))
+  const [profileFor, setProfileFor] = useState(null)
   const typingNames = Object.values(typingUsers).map(t => t.name)
 
   return (
@@ -370,10 +435,18 @@ function ConversationView({
         <Link to="/chat" className="md:hidden p-2 -ml-1 text-gray-300 hover:text-white shrink-0" aria-label="Back to conversations">
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <Avatar user={conversation.type === 'direct' ? conversation.partner : null} name={conversation.title} isGroup={conversation.type === 'group'} />
+        <Avatar
+          user={conversation.type === 'direct' ? conversation.partner : null}
+          name={conversation.title}
+          isGroup={conversation.type === 'group'}
+          onClick={conversation.type === 'direct' && conversation.partner ? () => setProfileFor(conversation.partner) : undefined}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h2 className="font-semibold font-display truncate">{conversation.title}</h2>
+            <h2
+              onClick={conversation.type === 'direct' && conversation.partner ? () => setProfileFor(conversation.partner) : undefined}
+              className={`font-semibold font-display truncate ${conversation.type === 'direct' ? 'cursor-pointer hover:text-primary-200' : ''}`}
+            >{conversation.title}</h2>
             {conversation.type === 'group' && (
               <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.06] text-gray-400 flex items-center gap-1">
                 <Users className="w-3 h-3" /> {conversation.members?.length || 0}
@@ -384,7 +457,7 @@ function ConversationView({
             {conversation.type === 'direct' && conversation.partner
               ? partnerStatus?.customStatus
                 ? `${partnerStatus.statusEmoji || ''} ${partnerStatus.customStatus}`
-                : conversation.partner.isOnline ? 'Active now' : 'Away'
+                : partnerOnline ? 'Active now' : conversation.partner.lastSeen ? `Last seen ${relTime(conversation.partner.lastSeen)}` : 'Offline'
               : conversation.members?.slice(0, 3).map(m => m.user?.name).join(', ') + ((conversation.members?.length || 0) > 3 ? ` +${conversation.members.length - 3}` : '')}
           </p>
         </div>
@@ -418,9 +491,16 @@ function ConversationView({
               <span className="text-[11px] text-gray-500 font-medium">{group.day}</span>
               <div className="flex-1 h-px bg-white/[0.06]" />
             </div>
-            {group.items.map(m => (
+            {group.items.map((m, idx) => {
+              const prev = group.items[idx - 1]
+              const compact = !!prev && prev.senderId === m.senderId && !prev.isDeleted
+                && !['meeting_link'].includes(prev.type) && !['meeting_link'].includes(m.type)
+                && new Date(m.createdAt) - new Date(prev.createdAt) < 5 * 60 * 1000
+              return (
               <MessageRow
                 key={m.id}
+                compact={compact}
+                onProfile={(u) => u?.id && setProfileFor(u)}
                 message={m}
                 isMine={m.senderId === user.id}
                 user={user}
@@ -443,7 +523,8 @@ function ConversationView({
                 onCreateTask={onCreateTask}
                 canModerate={conversation.myRole === 'owner'}
               />
-            ))}
+              )
+            })}
           </div>
         ))}
         {typingNames.length > 0 && (
@@ -474,22 +555,19 @@ function ConversationView({
             )}
           </div>
         )}
-        <div className="flex items-end gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={onFileChange}
-          />
+        <div className="relative flex items-end gap-1.5 rounded-2xl border border-white/[0.08] bg-dark-300/60 px-2 py-1.5 focus-within:border-primary-500/50 focus-within:ring-4 focus-within:ring-primary-500/10 transition-all">
+          <input ref={fileInputRef} type="file" className="hidden" onChange={onFileChange} />
           <button
             onClick={pick}
             disabled={isUploading}
-            className="p-2.5 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-all disabled:opacity-50"
+            className="p-2 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-all disabled:opacity-50"
             title="Attach a file"
+            aria-label="Attach a file"
           >
             <Paperclip className="w-5 h-5" />
           </button>
           <textarea
+            ref={inputRef}
             value={draft}
             onChange={handleDraftChange}
             onKeyDown={(e) => {
@@ -499,18 +577,39 @@ function ConversationView({
               }
             }}
             rows={1}
-            placeholder={`Message ${conversation.title}...`}
-            className="input !rounded-2xl resize-none max-h-32 py-3"
+            placeholder={`Message ${conversation.title}`}
+            className="flex-1 bg-transparent resize-none outline-none text-sm text-white placeholder-gray-500 py-2.5 max-h-32"
           />
+          <div className="relative">
+            {emojiOpen && (
+              <EmojiPicker className="bottom-full right-0 mb-3" onClose={() => setEmojiOpen(false)} onPick={insertEmoji} />
+            )}
+            <button
+              onClick={() => setEmojiOpen(o => !o)}
+              className={`p-2 rounded-xl transition-all ${emojiOpen ? 'text-primary-300 bg-primary-500/15' : 'text-gray-400 hover:text-primary-300 hover:bg-primary-500/10'}`}
+              title="Emoji"
+              aria-label="Open emoji picker"
+              aria-expanded={emojiOpen}
+            >
+              <Smile className="w-5 h-5" />
+            </button>
+          </div>
           <button
             onClick={handleSend}
             disabled={!draft.trim()}
-            className="btn btn-primary !px-4 !py-3 disabled:opacity-40"
+            className="p-2.5 rounded-xl bg-primary-500 text-white hover:bg-primary-400 disabled:opacity-30 disabled:hover:bg-primary-500 transition-all"
+            title="Send (Enter)"
+            aria-label="Send message"
           >
             <Send className="w-4 h-4" />
           </button>
         </div>
+        <p className="hidden sm:block text-[10px] text-gray-600 mt-1.5 px-1"><kbd className="font-mono">Enter</kbd> to send · <kbd className="font-mono">Shift + Enter</kbd> for a new line</p>
       </div>
+
+      {profileFor && (
+        <ProfileCard userId={profileFor.id} initial={profileFor} onClose={() => setProfileFor(null)} />
+      )}
     </>
   )
 }
@@ -520,11 +619,13 @@ function ConversationView({
 // ============================================================
 
 function MessageRow({
+  compact = false, onProfile,
   message: m, isMine, user, editing, editDraft, setEditDraft, onSubmitEdit, onCancelEdit,
   reactionOpen, onToggleReactions, menuOpen, onToggleMenu,
   onReact, onEdit, onDelete, onPin, onSave, onForward, onThread, onCreateTask, canModerate
 }) {
   const sender = m.sender || {}
+  const [moreOpen, setMoreOpen] = useState(false)
   const reactions = m.reactions || []
   const grouped = reactions.reduce((acc, r) => {
     acc[r.emoji] = acc[r.emoji] || { count: 0, mine: false }
@@ -534,25 +635,29 @@ function MessageRow({
   }, {})
 
   return (
-    <div className={`group flex gap-3 px-2 py-1 rounded-xl hover:bg-white/[0.02] ${m.isPinned ? 'bg-amber-500/[0.04]' : ''}`}>
-      <div className="w-9 shrink-0 pt-1">
-        {sender.avatar ? (
-          <img src={sender.avatar} alt={sender.name} className="w-9 h-9 rounded-full" />
+    <div className={`group flex gap-3 px-2 ${compact ? 'py-0.5' : 'pt-2.5 pb-0.5'} rounded-xl hover:bg-white/[0.03] ${m.isPinned ? 'bg-amber-500/[0.05]' : ''}`}>
+      <div className="w-9 shrink-0 pt-0.5">
+        {compact ? (
+          <span className="block text-[10px] text-gray-600 text-right pt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            {new Date(m.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+          </span>
         ) : (
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary-500 to-accent-600 flex items-center justify-center text-xs font-bold text-white">
-            {(sender.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-          </div>
+          <button type="button" onClick={() => onProfile?.(sender)} className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400" title="View profile">
+            <UserAvatar user={sender} size="sm" className="!block" />
+          </button>
         )}
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-gray-200">{sender.name || 'Unknown'}</span>
-          <span className="text-[11px] text-gray-600">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-          {m.editedAt && <span className="text-[10px] text-gray-600">(edited)</span>}
-          {m.isPinned && <Pin className="w-3 h-3 text-amber-400" />}
-          {m.forwardedFromId && <Forward className="w-3 h-3 text-gray-600" />}
-        </div>
+        {!compact && (
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <button type="button" onClick={() => onProfile?.(sender)} className="text-sm font-semibold text-gray-100 hover:underline">{sender.name || 'Unknown'}</button>
+            <span className="text-[11px] text-gray-500">{new Date(m.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+            {m.editedAt && <span className="text-[10px] text-gray-600">(edited)</span>}
+            {m.isPinned && <Pin className="w-3 h-3 text-amber-400 self-center" />}
+            {m.forwardedFromId && <Forward className="w-3 h-3 text-gray-600 self-center" />}
+          </div>
+        )}
 
         {editing ? (
           <div className="mt-1.5 flex gap-2">
@@ -612,16 +717,34 @@ function MessageRow({
           {(isMine || canModerate) && <ActionButton icon={Trash2} title="Delete" onClick={() => onDelete(m.id)} danger />}
 
           {reactionOpen && (
-            <div className="absolute top-8 right-0 z-30 glass-strong border border-white/10 rounded-xl p-1.5 flex gap-0.5 shadow-float" onClick={e => e.stopPropagation()}>
-              {REACTION_SET.map(emoji => (
+            <div className="absolute top-8 right-0 z-30" onClick={e => e.stopPropagation()}>
+              <div className="glass-strong border border-white/10 rounded-xl p-1.5 flex items-center gap-0.5 shadow-float">
+                {REACTION_SET.map(emoji => (
+                  <button
+                    key={emoji}
+                    onClick={() => { onReact(m.id, emoji); onToggleReactions() }}
+                    className="w-8 h-8 rounded-lg hover:bg-white/10 text-base transition-transform hover:scale-125"
+                  >
+                    {emoji}
+                  </button>
+                ))}
                 <button
-                  key={emoji}
-                  onClick={() => { onReact(m.id, emoji); onToggleReactions() }}
-                  className="w-8 h-8 rounded-lg hover:bg-white/10 text-base transition-transform hover:scale-125"
+                  onClick={() => setMoreOpen(o => !o)}
+                  className="w-8 h-8 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white flex items-center justify-center"
+                  title="More emoji"
+                  aria-label="More emoji"
                 >
-                  {emoji}
+                  <Plus className="w-4 h-4" />
                 </button>
-              ))}
+              </div>
+              {moreOpen && (
+                <EmojiPicker
+                  className="top-full right-0 mt-1"
+                  closeOnPick
+                  onClose={() => setMoreOpen(false)}
+                  onPick={(emoji) => { onReact(m.id, emoji); setMoreOpen(false); onToggleReactions() }}
+                />
+              )}
             </div>
           )}
         </div>
@@ -780,28 +903,28 @@ function Modal({ title, onClose, children }) {
   )
 }
 
-function Avatar({ user, name, isGroup }) {
-  if (isGroup) {
-    return (
-      <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shrink-0">
-        <Users className="w-5 h-5 text-white/90" />
-      </div>
-    )
-  }
-  const label = name || user?.name || '?'
-  return user?.avatar ? (
-    <div className="relative shrink-0">
-      <img src={user.avatar} alt={label} className="w-10 h-10 rounded-full" />
-      {user.isOnline && <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-dark-200" />}
+function Avatar({ user, name, isGroup, size = 'md', onClick }) {
+  const online = usePresenceStore(st => (user?.id ? st.onlineUserIds.includes(user.id) : false))
+  const body = isGroup ? (
+    <div className={`${size === 'sm' ? 'w-8 h-8' : 'w-10 h-10'} rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shrink-0`}>
+      <Users className="w-5 h-5 text-white/90" />
     </div>
   ) : (
-    <div className="relative shrink-0">
-      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold text-white bg-gradient-to-br ${user?.isOnline ? 'from-primary-500 to-accent-600' : 'from-dark-300 to-dark-400'}`}>
-        {label.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-      </div>
-      {user?.isOnline && <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-dark-200" />}
-    </div>
+    <UserAvatar user={user} name={name} size={size} online={user?.id ? online : undefined} />
   )
+  return onClick ? (
+    <button type="button" onClick={onClick} className="shrink-0 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400" title="View profile">{body}</button>
+  ) : body
+}
+
+const relTime = (iso) => {
+  if (!iso) return ''
+  const d = new Date(iso), now = new Date()
+  const days = Math.floor((new Date(now.toDateString()) - new Date(d.toDateString())) / 864e5)
+  if (days <= 0) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return d.toLocaleDateString([], { weekday: 'short' })
+  return d.toLocaleDateString([], { day: 'numeric', month: 'short' })
 }
 
 function NewChatModal({ contacts, onClose, onStartDirect, onCreateGroup }) {

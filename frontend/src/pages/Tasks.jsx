@@ -25,7 +25,7 @@ const isOverdue = (task) => task.dueDate && task.status !== 'done' && new Date(t
 
 export default function Tasks() {
   return (
-    <AppShell>
+    <AppShell wide>
       <TasksPage />
     </AppShell>
   )
@@ -57,7 +57,7 @@ export function TasksPage({ teamId: fixedTeamId } = {}) {
   }
 
   return (
-    <div className={embedded ? 'relative p-5 sm:p-6' : 'relative max-w-6xl mx-auto px-4 sm:px-6 py-10 lg:py-14'}>
+    <div className={embedded ? 'relative p-5 sm:p-6' : 'relative w-full min-h-screen flex flex-col px-4 sm:px-8 lg:px-10 py-8 lg:py-10'}>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
         <div>
@@ -110,7 +110,7 @@ export function TasksPage({ teamId: fixedTeamId } = {}) {
       ) : isLoading ? (
         <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 text-gray-600 animate-spin" /></div>
       ) : (
-        <div className="grid lg:grid-cols-3 gap-5">
+        <div className={`grid lg:grid-cols-3 gap-5 ${embedded ? "" : "flex-1"}`}>
           {COLUMNS.map(col => {
             const items = tasks.filter(t => t.status === col.key)
             return (

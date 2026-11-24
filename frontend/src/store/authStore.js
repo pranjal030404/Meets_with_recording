@@ -96,6 +96,12 @@ export const useAuthStore = create((set, get) => ({
     })
   },
 
+  // Replace the cached user after a profile/avatar change (also refreshes localStorage)
+  setUser: (user) => {
+    localStorage.setItem('user', JSON.stringify(user))
+    set({ user })
+  },
+
   updateProfile: async (data) => {
     set({ isLoading: true })
     try {
@@ -108,7 +114,7 @@ export const useAuthStore = create((set, get) => ({
       return { success: true }
     } catch (error) {
       set({ isLoading: false })
-      return { success: false, message: error.response?.data?.message }
+      return { success: false, message: error.response?.data?.message || 'Could not save profile' }
     }
   },
 

@@ -6,6 +6,7 @@ import { protect, generateToken, clearAssetCookie, revokeToken } from '../middle
 import { ensureSubscription, getSubscriptionDetails } from '../services/subscriptionService.js';
 import { getSetting } from '../services/settingsService.js';
 import { isSmtpConfigured, sendVerificationEmail } from '../services/mailService.js';
+import { handleAvatarUpload, saveAvatar, clearAvatar, pickProfileFields } from '../services/avatarService.js';
 
 const router = express.Router();
 
@@ -229,16 +230,8 @@ router.get('/me', protect, async (req, res) => {
 
 router.put('/profile', protect, async (req, res) => {
   try {
-    const { name, avatar, timezone, title, department } = req.body;
-
-    const updateData = {};
-    if (name) updateData.name = name;
-    if (avatar) updateData.avatar = avatar;
-    if (timezone !== undefined) updateData.timezone = timezone;
-    if (title !== undefined) updateData.title = title;
-    if (department !== undefined) updateData.department = department;
-
-    await User.update(updateData, { where: { id: req.user.id } });
+    const updateData = pickProfileFields(req.body);
+    if (Object.keys(updateData).length) await User.update(updateData, { where: { id: req.user.id } });
 
     const user = await User.findByPk(req.user.id);
 
@@ -249,11 +242,44 @@ router.put('/profile', protect, async (req, res) => {
     });
   } catch (error) {
     console.error('Update profile error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error updating profile',
-      error: error.message
+    res.status(500).json({ success: false, message: 'Error updating profile' });
+  }
+});
+
+// Profile photo: multipart field "avatar" (JPG/PNG/WebP/GIF, max 5 MB)
+router.post('/profile/avatar', protect, handleAvatarUpload, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'No image uploaded' });
+    const user = await User.findByPk(req.user.id);
+    await saveAvatar(user, req.file);
+    res.json({ success: true, data: { user: user.toJSON() } });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Could not save photo' });
+  }
+});
+
+router.delete('/profile/avatar', protect, async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id);
+    await clearAvatar(user);
+    res.json({ success: true, data: { user: user.toJSON() } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Could not remove photo' });
+  }
+});
+
+// Public profile card of another (active) user: only fields that are safe to show to any signed-in user.
+router.get('/users/:id', protect, async (req, res) => {
+  try {
+    const u = await User.findOne({
+      where: { id: req.params.id, isActive: true },
+      attributes: ['id', 'name', 'email', 'avatar', 'title', 'department', 'location', 'timezone', 'bio',
+        'customStatus', 'statusEmoji', 'statusExpiresAt', 'isOnline', 'lastSeen']
     });
+    if (!u) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, data: { user: u.toJSON() } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error loading profile' });
   }
 });
 

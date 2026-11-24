@@ -2,8 +2,15 @@ import { create } from 'zustand';
 import api from '../lib/api';
 import { getSocket } from '../lib/socket';
 
+// A status past its expiry is treated as "no status" everywhere (the server stores the time, clients enforce it).
+export const getActiveStatus = (st) => {
+  if (!st || !st.customStatus) return null;
+  if (st.statusExpiresAt && new Date(st.statusExpiresAt).getTime() <= Date.now()) return null;
+  return st;
+};
+
 // Presence: online users + custom statuses
-export const usePresenceStore = create((set) => ({
+export const usePresenceStore = create((set, get) => ({
   onlineUserIds: [],
   statuses: {}, // userId -> { customStatus, statusEmoji, statusExpiresAt }
 
@@ -14,8 +21,8 @@ export const usePresenceStore = create((set) => ({
   removeOnline: (userId) => set(state => ({
     onlineUserIds: state.onlineUserIds.filter(id => id !== userId)
   })),
-  setStatus: ({ userId, customStatus, statusEmoji }) => set(state => ({
-    statuses: { ...state.statuses, [userId]: { customStatus, statusEmoji } }
+  setStatus: ({ userId, customStatus, statusEmoji, statusExpiresAt }) => set(state => ({
+    statuses: { ...state.statuses, [userId]: { customStatus, statusEmoji, statusExpiresAt: statusExpiresAt || null } }
   })),
 
   isOnline: (userId) => get().onlineUserIds.includes(userId),
@@ -24,7 +31,7 @@ export const usePresenceStore = create((set) => ({
     try {
       const res = await api.put('/auth/status', { customStatus, statusEmoji, statusExpiresAt });
       set(state => ({
-        statuses: { ...state.statuses, [res.data.data.user.id]: { customStatus, statusEmoji } }
+        statuses: { ...state.statuses, [res.data.data.user.id]: { customStatus, statusEmoji, statusExpiresAt: statusExpiresAt || null } }
       }));
       return { success: true, user: res.data.data.user };
     } catch (error) {

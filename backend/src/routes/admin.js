@@ -15,6 +15,7 @@ import logAudit from '../services/auditService.js';
 import Admin from '../models/Admin.js';
 import { getSetting, setSetting } from '../services/settingsService.js';
 import { isSmtpConfigured, smtpSummary, verifySmtpConnection, sendTestEmail } from '../services/mailService.js';
+import { handleAvatarUpload, saveAvatar, clearAvatar, pickProfileFields } from '../services/avatarService.js';
 import { protectAdmin, generateAdminToken, requireAdminPermission as need } from '../middleware/adminAuth.js';
 
 const router = express.Router();
@@ -171,7 +172,7 @@ router.get('/users', need('admin.users.view'), async (req, res) => {
 
     const { rows, count } = await User.findAndCountAll({
       where,
-      attributes: ['id', 'name', 'email', 'avatar', 'role', 'roleId', 'isActive', 'isOnline', 'lastSeen', 'title', 'department', 'createdAt'],
+      attributes: ['id', 'name', 'email', 'avatar', 'role', 'roleId', 'isActive', 'isOnline', 'lastSeen', 'title', 'department', 'phone', 'bio', 'location', 'createdAt'],
       include: [{ model: Role, as: 'customRole', attributes: ['id', 'name'] }],
       order: [['createdAt', 'DESC']],
       limit: parseInt(limit),
@@ -300,6 +301,45 @@ router.put('/users/:id/status', need('admin.users.manage'), async (req, res) => 
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Error updating user status', error: error.message });
+  }
+});
+
+// ---------- Edit any user's profile photo + personal details ----------
+router.put('/users/:id/profile', need('admin.users.manage'), async (req, res) => {
+  try {
+    const user = await User.findByPk(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    const fields = pickProfileFields(req.body);
+    await user.update(fields);
+    audit(req, 'user.profile_update', 'User', user.id, { email: user.email, fields: Object.keys(fields) });
+    res.json({ success: true, data: { user: user.toJSON() } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error updating profile', error: error.message });
+  }
+});
+
+router.post('/users/:id/avatar', need('admin.users.manage'), handleAvatarUpload, async (req, res) => {
+  try {
+    const user = await User.findByPk(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!req.file) return res.status(400).json({ success: false, message: 'No image uploaded' });
+    await saveAvatar(user, req.file);
+    audit(req, 'user.avatar_update', 'User', user.id, { email: user.email });
+    res.json({ success: true, data: { user: user.toJSON() } });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Could not save photo' });
+  }
+});
+
+router.delete('/users/:id/avatar', need('admin.users.manage'), async (req, res) => {
+  try {
+    const user = await User.findByPk(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    await clearAvatar(user);
+    audit(req, 'user.avatar_remove', 'User', user.id, { email: user.email });
+    res.json({ success: true, data: { user: user.toJSON() } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Could not remove photo' });
   }
 });
 
