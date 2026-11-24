@@ -8,6 +8,15 @@ import 'calendar_screen.dart';
 import 'files_screen.dart';
 import 'meetings_screen.dart';
 
+const _statusPresets = [
+  ('✅', 'Available'),
+  ('🎯', 'Focused'),
+  ('📅', 'In a meeting'),
+  ('☕', 'On a break'),
+  ('🏠', 'Working remotely'),
+  ('✈️', 'Traveling'),
+];
+
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
 
@@ -24,13 +33,33 @@ class MoreScreen extends StatelessWidget {
             child: ListTile(
               contentPadding: const EdgeInsets.all(14),
               leading: UserAvatar(name: s.name, url: u['avatar']?.toString(), radius: 28),
-              title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
+              title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18)),
               subtitle: Text('${s.email}${plan != null ? '\nPlan: $plan' : ''}${(u['customStatus'] ?? '').toString().isNotEmpty ? '\n${u['statusEmoji'] ?? ''} ${u['customStatus']}' : ''}'),
               isThreeLine: true,
               trailing: const Icon(Icons.edit_outlined),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())),
             ),
           ),
+          const SectionTitle('Status'),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final p in _statusPresets)
+              ChoiceChip(
+                label: Text('${p.$1} ${p.$2}'),
+                selected: u['customStatus'] == p.$2,
+                onSelected: (_) => guard(context, () async {
+                  await Api.instance.put('/auth/status', {'customStatus': p.$2, 'statusEmoji': p.$1});
+                  await Session.instance.refresh();
+                }),
+              ),
+            if ((u['customStatus'] ?? '').toString().isNotEmpty)
+              ActionChip(
+                label: const Text('Clear'),
+                onPressed: () => guard(context, () async {
+                  await Api.instance.put('/auth/status', {'customStatus': '', 'statusEmoji': ''});
+                  await Session.instance.refresh();
+                }),
+              ),
+          ]),
           const SectionTitle('Workspace'),
           _tile(context, Icons.calendar_month, 'Calendar', const CalendarScreen()),
           _tile(context, Icons.folder_outlined, 'Files', const FilesScreen(standalone: true)),
