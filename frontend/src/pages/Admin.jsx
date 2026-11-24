@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import { LogOut, KeyRound, Plus, Trash2, X, UserCog, Settings, Mail } from 'lucide-react'
 import api from '../lib/adminApi'
+import Avatar from '../components/Avatar'
+import ProfileModal from '../components/ProfileModal'
 import { useAdminStore, useCan } from '../store/adminStore'
 import { formatBytes } from '../store/fileStore'
 import toast from 'react-hot-toast'
@@ -249,6 +251,7 @@ function UsersTab() {
   const [historyUser, setHistoryUser] = useState(null)
   const isSuper = useCan('admin.users.manage')
   const [creating, setCreating] = useState(false)
+  const [editUser, setEditUser] = useState(null)
 
   const load = () => {
     setIsLoading(true)
@@ -306,7 +309,7 @@ function UsersTab() {
                 <tr key={u.id} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
                   <td className="py-2.5 pr-4">
                     <div className="flex items-center gap-2.5">
-                      {u.avatar ? <img src={u.avatar} className="w-7 h-7 rounded-full" alt="" /> : <div className="w-7 h-7 rounded-full bg-dark-300" />}
+                      <Avatar user={u} size="sm" />
                       <div>
                         <p className="text-gray-200">{u.name}</p>
                         <p className="text-xs text-gray-500">{u.email}</p>
@@ -334,6 +337,7 @@ function UsersTab() {
                   <td className="py-2.5">
                     <div className="flex gap-2">
                       <button onClick={() => setHistoryUser(u)} className="text-xs text-primary-300 hover:underline">History</button>
+                      {isSuper && <button onClick={() => setEditUser(u)} className="text-xs text-gray-300 hover:underline">Edit profile</button>}
                       {isSuper && (
                         <button onClick={() => toggleActive(u)} className={`text-xs hover:underline ${u.isActive ? 'text-red-300' : 'text-emerald-300'}`}>
                           {u.isActive ? 'Suspend' : 'Reactivate'}
@@ -347,6 +351,15 @@ function UsersTab() {
           </table>
           <Pager page={page} setPage={setPage} total={total} size={20} />
         </div>
+      )}
+      {editUser && (
+        <ProfileModal
+          client={api}
+          target={editUser}
+          endpoints={{ profile: `/admin/users/${editUser.id}/profile`, avatar: `/admin/users/${editUser.id}/avatar` }}
+          onClose={() => setEditUser(null)}
+          onSaved={(u) => { setUsers(list => list.map(x => x.id === u.id ? { ...x, ...u } : x)); setEditUser(prev => prev && { ...prev, ...u }) }}
+        />
       )}
       {creating && (
         <AccountForm

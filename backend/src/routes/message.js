@@ -12,7 +12,7 @@ import logAudit from '../services/auditService.js';
 
 const router = express.Router();
 
-const USER_ATTRS = ['id', 'name', 'email', 'avatar', 'customStatus', 'statusEmoji'];
+const USER_ATTRS = ['id', 'name', 'email', 'avatar', 'customStatus', 'statusEmoji', 'statusExpiresAt', 'title'];
 
 const senderInclude = () => ({ model: User, as: 'sender', attributes: USER_ATTRS });
 

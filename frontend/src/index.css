@@ -659,3 +659,6 @@ h1, h2, h3, .font-display {
     animation: ping-soft 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
   }
 }
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

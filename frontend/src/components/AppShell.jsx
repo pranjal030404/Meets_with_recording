@@ -2,13 +2,16 @@ import { useEffect, useState, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Video, LayoutDashboard, MessageSquare, Users, Calendar, Folder, CheckSquare,
-  Clock, CreditCard, Shield, LogOut, Menu, X, Search, ChevronDown, SmilePlus, Check
+  Clock, CreditCard, Shield, LogOut, Menu, X, Search, ChevronDown, SmilePlus, Check, Pencil, Smile
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import branding from '../config/branding'
 import BrandMark from './BrandMark'
 import { useConversationStore, bindConversationSocket } from '../store/conversationStore'
-import { usePresenceStore, bindPresenceSocket } from '../store/presenceStore'
+import { usePresenceStore, bindPresenceSocket, getActiveStatus } from '../store/presenceStore'
+import Avatar from './Avatar'
+import EmojiPicker from './EmojiPicker'
+import ProfileModal from './ProfileModal'
 import NotificationBell from './NotificationBell'
 import toast from 'react-hot-toast'
 
@@ -23,14 +26,38 @@ const NAV_ITEMS = [
   { to: '/billing', label: 'Billing', icon: CreditCard, match: ['/billing'] },
 ]
 
+// tone drives the presence dot: green = reachable, red = please don't disturb, amber = away
 const STATUS_PRESETS = [
-  { emoji: '✅', text: 'Available' },
-  { emoji: '🎯', text: 'Focused' },
-  { emoji: '📅', text: 'In a meeting' },
-  { emoji: '☕', text: 'On a break' },
-  { emoji: '🌿', text: 'Out sick' },
-  { emoji: '✈️', text: 'Traveling' },
+  { emoji: '✅', text: 'Available', tone: 'green' },
+  { emoji: '🎯', text: 'Focused', tone: 'red' },
+  { emoji: '📅', text: 'In a meeting', tone: 'red' },
+  { emoji: '☕', text: 'On a break', tone: 'amber' },
+  { emoji: '🍽️', text: 'At lunch', tone: 'amber' },
+  { emoji: '🏠', text: 'Working remotely', tone: 'green' },
+  { emoji: '✈️', text: 'Traveling', tone: 'amber' },
+  { emoji: '🌿', text: 'Out sick', tone: 'gray' },
 ]
+const TONE_DOT = { green: 'bg-green-400', red: 'bg-red-500', amber: 'bg-amber-400', gray: 'bg-gray-500' }
+const dotFor = (st) => TONE_DOT[STATUS_PRESETS.find(p => p.text === st?.customStatus)?.tone || 'green']
+
+const endOfToday = () => { const d = new Date(); d.setHours(23, 59, 59, 0); return d }
+const endOfWeek = () => { const d = new Date(); d.setDate(d.getDate() + ((7 - d.getDay()) % 7)); d.setHours(23, 59, 59, 0); return d }
+const CLEAR_AFTER = [
+  { id: 'never', label: "Don't clear", at: () => null },
+  { id: '30m', label: '30 minutes', at: () => new Date(Date.now() + 30 * 60e3) },
+  { id: '1h', label: '1 hour', at: () => new Date(Date.now() + 60 * 60e3) },
+  { id: '4h', label: '4 hours', at: () => new Date(Date.now() + 4 * 60 * 60e3) },
+  { id: 'today', label: 'Today', at: endOfToday },
+  { id: 'week', label: 'This week', at: endOfWeek },
+]
+const clearsLabel = (iso) => {
+  if (!iso) return null
+  const ms = new Date(iso).getTime() - Date.now()
+  if (ms <= 0) return null
+  const m = Math.round(ms / 60e3)
+  if (m < 60) return `Clears in ${Math.max(m, 1)} min`
+  return `Clears ${new Date(iso).toLocaleString([], { weekday: m > 24 * 60 ? 'short' : undefined, hour: 'numeric', minute: '2-digit' })}`
+}
 
 export default function AppShell({ children, wide = false }) {
   const location = useLocation()
@@ -44,10 +71,21 @@ export default function AppShell({ children, wide = false }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [statusOpen, setStatusOpen] = useState(false)
   const [customText, setCustomText] = useState('')
+  const [customEmoji, setCustomEmoji] = useState('💬')
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const [clearAfter, setClearAfter] = useState('never')
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [, tick] = useState(0)
   const statusRef = useRef(null)
 
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0)
-  const myStatus = statuses[user?.id] || { customStatus: user?.customStatus, statusEmoji: user?.statusEmoji }
+  const myStatus = getActiveStatus(statuses[user?.id] || { customStatus: user?.customStatus, statusEmoji: user?.statusEmoji, statusExpiresAt: user?.statusExpiresAt })
+
+  // re-evaluate expiry while the app stays open
+  useEffect(() => {
+    const t = setInterval(() => tick(n => n + 1), 30000)
+    return () => clearInterval(t)
+  }, [])
 
   // Bind workspace sockets for the shell's lifetime + load chat unread counts
   useEffect(() => {
@@ -62,7 +100,7 @@ export default function AppShell({ children, wide = false }) {
   // Close status popover on outside click
   useEffect(() => {
     const handler = (e) => {
-      if (statusRef.current && !statusRef.current.contains(e.target)) setStatusOpen(false)
+      if (statusRef.current && !statusRef.current.contains(e.target)) { setStatusOpen(false); setEmojiOpen(false) }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -74,18 +112,21 @@ export default function AppShell({ children, wide = false }) {
   }
 
   const handleSetStatus = async (emoji, text) => {
-    const result = await updateMyStatus({ customStatus: text, statusEmoji: emoji })
+    const at = CLEAR_AFTER.find(o => o.id === clearAfter)?.at()
+    const result = await updateMyStatus({ customStatus: text, statusEmoji: emoji, statusExpiresAt: at ? at.toISOString() : null })
     if (result.success) {
       toast.success('Status updated')
       setStatusOpen(false)
       setCustomText('')
+      setCustomEmoji('💬')
+      setEmojiOpen(false)
     } else {
       toast.error(result.message)
     }
   }
 
   const handleClearStatus = async () => {
-    await updateMyStatus({ customStatus: null, statusEmoji: null })
+    await updateMyStatus({ customStatus: null, statusEmoji: null, statusExpiresAt: null })
     setStatusOpen(false)
   }
 
@@ -145,61 +186,112 @@ export default function AppShell({ children, wide = false }) {
       {/* User + status */}
       <div className="p-3 border-t border-white/[0.06] relative" ref={statusRef}>
         {statusOpen && (
-          <div className="absolute bottom-full left-3 right-3 mb-2 glass-strong rounded-2xl border border-white/10 p-3 shadow-float z-50">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Set status</p>
-            <div className="space-y-1 max-h-52 overflow-y-auto">
-              {STATUS_PRESETS.map(preset => (
-                <button
-                  key={preset.text}
-                  onClick={() => handleSetStatus(preset.emoji, preset.text)}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-gray-300 hover:bg-white/[0.06] transition-colors ${
-                    myStatus?.customStatus === preset.text ? 'bg-primary-500/15 text-primary-200' : ''
-                  }`}
-                >
-                  <span>{preset.emoji}</span> {preset.text}
-                  {myStatus?.customStatus === preset.text && <Check className="w-4 h-4 ml-auto text-primary-300" />}
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2 mt-2 pt-2 border-t border-white/[0.06]">
-              <input
-                value={customText}
-                onChange={(e) => setCustomText(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && customText.trim() && handleSetStatus('💬', customText.trim())}
-                placeholder="Custom status..."
-                className="input !py-1.5 text-sm flex-1"
-                maxLength={60}
-              />
+          <div className="absolute bottom-full left-3 right-3 mb-2 glass-strong rounded-2xl border border-white/10 shadow-float z-50 animate-fade-in">
+            {/* who am I + edit profile */}
+            <div className="flex items-center gap-3 p-3 border-b border-white/[0.06]">
+              <Avatar user={user} size="md" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-100 truncate">{user?.name}</p>
+                <p className="text-[11px] text-gray-500 truncate">{user?.title || user?.email}</p>
+              </div>
               <button
-                onClick={() => customText.trim() && handleSetStatus('💬', customText.trim())}
-                className="btn btn-primary !px-3 !py-1.5"
+                onClick={() => { setProfileOpen(true); setStatusOpen(false) }}
+                className="p-2 rounded-lg text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-colors"
+                title="Edit profile"
               >
-                <SmilePlus className="w-4 h-4" />
+                <Pencil className="w-4 h-4" />
               </button>
             </div>
-            {myStatus?.customStatus && (
-              <button onClick={handleClearStatus} className="w-full mt-2 text-xs text-red-400 hover:text-red-300 py-1">
-                Clear status
-              </button>
-            )}
+
+            <div className="p-3">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Set status</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {STATUS_PRESETS.map(preset => {
+                  const on = myStatus?.customStatus === preset.text
+                  return (
+                    <button
+                      key={preset.text}
+                      onClick={() => handleSetStatus(preset.emoji, preset.text)}
+                      className={`flex items-center gap-2 px-2.5 py-2 rounded-xl text-[13px] text-left border transition-colors ${
+                        on ? 'bg-primary-500/15 border-primary-500/40 text-primary-100' : 'border-white/[0.06] bg-white/[0.02] text-gray-300 hover:bg-white/[0.07]'
+                      }`}
+                    >
+                      <span className="text-base leading-none">{preset.emoji}</span>
+                      <span className="truncate">{preset.text}</span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* custom status with emoji picker */}
+              <div className="relative flex gap-1.5 mt-3">
+                {emojiOpen && (
+                  <EmojiPicker
+                    className="bottom-full left-0 mb-2"
+                    onClose={() => setEmojiOpen(false)}
+                    onPick={(e) => setCustomEmoji(e)}
+                    closeOnPick
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEmojiOpen(o => !o)}
+                  className={`w-10 shrink-0 rounded-xl border text-xl flex items-center justify-center transition-colors ${emojiOpen ? 'border-primary-500/50 bg-primary-500/10' : 'border-white/10 bg-dark-300/70 hover:bg-white/[0.08]'}`}
+                  title="Choose emoji"
+                  aria-label="Choose status emoji"
+                >
+                  {customEmoji || <Smile className="w-5 h-5 text-gray-400" />}
+                </button>
+                <input
+                  value={customText}
+                  onChange={(e) => setCustomText(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && customText.trim() && handleSetStatus(customEmoji, customText.trim())}
+                  placeholder="What's your status?"
+                  className="input !py-2 text-sm flex-1 min-w-0"
+                  maxLength={60}
+                />
+              </div>
+
+              <div className="flex items-center gap-2 mt-2">
+                <label className="text-[11px] text-gray-500 shrink-0">Clear after</label>
+                <select value={clearAfter} onChange={(e) => setClearAfter(e.target.value)} className="input !py-1.5 !px-2 text-xs flex-1">
+                  {CLEAR_AFTER.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+                <button
+                  onClick={() => customText.trim() && handleSetStatus(customEmoji, customText.trim())}
+                  disabled={!customText.trim()}
+                  className="btn btn-primary !px-3 !py-1.5 text-xs disabled:opacity-40"
+                >
+                  Save
+                </button>
+              </div>
+
+              {myStatus?.customStatus && (
+                <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-white/[0.06]">
+                  <span className="text-[11px] text-gray-500 truncate">{clearsLabel(myStatus.statusExpiresAt) || 'Stays until you clear it'}</span>
+                  <button onClick={handleClearStatus} className="text-xs text-red-400 hover:text-red-300 font-medium shrink-0 ml-2">Clear status</button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setStatusOpen(!statusOpen)}
-            className="relative flex-1 flex items-center gap-2.5 rounded-xl px-2 py-2 hover:bg-white/[0.04] transition-colors text-left"
+            aria-expanded={statusOpen}
+            className={`relative flex-1 min-w-0 flex items-center gap-2.5 rounded-xl px-2 py-2 transition-colors text-left ${statusOpen ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}`}
           >
             <div className="relative shrink-0">
-              <img src={user?.avatar} alt={user?.name} className="w-9 h-9 rounded-full ring-2 ring-primary-500/30" />
-              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-dark-200" />
+              <Avatar user={user} size="md" ring />
+              <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-dark-200 ${dotFor(myStatus)}`} />
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-gray-200 truncate">{user?.name}</p>
               {myStatus?.customStatus ? (
-                <p className="text-[11px] text-gray-500 truncate">{myStatus.statusEmoji} {myStatus.customStatus}</p>
+                <p className="text-[11px] text-gray-400 truncate">{myStatus.statusEmoji} {myStatus.customStatus}</p>
               ) : (
-                <p className="text-[11px] text-gray-600 flex items-center gap-1"><ChevronDown className="w-3 h-3" /> Set status</p>
+                <p className="text-[11px] text-gray-500 flex items-center gap-1"><ChevronDown className="w-3 h-3" /> Set status</p>
               )}
             </div>
           </button>
@@ -258,6 +350,8 @@ export default function AppShell({ children, wide = false }) {
         </div>
         {children}
       </main>
+
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </div>
   )
 }

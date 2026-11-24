@@ -70,3 +70,26 @@ land on the node that owns it. Before adding a second `server` line in the upstr
 2. Give each node its own `MEDIASOUP_ANNOUNCED_IP` and open its media port range.
 3. Route a room to one node (e.g. hash on the room id) rather than by client IP.
 Until then, keep a single backend and scale by raising `MEDIASOUP_NUM_WORKERS` (uses more CPU cores).
+
+## Load balancing with PM2 (2 nodes on this VPS)
+Preset: `backend/ecosystem.vps.config.cjs` (nodes on 5010/5011, hostnames `node1.meet.arthvex.co.in`, `node2.meet.arthvex.co.in`)
++ `deploy/nginx/meet.arthvex.co.in.multinode.conf`. Frontend stays `meetclone-frontend` (static, port 5005).
+```bash
+# 1. DNS: A records for node1.meet / node2.meet -> VPS IP (meet already exists)
+# 2. Redis (required with >1 node)
+sudo apt install -y redis-server && sudo systemctl enable --now redis-server
+# 3. backend/.env  ->  REDIS_URL=redis://127.0.0.1:6379  CLIENT_URL=https://meet.arthvex.co.in  TRUST_PROXY=1
+#                      MEDIASOUP_ANNOUNCED_IP=<VPS public IP>   (JWT_SECRET is shared: same .env for both nodes)
+# 4. Cert covering all three names
+sudo certbot certonly --nginx -d meet.arthvex.co.in -d node1.meet.arthvex.co.in -d node2.meet.arthvex.co.in
+# 5. nginx (stop Apache first if it owns 80/443; other sites on this VPS must keep their own server blocks)
+sudo cp deploy/nginx/meet.arthvex.co.in.multinode.conf /etc/nginx/sites-available/meet.arthvex.co.in.conf
+sudo nginx -t && sudo systemctl reload nginx
+# 6. Swap the single backend for the two nodes
+cd backend && pm2 delete meetclone-backend
+pm2 start ecosystem.vps.config.cjs --env production && pm2 save
+```
+Firewall: UDP+TCP 40000-49999 stays open (split into 40000-44999 / 45000-49999 per node). Check: `pm2 ls`, `curl -s https://meet.arthvex.co.in/healthz`.
+Deploys: `deploy/scripts/rolling-restart.sh` (pull, migrate, build, then restarts node 1, waits for health, then node 2). Never `pm2 restart all` here: it also bounces your other apps and both nodes at once.
+Verify anytime: `deploy/scripts/check-lb.sh` (checks all three hostnames, both local ports, Redis and PM2 state).
+The nginx file also has rate limits (auth 5 r/s, API 20 r/s per IP), 1 GB streamed uploads for recordings, HSTS and per-node `/healthz`.
