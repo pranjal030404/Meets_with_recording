@@ -1,0 +1,39 @@
+group 'com.cloudwebrtc.webrtc'
+version '1.0-SNAPSHOT'
+
+// Patched for current Android Gradle Plugin: no legacy buildscript block, Java-only module.
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.cloudwebrtc.webrtc'
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 21
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        consumerProguardFiles 'proguard-rules.pro'
+    }
+
+    lintOptions {
+        disable 'InvalidPackage'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'io.github.webrtc-sdk:android:114.5735.08.1'
+    implementation 'com.github.davidliu:audioswitch:89582c47c9a04c62f90aa5e57251af4800a62c9a'
+    implementation 'androidx.annotation:annotation:1.1.0'
+}

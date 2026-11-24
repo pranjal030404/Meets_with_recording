@@ -1,0 +1,157 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../core/session.dart';
+import '../widgets/common.dart';
+import 'meeting_screen.dart';
+
+/// Camera/mic preview + toggles shown before entering a meeting.
+class PreJoinScreen extends StatefulWidget {
+  final String roomId;
+  final String? title;
+  final bool viewOnly;
+  const PreJoinScreen({super.key, required this.roomId, this.title, this.viewOnly = false});
+  @override
+  State<PreJoinScreen> createState() => _PreJoinScreenState();
+}
+
+class _PreJoinScreenState extends State<PreJoinScreen> {
+  bool _mic = false;
+  bool _cam = false;
+  MediaStream? _preview;
+  final _renderer = RTCVideoRenderer();
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _renderer.initialize().then((_) => setState(() => _ready = true));
+  }
+
+  Future<void> _togglePreview(bool cam) async {
+    if (cam) {
+      final st = await Permission.camera.request();
+      if (!st.isGranted) {
+        if (mounted) toast(context, 'Camera permission is required', error: true);
+        return;
+      }
+      try {
+        _preview = await navigator.mediaDevices.getUserMedia({'audio': false, 'video': {'facingMode': 'user'}});
+        _renderer.srcObject = _preview;
+      } catch (e) {
+        if (mounted) toast(context, 'Could not open the camera: $e', error: true);
+        return;
+      }
+    } else {
+      _stopPreview();
+    }
+    setState(() => _cam = cam);
+  }
+
+  void _stopPreview() {
+    _renderer.srcObject = null;
+    for (final t in _preview?.getTracks() ?? <MediaStreamTrack>[]) {
+      t.stop();
+    }
+    _preview?.dispose();
+    _preview = null;
+  }
+
+  Future<void> _toggleMic() async {
+    if (!_mic) {
+      final st = await Permission.microphone.request();
+      if (!st.isGranted) {
+        if (mounted) toast(context, 'Microphone permission is required', error: true);
+        return;
+      }
+    }
+    setState(() => _mic = !_mic);
+  }
+
+  Future<void> _join() async {
+    _stopPreview(); // release the camera so the room can take it
+    await Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MeetingScreen(roomId: widget.roomId, startMic: _mic && !widget.viewOnly, startCam: _cam && !widget.viewOnly, viewOnly: widget.viewOnly),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _stopPreview();
+    _renderer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.title ?? 'Join meeting')),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  color: Colors.black87,
+                  width: double.infinity,
+                  child: _cam && _ready
+                      ? RTCVideoView(_renderer, mirror: true, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)
+                      : Center(
+                          child: Column(mainAxisSize: MainAxisSize.min, children: [
+                            CircleAvatar(radius: 44, backgroundColor: cs.primaryContainer, child: Text(Session.instance.name.isEmpty ? '?' : Session.instance.name[0].toUpperCase(), style: TextStyle(fontSize: 36, color: cs.onPrimaryContainer))),
+                            const SizedBox(height: 12),
+                            Text(Session.instance.name, style: const TextStyle(color: Colors.white, fontSize: 18)),
+                            const SizedBox(height: 4),
+                            const Text('Camera is off', style: TextStyle(color: Colors.white54)),
+                          ]),
+                        ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (!widget.viewOnly)
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                _RoundToggle(on: _mic, onIcon: Icons.mic, offIcon: Icons.mic_off, label: _mic ? 'Mic on' : 'Mic off', onTap: _toggleMic),
+                const SizedBox(width: 24),
+                _RoundToggle(on: _cam, onIcon: Icons.videocam, offIcon: Icons.videocam_off, label: _cam ? 'Camera on' : 'Camera off', onTap: () => _togglePreview(!_cam)),
+              ]),
+            if (!widget.viewOnly && !_mic)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text('You will join muted. Turn the mic on so others can hear you.', style: TextStyle(color: cs.outline), textAlign: TextAlign.center),
+              ),
+            const SizedBox(height: 16),
+            SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: _join, icon: const Icon(Icons.login), label: Text(widget.viewOnly ? 'Watch' : 'Join now'))),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoundToggle extends StatelessWidget {
+  final bool on;
+  final IconData onIcon, offIcon;
+  final String label;
+  final VoidCallback onTap;
+  const _RoundToggle({required this.on, required this.onIcon, required this.offIcon, required this.label, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(children: [
+      IconButton.filled(
+        style: IconButton.styleFrom(backgroundColor: on ? cs.primary : cs.errorContainer, foregroundColor: on ? cs.onPrimary : cs.onErrorContainer, minimumSize: const Size(60, 60)),
+        onPressed: onTap,
+        icon: Icon(on ? onIcon : offIcon, size: 28),
+      ),
+      const SizedBox(height: 6),
+      Text(label, style: const TextStyle(fontSize: 12)),
+    ]);
+  }
+}

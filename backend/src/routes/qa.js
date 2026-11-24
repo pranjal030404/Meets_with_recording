@@ -95,8 +95,7 @@ router.put('/:questionId/upvote', protect, async (req, res) => {
     if (question.hasUserUpvoted(req.user.id)) {
       question.upvotes = upvotes.filter(id => id !== req.user.id);
     } else {
-      upvotes.push(req.user.id);
-      question.upvotes = upvotes;
+      question.upvotes = [...upvotes, req.user.id];
     }
 
     await question.save();
