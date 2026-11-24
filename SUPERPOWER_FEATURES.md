@@ -1,6 +1,6 @@
-# ARTHVEX TEAM Spec → MeetClone Feature Coverage
+# ARTHVEX TEAM Spec → Minutes Feature Coverage
 
-This document maps the **ARTHVEX TEAM — Complete Product Feature & Requirements Specification** (Slack + Teams class blueprint, Sept 2026) to what MeetClone implements today.
+This document maps the **ARTHVEX TEAM — Complete Product Feature & Requirements Specification** (Slack + Teams class blueprint, Sept 2026) to what Minutes implements today.
 
 Legend: ✅ fully working · 🟡 partially working / basic version · ⬜ not yet (roadmap)
 

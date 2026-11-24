@@ -10,7 +10,7 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-/// Thin REST client for the MeetClone backend. Every method returns the decoded
+/// Thin REST client for the Minutes backend. Every method returns the decoded
 /// JSON body and throws [ApiException] with a human readable message on failure.
 class Api {
   Api._();
