@@ -42,15 +42,15 @@
 }
 .lp-btn:active { transform: scale(0.98); }
 .lp-btn-lg { height: 48px; padding: 0 24px; font-size: 15px; }
-.lp-btn-primary { background: var(--text); color: #17140f; }
-.lp-btn-primary:hover { background: #fff; }
-.lp-btn-secondary { background: transparent; color: var(--text); border-color: var(--line-strong); }
+.lp .lp-btn-primary { background: var(--text); color: #17140f; }
+.lp .lp-btn-primary:hover { background: #fff; }
+.lp .lp-btn-secondary { background: transparent; color: var(--text); border-color: var(--line-strong); }
 .lp-btn-secondary:hover { background: var(--raised); }
 .lp-link { color: var(--text-2); font-size: 14px; transition: color 150ms var(--ease); }
 .lp-link:hover { color: var(--text); }
 
 /* ---------- Nav ---------- */
-.lp-nav { position: sticky; top: 0; z-index: 50; background: rgba(18, 17, 16, 0.92); border-bottom: 1px solid var(--line); }
+.lp-nav { position: sticky; top: 0; z-index: 50; background: var(--bg); border-bottom: 1px solid var(--line); }
 .lp-nav-in { height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .lp-brand { display: inline-flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; }
 .lp-mark { width: 28px; height: 28px; border-radius: 8px; background: var(--text); color: #17140f; display: inline-flex; align-items: center; justify-content: center; }
