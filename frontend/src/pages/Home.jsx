@@ -61,18 +61,13 @@ export default function Home() {
         <div className="grid lg:grid-cols-2 gap-14 items-center">
           {/* Left: Actions */}
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-400/25 bg-primary-500/10 px-4 py-1.5 text-xs font-semibold text-primary-200 mb-6 animate-fade-in-up stagger-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
-              HD Video · Recording · Transcripts · Teams
-            </div>
-
-            <h1 className="text-4xl sm:text-5xl xl:text-[3.4rem] font-bold leading-[1.08] tracking-tight mb-5 font-display animate-fade-in-up stagger-2">
-              Video calls and meetings{' '}
-              <span className="gradient-text">for everyone</span>
+<h1 className="text-4xl sm:text-5xl xl:text-[3.4rem] font-bold leading-[1.08] tracking-tight mb-5 font-display animate-fade-in-up stagger-2">
+              Meetings you can record,
+              transcribe and revisit
             </h1>
 
             <p className="text-gray-400 text-lg leading-relaxed mb-9 max-w-lg animate-fade-in-up stagger-3">
-              Connect, collaborate, and celebrate from anywhere. Crystal-clear meetings with live chat, reactions, whiteboard, and smart reminders.
+              HD video with live chat, a whiteboard and screen sharing. Every meeting can be recorded, transcribed and summarized for your team.
             </p>
 
             <div className="flex flex-wrap gap-4 mb-9 animate-fade-in-up stagger-4">
@@ -141,9 +136,9 @@ export default function Home() {
                 <div className="grid grid-cols-2 gap-4">
                   {/* Simulated video tiles */}
                   <DemoTile name="You" color="from-primary-500 to-primary-700" animation="animate-float" icon={<Mic className="w-4 h-4" />} active />
-                  <DemoTile name="Aisha" color="from-emerald-500 to-teal-700" animation="animate-float-delayed" icon={<MessageSquare className="w-4 h-4" />} />
-                  <DemoTile name="Marcus" color="from-fuchsia-500 to-purple-700" animation="animate-float-slow" icon={<Monitor className="w-4 h-4" />} />
-                  <DemoTile name="Sam" color="from-amber-500 to-orange-600" animation="animate-float" icon={<User className="w-4 h-4" />} />
+                  <DemoTile name="Aisha" color="from-slate-600 to-slate-700" animation="animate-float-delayed" icon={<MessageSquare className="w-4 h-4" />} />
+                  <DemoTile name="Marcus" color="from-slate-500 to-slate-700" animation="animate-float-slow" icon={<Monitor className="w-4 h-4" />} />
+                  <DemoTile name="Sam" color="from-zinc-600 to-zinc-700" animation="animate-float" icon={<User className="w-4 h-4" />} />
                 </div>
 
                 {/* Mini control bar */}
@@ -174,7 +169,7 @@ export default function Home() {
           <div className="text-center mb-14 animate-fade-in-up">
             <h2 className="text-3xl sm:text-4xl font-bold font-display tracking-tight">
               Everything you need for{' '}
-              <span className="gradient-text">productive meetings</span>
+              productive meetings
             </h2>
             <p className="text-gray-400 mt-4 max-w-xl mx-auto">
               A complete collaboration suite designed for modern teams, classrooms, and everything in between.
@@ -220,7 +215,7 @@ export default function Home() {
           <div className="mt-16 flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-sm text-gray-500 animate-fade-in stagger-5">
             <span className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-primary-400" />
-              End-to-end authenticated
+              Authenticated rooms
             </span>
             <span className="flex items-center gap-2">
               <Keyboard className="w-4 h-4 text-primary-400" />

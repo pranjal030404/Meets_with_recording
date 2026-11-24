@@ -216,7 +216,7 @@ export default function Whiteboard({ roomId, onClose }) {
 
         {/* Tips */}
         <div className="p-3 border-t border-dark-400 text-xs text-gray-400 text-center">
-          💡 Tip: All participants can draw simultaneously. Click "Save" to download your whiteboard.
+          Everyone can draw at once. Select Save to download the whiteboard.
         </div>
       </div>
     </div>
