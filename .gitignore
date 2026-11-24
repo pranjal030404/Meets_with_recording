@@ -94,3 +94,10 @@ uploads/*
 .parcel-cache/
 .vite/
 .venv-whisper/
+
+# Android builds / APKs
+*.apk
+*.aab
+app/build/
+app/android/.gradle/
+app/android/local.properties

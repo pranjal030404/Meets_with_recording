@@ -127,7 +127,9 @@ router.post('/:pollId/vote', protect, async (req, res) => {
       }
     });
 
-    poll.options = options;
+    // Options were mutated in place; give Sequelize a fresh copy and flag the JSON column as changed so it is saved.
+    poll.options = options.map(o => ({ ...o, votes: [...(o.votes || [])] }));
+    poll.changed('options', true);
     poll.totalVotes = (poll.totalVotes || 0) + 1;
     await poll.save();
 
