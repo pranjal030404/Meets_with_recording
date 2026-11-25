@@ -14,6 +14,7 @@ import EmojiPicker from './EmojiPicker'
 import ProfileModal from './ProfileModal'
 import NotificationBell from './NotificationBell'
 import toast from 'react-hot-toast'
+import api from '../lib/api'
 
 const NAV_ITEMS = [
   { to: '/app', label: 'Home', icon: LayoutDashboard, match: ['/app'] },
@@ -93,6 +94,10 @@ export default function AppShell({ children, wide = false }) {
     useConversationStore.setState({ _myId: user.id })
     const unbindConv = bindConversationSocket(useConversationStore)
     const unbindPresence = bindPresenceSocket(user.id)
+    // The server changes the status around meetings, so the copy saved at login can be out of date
+    api.get('/auth/me')
+      .then(({ data }) => usePresenceStore.getState().setStatus({ ...data.data.user, userId: user.id }))
+      .catch(() => {})
     fetchConversations()
     return () => { unbindConv(); unbindPresence() }
   }, [user?.id])
