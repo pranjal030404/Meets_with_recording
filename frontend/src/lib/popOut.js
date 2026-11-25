@@ -30,7 +30,7 @@ const finish = (composite, extra) => {
 async function openWindow(composite, onLeave) {
   const win = await window.documentPictureInPicture.requestWindow({ width: 380, height: 270 })
   const doc = win.document
-  doc.body.style.cssText = 'margin:0;display:flex;flex-direction:column;height:100vh;background:#0e0f11;font:600 13px system-ui,sans-serif'
+  doc.body.style.cssText = 'margin:0;display:flex;flex-direction:column;height:100vh;background:#121110;font:600 13px system-ui,sans-serif'
   const video = doc.createElement('video')
   video.muted = true // meeting sound keeps playing from the main tab
   video.autoplay = true

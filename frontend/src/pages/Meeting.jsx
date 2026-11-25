@@ -495,7 +495,7 @@ export default function Meeting() {
         <div className="flex flex-col gap-2">
           <span>The host is asking you to unmute</span>
           <div className="flex gap-2">
-            <button className="px-3 py-1 bg-primary-600 rounded text-sm text-white" onClick={() => { toggleMute(); toast.dismiss(t.id) }}>Unmute</button>
+            <button className="px-3 py-1 bg-primary-600 rounded text-sm text-ink" onClick={() => { toggleMute(); toast.dismiss(t.id) }}>Unmute</button>
             <button className="px-3 py-1 bg-dark-400 rounded text-sm text-white" onClick={() => toast.dismiss(t.id)}>Decline</button>
           </div>
         </div>
@@ -633,7 +633,7 @@ export default function Meeting() {
           <span className="flex items-center gap-3 text-sm">
             You've been assigned to {mine.name}
             <button
-              className="px-3 py-1 rounded-full bg-primary-500 text-white text-xs font-semibold"
+              className="px-3 py-1 rounded-full bg-primary-500 text-ink text-xs font-semibold"
               onClick={() => { toast.dismiss(t.id); goToRoom(mine.joinRoomId) }}
             >
               Join
@@ -819,7 +819,7 @@ export default function Meeting() {
 
       {/* Live stream banner */}
       {tools.stream && (
-        <div className="bg-primary-700 text-white text-center py-1.5 text-sm font-medium flex items-center justify-center gap-2 animate-slide-down">
+        <div className="bg-primary-700 text-ink text-center py-1.5 text-sm font-medium flex items-center justify-center gap-2 animate-slide-down">
           <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse" />
           Live streaming to a view-only audience
         </div>

@@ -239,7 +239,7 @@ const Calendar = () => {
                   {day && (
                     <>
                       <div className={`text-sm font-semibold mb-1.5 flex items-center justify-center rounded-full transition-colors ${
-                        isToday ? 'w-7 h-7 text-white bg-primary-500' : isPast ? 'text-gray-600' : 'text-gray-200'
+                        isToday ? 'w-7 h-7 text-ink bg-primary-500' : isPast ? 'text-gray-600' : 'text-gray-200'
                       } ${!isToday ? 'group-hover:text-white' : ''}`}>
                         {day.getDate()}
                       </div>

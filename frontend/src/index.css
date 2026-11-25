@@ -58,8 +58,8 @@ p, h1, h2, h3, h4, li, td, th, label { overflow-wrap: anywhere; }
 
 body {
   font-family: 'Manrope', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background-color: #0e0f11;
-  color: #ededee;
+  background-color: #121110;
+  color: #f2eee8;
   min-height: 100vh;
   min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
@@ -71,7 +71,7 @@ h1, h2, h3, .font-display {
 }
 
 ::selection {
-  background: rgba(59, 130, 246, 0.4);
+  background: rgba(232, 163, 61, 0.4);
   color: #fff;
 }
 
@@ -87,12 +87,12 @@ h1, h2, h3, .font-display {
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #34353a;
+    background: #3d3833;
     border-radius: 8px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #4a4b51;
+    background: #524c45;
   }
 
   /* ---------- Fix Chrome/Safari autofill white boxes + text overlap ---------- */
@@ -102,9 +102,9 @@ h1, h2, h3, .font-display {
   input:-webkit-autofill:active,
   textarea:-webkit-autofill,
   select:-webkit-autofill {
-    -webkit-text-fill-color: #f1f5f9;
-    caret-color: #f1f5f9;
-    -webkit-box-shadow: 0 0 0 1000px #1b1c1f inset;
+    -webkit-text-fill-color: #f2eee8;
+    caret-color: #f2eee8;
+    -webkit-box-shadow: 0 0 0 1000px #211f1d inset;
     transition: background-color 9999s ease-in-out 0s;
   }
 }
@@ -112,7 +112,7 @@ h1, h2, h3, .font-display {
 /* ---------- Video container ---------- */
 .video-container {
   position: relative;
-  background: #1b1c1f;
+  background: #211f1d;
   border-radius: 16px;
   overflow: hidden;
   transition: box-shadow 0.2s ease;
@@ -122,7 +122,7 @@ h1, h2, h3, .font-display {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  background: #141517;
+  background: #1a1917;
 }
 
 /* ---------- Participant grid ---------- */
@@ -230,7 +230,7 @@ h1, h2, h3, .font-display {
 }
 
 /* ---------- Skeleton ---------- */
-.skeleton { background: #1b1c1f; }
+.skeleton { background: #211f1d; }
 
 /* ============================================================
    COMPONENT CLASSES — wrapped in @layer components so Tailwind
@@ -245,7 +245,7 @@ h1, h2, h3, .font-display {
     @apply disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-lg { @apply min-h-12 px-6 text-base; }
-  .btn-primary { @apply bg-primary-600 text-white hover:bg-primary-700; }
+  .btn-primary { @apply bg-gray-100 text-ink hover:bg-white; }
   .btn-secondary { @apply border border-white/10 bg-white/[0.04] text-gray-100 hover:border-white/20 hover:bg-white/[0.08]; }
   .btn-danger { @apply bg-red-600 text-white hover:bg-red-700; }
   .btn-success { @apply bg-emerald-700 text-white hover:bg-emerald-800; }
@@ -273,7 +273,7 @@ h1, h2, h3, .font-display {
 
   /* ---------- Chat ---------- */
   .chat-message { @apply mb-2 max-w-[80%] rounded-2xl p-3; }
-  .chat-message.own { @apply ml-auto rounded-br-md bg-primary-600 text-white; }
+  .chat-message.own { @apply ml-auto rounded-br-md bg-primary-500 text-ink; }
   .chat-message.other { @apply rounded-bl-md border border-white/[0.06] bg-dark-300 text-gray-100; }
 
   /* ---------- Inputs ---------- */
@@ -336,8 +336,8 @@ h1, h2, h3, .font-display {
     font-size: 11px;
     font-weight: 500;
     white-space: nowrap;
-    color: #ededee;
-    background: #1b1c1f;
+    color: #f2eee8;
+    background: #211f1d;
     border: 1px solid rgba(255, 255, 255, 0.10);
     opacity: 0;
     pointer-events: none;

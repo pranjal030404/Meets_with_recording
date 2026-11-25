@@ -195,7 +195,7 @@ function PeopleResults({ items }) {
               {u.avatar ? (
                 <img src={u.avatar} className="w-10 h-10 rounded-full" alt={u.name} />
               ) : (
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-semibold text-white ${u.isOnline ? 'bg-primary-500' : 'bg-dark-300'}`}>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-semibold text-ink ${u.isOnline ? 'bg-primary-500' : 'bg-dark-300'}`}>
                   {u.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                 </div>
               )}

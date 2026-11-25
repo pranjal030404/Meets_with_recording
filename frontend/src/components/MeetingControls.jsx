@@ -345,7 +345,7 @@ function ControlButton({ active, activeColor = 'default', onClick, icon, label, 
     switch (activeColor) {
       case 'green': return 'bg-green-500 text-white'
       case 'red': return 'bg-red-500 text-white'
-      case 'blue': return 'bg-primary-500 text-white'
+      case 'blue': return 'bg-primary-500 text-ink'
       case 'yellow': return 'bg-yellow-500 text-black'
       default: return 'bg-dark-400/70 hover:bg-dark-500/80 border border-white/[0.06] text-gray-200'
     }
@@ -376,7 +376,7 @@ function ControlButton({ active, activeColor = 'default', onClick, icon, label, 
       )}
       {icon}
       {badge != null && (
-        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-primary-500 rounded-full text-[10px] flex items-center justify-center px-1 font-semibold text-white">
+        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-primary-500 rounded-full text-[10px] flex items-center justify-center px-1 font-semibold text-ink">
           {badge}
         </span>
       )}

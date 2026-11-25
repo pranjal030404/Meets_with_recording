@@ -127,7 +127,7 @@ export default function VideoGrid({
           ) : (
             <div className="text-center">
               <div className="w-24 h-24 bg-primary-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-4xl font-semibold text-white">
+                <span className="text-4xl font-semibold text-ink">
                   {screenShareUser.name?.charAt(0).toUpperCase()}
                 </span>
               </div>
@@ -233,7 +233,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
       {isVideoOff || !stream || (!isLocal && !hasRemoteVideo) ? (
         <div className="w-full h-full flex items-center justify-center bg-dark-300">
           <div className={`${small ? 'w-14 h-14' : 'w-24 h-24'} bg-primary-500 rounded-full flex items-center justify-center`}>
-            <span className={`${small ? 'text-xl' : 'text-3xl'} font-semibold text-white`}>
+            <span className={`${small ? 'text-xl' : 'text-3xl'} font-semibold text-ink`}>
               {user?.name?.charAt(0).toUpperCase() || <User className={small ? 'w-6 h-6' : 'w-10 h-10'} />}
             </span>
           </div>

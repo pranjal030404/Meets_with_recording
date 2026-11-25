@@ -100,7 +100,7 @@ export default function ParticipantsList({
           {waitingRoomUsers.length > 1 && (
             <button
               onClick={() => waitingRoomUsers.forEach(u => onAdmit(u.socketId))}
-              className="w-full mb-2 px-3 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg text-sm font-medium transition-colors"
+              className="w-full mb-2 px-3 py-2 bg-primary-600 hover:bg-primary-700 text-ink rounded-lg text-sm font-medium transition-colors"
             >
               Admit All ({waitingRoomUsers.length})
             </button>

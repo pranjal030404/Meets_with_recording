@@ -284,7 +284,7 @@ export default function JoinMeeting() {
               {isVideoOff ? (
                 <div className="w-full h-full flex items-center justify-center bg-dark-300">
                   <div className="w-24 h-24 bg-primary-500 rounded-full flex items-center justify-center">
-                    <span className="text-3xl font-semibold">
+                    <span className="text-3xl font-semibold text-ink">
                       {user?.name?.charAt(0).toUpperCase()}
                     </span>
                   </div>

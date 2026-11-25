@@ -17,6 +17,7 @@ import {
 import { useAuthStore } from '../store/authStore'
 import branding, { copyrightHolder } from '../config/branding'
 import './landing.css'
+import BrandMark from '../components/BrandMark'
 
 const ICON = { size: 20, strokeWidth: 1.5 }
 
@@ -61,7 +62,7 @@ export default function Landing() {
       <header className="lp-nav">
         <nav className="lp-wrap lp-nav-in">
           <Link to="/" className="lp-brand">
-            <span className="lp-mark"><Video size={16} strokeWidth={1.75} /></span>
+            <BrandMark size="sm" />
             {branding.appName}
           </Link>
 
