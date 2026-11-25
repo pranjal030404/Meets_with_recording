@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import '../core/theme.dart';
 import '../core/api.dart';
 import '../widgets/common.dart';
 
 class BillingScreen extends StatefulWidget {
-  const BillingScreen({super.key});
+  final bool embedded;
+  const BillingScreen({super.key, this.embedded = false});
   @override
   State<BillingScreen> createState() => _BillingScreenState();
 }
@@ -56,7 +58,7 @@ class _BillingScreenState extends State<BillingScreen> {
     final sub = asMap(me?['subscription']);
     final usage = asMap(me?['usage']);
     return Scaffold(
-      appBar: AppBar(title: const Text('Plan & billing')),
+      appBar: widget.embedded ? null : AppBar(title: const Text('Billing')),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
@@ -64,16 +66,17 @@ class _BillingScreenState extends State<BillingScreen> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView(padding: const EdgeInsets.all(16), children: [
+                    if (widget.embedded) const PageHeader('Billing', subtitle: 'Your subscription, usage and payment history'),
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Text('Current plan', style: TextStyle(color: cs.outline)),
-                          Text((asMap(sub['plan'])['name'] ?? currentSlug).toString(), style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+                          Text((asMap(sub['plan'])['name'] ?? currentSlug).toString(), style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w500)),
                           if (sub['status'] != null) Text('Status: ${sub['status']}${sub['cancelAtPeriodEnd'] == true ? ' (cancels at period end)' : ''}'),
                           if (usage.isNotEmpty) ...[
                             const Divider(height: 24),
-                            ...usage.entries.where((e) => e.value is num).map((e) => Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Row(children: [Expanded(child: Text(e.key)), Text('${e.value}')]))),
+                            ...usage.entries.where((e) => e.value is num).map((e) => Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Row(children: [Expanded(child: Text(const {'meetingsCreated': 'Meetings created', 'meetingMinutes': 'Meeting minutes', 'recordingMinutes': 'Recording minutes'}[e.key] ?? e.key)), Text('${e.value}')]))),
                           ],
                           if (currentSlug != 'free')
                             Row(children: [
@@ -106,13 +109,13 @@ class _BillingScreenState extends State<BillingScreen> {
                           padding: const EdgeInsets.all(16),
                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Row(children: [
-                              Expanded(child: Text(p['name'].toString(), style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700))),
+                              Expanded(child: Text(p['name'].toString(), style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w500))),
                               Text('${p['currency'] ?? 'USD'} $price/${interval == 'monthly' ? 'mo' : 'yr'}', style: const TextStyle(fontWeight: FontWeight.w600)),
                             ]),
                             if ((p['description'] ?? '').toString().isNotEmpty) Text(p['description'].toString(), style: TextStyle(color: cs.outline)),
                             const SizedBox(height: 8),
-                            ...features.map((f) => Row(children: [const Icon(Icons.check, size: 16, color: Colors.green), const SizedBox(width: 6), Expanded(child: Text(f.toString()))])),
-                            const SizedBox(height: 10),
+                            ...features.map((f) => Row(children: [const Icon(Icons.check, size: 16, color: AppTheme.done), const SizedBox(width: 8), Expanded(child: Text(f.toString()))])),
+                            const SizedBox(height: 12),
                             SizedBox(width: double.infinity, child: current ? const Chip(label: Text('Current plan')) : FilledButton.tonal(onPressed: () => _subscribe(p), child: Text('Choose ${p['name']}'))),
                           ]),
                         ),

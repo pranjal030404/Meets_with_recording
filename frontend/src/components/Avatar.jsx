@@ -9,10 +9,8 @@ const SIZES = {
   '2xl': 'w-28 h-28 text-3xl',
 }
 const DOTS = { xs: 'w-2 h-2', sm: 'w-2.5 h-2.5', md: 'w-3 h-3', lg: 'w-3.5 h-3.5', xl: 'w-4 h-4', '2xl': 'w-5 h-5' }
-const PALETTE = [
-  'from-sky-500 to-blue-700', 'from-violet-500 to-purple-700', 'from-emerald-500 to-teal-700',
-  'from-rose-500 to-pink-700', 'from-amber-500 to-orange-700', 'from-cyan-500 to-indigo-700',
-]
+// muted, one step apart: enough to tell people apart without competing with the blue accent
+const PALETTE = ['bg-[#31528c]', 'bg-[#2f6660]', 'bg-[#5b4a7d]', 'bg-[#7a4553]', 'bg-[#75592f]', 'bg-[#46525f]']
 
 export const initialsOf = (name = '?') =>
   String(name).trim().split(/\s+/).map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
@@ -48,7 +46,7 @@ export default function Avatar({ user, name, src, size = 'md', online, ring = fa
       ) : (
         <div
           aria-label={label}
-          className={`${SIZES[size]} rounded-full flex items-center justify-center font-bold text-white bg-gradient-to-br ${colorOf(user?.id || label)} ${ring ? 'ring-2 ring-primary-500/40' : ''}`}
+          className={`${SIZES[size]} rounded-full flex items-center justify-center font-medium text-white ${colorOf(user?.id || label)} ${ring ? 'ring-2 ring-primary-500/40' : ''}`}
         >
           {initialsOf(label)}
         </div>

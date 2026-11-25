@@ -7,6 +7,7 @@ import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import FileEntry from '../models/FileEntry.js';
 import { protect } from '../middleware/auth.js';
+import { parseBreakoutRoomId } from '../lib/breakoutRoomId.js';
 
 const router = express.Router();
 
@@ -25,6 +26,11 @@ const recipientInclude = () => ({
 router.get('/:roomId/messages', protect, async (req, res) => {
   try {
     const { limit = 50, before } = req.query;
+
+    // Breakout chat is live only (see chat:send), so there is no history to load
+    if (parseBreakoutRoomId(req.params.roomId)) {
+      return res.json({ success: true, data: { messages: [] } });
+    }
 
     const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
 

@@ -47,7 +47,8 @@ class Api {
       } else {
         msg = e.message ?? 'Request failed';
       }
-      final isCredential = RegExp(r'/auth/(login|signup)').hasMatch(path);
+      // A 401 from these must not trigger a logout (logout itself would loop forever on an expired token).
+      final isCredential = RegExp(r'/auth/(login|signup|logout)').hasMatch(path);
       final suspended = status == 403 && msg.toLowerCase().contains('suspended');
       if ((status == 401 || suspended) && !isCredential) onUnauthorized?.call();
       throw ApiException(msg, status: status, code: code);

@@ -48,17 +48,17 @@ export default function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/75 backdrop-blur-md animate-fade-in"
+        className="absolute inset-0 bg-black/75"
         onClick={onClose}
       />
 
       {/* Modal */}
       <div
         className={`
-          relative bg-dark-200/95 backdrop-blur-xl rounded-2xl p-6 w-full ${sizes[size]}
+          relative bg-dark-200/95 rounded-2xl p-6 w-full ${sizes[size]}
           border border-white/10
           animate-slide-up
-          shadow-float
+         
           max-h-[90vh] overflow-y-auto
         `}
       >
@@ -69,12 +69,12 @@ export default function Modal({
         {(title || showCloseButton) && (
           <div className="flex items-center justify-between mb-5">
             {title && (
-              <h2 className="text-2xl font-bold text-white font-display">{title}</h2>
+              <h2 className="text-2xl font-semibold text-white font-display">{title}</h2>
             )}
             {showCloseButton && (
               <button
                 onClick={onClose}
-                className="p-2 hover:bg-dark-400/70 rounded-xl transition-all duration-200 text-gray-400 hover:text-white hover:rotate-90 ml-auto"
+                className="p-2 hover:bg-dark-400/70 rounded-xl transition-colors text-gray-400 hover:text-white ml-auto"
               >
                 <X className="w-5 h-5" />
               </button>

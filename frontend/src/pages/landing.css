@@ -1,22 +1,20 @@
-/* Landing page. Scoped under .lp so shared app styles are untouched.
-   Spacing is on a 4px grid. Neutrals are a warm graphite ramp, one amber accent,
-   and a red tally used only for recording. */
+/* Landing page. Scoped under .lp. Same graphite ramp, blue accent and type as the app. */
 
 .lp {
-  --bg: #121110;
-  --surface: #1a1917;
-  --raised: #211f1d;
-  --line: rgba(242, 238, 232, 0.08);
-  --line-strong: rgba(242, 238, 232, 0.14);
-  --text: #f2eee8;
-  --text-2: #a8a299;
-  --text-3: #8a847b;
-  --accent: #e8a33d;
-  --accent-ink: #1a1307;
+  --bg: #0e0f11;
+  --surface: #141517;
+  --raised: #1b1c1f;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --text: #ededee;
+  --text-2: #a1a2a7;
+  --text-3: #85868c;
+  --accent: #60a5fa;
+  --accent-fill: #2563eb;
   --tally: #e5484d;
-  --ok: #6fbf8e;
+  --ok: #34d399;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
 
   position: relative;
   min-height: 100vh;
@@ -25,7 +23,7 @@
   font-family: 'Manrope', 'Segoe UI', sans-serif;
   overflow-x: clip;
 }
-.lp h1, .lp h2, .lp h3 { font-family: 'Manrope', 'Segoe UI', sans-serif; font-weight: 500; }
+.lp h1, .lp h2, .lp h3 { font-family: 'Space Grotesk', 'Manrope', sans-serif; font-weight: 600; }
 .lp a { color: inherit; text-decoration: none; }
 .lp :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
@@ -42,8 +40,8 @@
 }
 .lp-btn:active { transform: scale(0.98); }
 .lp-btn-lg { height: 48px; padding: 0 24px; font-size: 15px; }
-.lp .lp-btn-primary { background: var(--text); color: #17140f; }
-.lp .lp-btn-primary:hover { background: #fff; }
+.lp .lp-btn-primary { background: var(--accent-fill); color: #fff; }
+.lp .lp-btn-primary:hover { background: #1d4ed8; }
 .lp .lp-btn-secondary { background: transparent; color: var(--text); border-color: var(--line-strong); }
 .lp-btn-secondary:hover { background: var(--raised); }
 .lp-link { color: var(--text-2); font-size: 14px; transition: color 150ms var(--ease); }
@@ -53,7 +51,7 @@
 .lp-nav { position: sticky; top: 0; z-index: 50; background: var(--bg); border-bottom: 1px solid var(--line); }
 .lp-nav-in { height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .lp-brand { display: inline-flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; }
-.lp-mark { width: 28px; height: 28px; border-radius: 8px; background: var(--text); color: #17140f; display: inline-flex; align-items: center; justify-content: center; }
+.lp-mark { width: 28px; height: 28px; border-radius: 8px; background: var(--accent-fill); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
 .lp-links { display: none; align-items: center; gap: 32px; }
 @media (min-width: 768px) { .lp-links { display: flex; } }
 .lp-nav-actions { display: flex; align-items: center; gap: 20px; }
@@ -93,7 +91,7 @@
   border-radius: 999px 999px 0 0; background: var(--fig);
 }
 .lp-tile-speaking { box-shadow: inset 0 0 0 2px var(--accent); }
-.lp-chip { position: absolute; left: 8px; bottom: 8px; z-index: 1; font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: 4px; background: rgba(18, 17, 16, 0.72); color: var(--text); }
+.lp-chip { position: absolute; left: 8px; bottom: 8px; z-index: 1; font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: 4px; background: rgba(14, 15, 17, 0.72); color: var(--text); }
 
 .lp-side { background: var(--bg); border-radius: 8px; padding: 12px; display: none; flex-direction: column; gap: 12px; }
 @media (min-width: 768px) { .lp-side { display: flex; } }

@@ -16,8 +16,8 @@ export default class ErrorBoundary extends Component {
     if (!this.state.error) return this.props.children
     return (
       <div className="min-h-screen bg-dark-100 text-white flex items-center justify-center p-6">
-        <div className="max-w-md w-full rounded-3xl border border-white/10 bg-dark-200/70 p-6 text-center">
-          <h1 className="text-xl font-bold mb-2">Something went wrong</h1>
+        <div className="max-w-md w-full rounded-2xl border border-white/10 bg-dark-200/70 p-6 text-center">
+          <h1 className="text-xl font-semibold mb-2">Something went wrong</h1>
           <p className="text-sm text-gray-400 mb-4">This screen hit an unexpected error. Your data is safe.</p>
           <pre className="text-left text-xs text-red-300 bg-black/30 rounded-xl p-3 mb-5 overflow-auto max-h-32 whitespace-pre-wrap">
             {String(this.state.error?.message || this.state.error)}

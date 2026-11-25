@@ -40,8 +40,7 @@ export default function LoadingSpinner({
 
 export function PageLoader({ text = 'Loading...' }) {
   return (
-    <div className="min-h-screen bg-dark-100 flex items-center justify-center aurora-bg">
-      <div className="blob w-96 h-96 bg-primary-600/20 animate-aurora -top-20" />
+    <div className="min-h-screen bg-dark-100 flex items-center justify-center">
       <LoadingSpinner size="lg" text={text} />
     </div>
   )

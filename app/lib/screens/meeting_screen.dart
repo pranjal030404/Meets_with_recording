@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -7,6 +8,7 @@ import '../core/config.dart';
 import '../core/meeting_controller.dart';
 import '../widgets/common.dart';
 import 'meeting_panels.dart';
+import 'meeting_tools.dart';
 
 class MeetingScreen extends StatefulWidget {
   final String roomId;
@@ -20,6 +22,11 @@ class MeetingScreen extends StatefulWidget {
 
 class _MeetingScreenState extends State<MeetingScreen> {
   late final MeetingController c;
+  static const _pipChannel = MethodChannel('minutes/pip');
+  bool _pip = false; // showing as a floating window
+  String? _callState; // last state sent to Android
+  bool _hideSelf = false;
+  bool _mirrorSelf = true;
   bool _speaker = true;
   bool _showControls = true;
   String? _lastInfo;
@@ -30,6 +37,20 @@ class _MeetingScreenState extends State<MeetingScreen> {
     super.initState();
     c = MeetingController(widget.roomId, startMic: widget.startMic, startCam: widget.startCam, viewOnly: widget.viewOnly);
     c.addListener(_onChange);
+    _pipChannel.setMethodCallHandler((call) async {
+      if (!mounted) return;
+      // buttons on the floating window
+      if (call.method == 'pipAction') {
+        if (call.arguments == 'mic') c.toggleMic();
+        if (call.arguments == 'leave') _leaveFromPip();
+        return;
+      }
+      if (call.method != 'pipChanged') return;
+      final inPip = call.arguments == true;
+      // sheets and dialogs would fill the tiny window
+      if (inPip) Navigator.of(context).popUntil((r) => r.settings.name == 'meeting' || r.isFirst);
+      setState(() => _pip = inPip);
+    });
     c.join().then((_) => c.toggleSpeaker(true));
     WakelockPlus.enable();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -37,8 +58,41 @@ class _MeetingScreenState extends State<MeetingScreen> {
     });
   }
 
+  /// Tell Android about the call: whether to keep it alive in the background, and whether to pop out
+  /// when the person leaves the app (not while presenting, since the window would be in the shared
+  /// picture, nor while Android's capture permission dialog is opening).
+  void _syncCall() {
+    if (_finished) return;
+    final inCall = c.phase == RoomPhase.connected;
+    final pop = inCall && !c.screenSharing && !c.screenShareBusy && !c.recordingBusy;
+    final state = '$inCall $pop ${c.micOn} ${c.camOn}';
+    if (state == _callState) return;
+    _callState = state;
+    _android('update', {'inCall': inCall, 'pop': pop, 'micOn': c.micOn});
+  }
+
+  /// Not left to dispose(): Flutter draws no frames in the background, so the screen stays mounted
+  /// (and the call service running) until the app is opened again.
+  void _endAndroidCall() {
+    _android('update', {'inCall': false, 'pop': false, 'micOn': false});
+    _android('close');
+  }
+
+  /// No-op on platforms without the Android side.
+  void _android(String method, [Object? args]) {
+    _pipChannel.invokeMethod(method, args).catchError((_) {});
+  }
+
+  Future<void> _leaveFromPip() async {
+    _finished = true;
+    _endAndroidCall();
+    await c.leave();
+    if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+  }
+
   void _onChange() {
     if (!mounted) return;
+    _syncCall();
     final info = c.infoMessage;
     if (info != null && info != _lastInfo) {
       _lastInfo = info;
@@ -46,16 +100,37 @@ class _MeetingScreenState extends State<MeetingScreen> {
       c.infoMessage = null;
       _lastInfo = null;
     }
+    if (c.switchTo != null && !_switching) {
+      _switchRoom(c.switchTo!);
+      return;
+    }
     if (c.phase == RoomPhase.ended) {
       _finish(c.error ?? 'The meeting has ended.');
     }
     setState(() {});
   }
 
+  bool _switching = false;
+  Future<void> _switchRoom(String roomId) async {
+    _switching = true;
+    _finished = true;
+    final nav = Navigator.of(context);
+    final mic = c.micOn, cam = c.camOn;
+    // no REST leave: moving to a breakout room must not mark you as having left the meeting
+    await c.leave(notifyServer: false);
+    if (!mounted) return;
+    nav.popUntil((r) => r.settings.name == 'meeting' || r.isFirst);
+    nav.pushReplacement(MaterialPageRoute(
+      settings: const RouteSettings(name: 'meeting'),
+      builder: (_) => MeetingScreen(roomId: roomId, startMic: mic, startCam: cam, viewOnly: widget.viewOnly),
+    ));
+  }
+
   bool _finished = false;
   Future<void> _finish(String msg) async {
     if (_finished) return;
     _finished = true;
+    _endAndroidCall();
     await c.leave(notifyServer: false);
     if (!mounted) return;
     Navigator.of(context).popUntil((r) => r.isFirst);
@@ -72,8 +147,14 @@ class _MeetingScreenState extends State<MeetingScreen> {
   @override
   void dispose() {
     _ticker?.cancel();
-    WakelockPlus.disable();
+    // the next room's screen is already keeping the display on
+    if (!_switching) WakelockPlus.disable();
     c.removeListener(_onChange);
+    // when moving between rooms the next screen takes the channel over
+    if (!_switching) {
+      _pipChannel.setMethodCallHandler(null);
+      _android('update', {'inCall': false, 'pop': false, 'micOn': false});
+    }
     c.dispose();
     super.dispose();
   }
@@ -87,26 +168,38 @@ class _MeetingScreenState extends State<MeetingScreen> {
         if (!didPop) _leave();
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF0B0D14),
+        backgroundColor: const Color(0xFF121110),
         body: SafeArea(child: _body()),
       ),
     );
   }
 
   Widget _body() {
+    if (_pip && c.phase == RoomPhase.connected) return _pipView();
     switch (c.phase) {
       case RoomPhase.connecting:
         return _center(const CircularProgressIndicator(), 'Joining meeting…');
       case RoomPhase.waiting:
         return _center(const Icon(Icons.hourglass_top, size: 48, color: Colors.white70), 'Waiting for the host to let you in…', action: TextButton(onPressed: _leave, child: const Text('Cancel')));
       case RoomPhase.failed:
-        return _center(const Icon(Icons.error_outline, size: 48, color: Colors.redAccent), c.error ?? 'Could not join the meeting',
+        return _center(const Icon(Icons.error_outline, size: 48, color: AppTheme.overdue), c.error ?? 'Could not join the meeting',
             action: FilledButton(onPressed: () { c.leave(notifyServer: false); Navigator.pop(context); }, child: const Text('Back')));
       case RoomPhase.ended:
         return _center(const Icon(Icons.call_end, size: 48, color: Colors.white70), 'Meeting ended');
       case RoomPhase.connected:
         return _room();
     }
+  }
+
+  /// The floating window: just whoever matters most right now.
+  Widget _pipView() {
+    final peers = c.peers.values.toList();
+    final sharer = peers.cast<Peer?>().firstWhere((p) => p!.screen != null, orElse: () => null);
+    final focus = sharer ??
+        c.peers[c.spotlightUserId ?? c.pinnedUserId] ??
+        peers.cast<Peer?>().firstWhere((p) => p!.speaking, orElse: () => null) ??
+        (peers.isEmpty ? null : peers.first);
+    return focus == null ? _selfTile() : _peerTile(focus, forceScreen: focus == sharer);
   }
 
   Widget _center(Widget icon, String text, {Widget? action}) => Center(
@@ -140,12 +233,18 @@ class _MeetingScreenState extends State<MeetingScreen> {
         // captions
         if (c.caption != null)
           Positioned(left: 16, right: 16, bottom: 110, child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(8)),
             child: Text('${c.captionBy ?? ''}: ${c.caption}', style: const TextStyle(color: Colors.white), textAlign: TextAlign.center),
           )),
         // waiting room banner for hosts
         if (c.isManager && c.waiting.isNotEmpty) Positioned(top: 60, left: 12, right: 12, child: _waitingBanner()),
+        // stays visible even with the controls hidden: nobody should share without knowing
+        if (c.screenSharing) Positioned(left: 12, right: 12, bottom: 96, child: _sharingBanner()),
+        if (c.inBreakout) Positioned(top: 60, left: 12, right: 12, child: _breakoutBanner(
+              'You are in a breakout room', 'Return', c.returnToMainRoom)),
+        if (c.assignedRoom != null) Positioned(top: 60, left: 12, right: 12, child: _breakoutBanner(
+              'You are assigned to ${c.assignedRoom!['name']}', 'Join', () => c.joinBreakout(c.assignedRoom!), onClose: c.dismissAssignment)),
         if (_showControls) Positioned(left: 0, right: 0, bottom: 0, child: _controls()),
       ]),
     );
@@ -165,7 +264,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
       }
     }
     final link = c.linkState;
-    final linkColor = link == 'connected' ? Colors.greenAccent : (link == 'failed' || link == 'disconnected') ? Colors.redAccent : Colors.amber;
+    final linkColor = link == 'connected' ? AppTheme.done : (link == 'failed' || link == 'disconnected') ? AppTheme.overdue : AppTheme.inProgress;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
       decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent])),
@@ -173,7 +272,8 @@ class _MeetingScreenState extends State<MeetingScreen> {
         Icon(Icons.circle, size: 10, color: linkColor),
         const SizedBox(width: 8),
         Expanded(child: Text(m?['title']?.toString() ?? 'Meeting', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
-        if (c.recording) const Padding(padding: EdgeInsets.only(right: 8), child: Chip(label: Text('REC'), avatar: Icon(Icons.fiber_manual_record, color: Colors.red, size: 14), visualDensity: VisualDensity.compact)),
+        if (c.stream != null) const Padding(padding: EdgeInsets.only(right: 8), child: Chip(label: Text('LIVE'), avatar: Icon(Icons.sensors, color: AppTheme.overdue, size: 14), visualDensity: VisualDensity.compact)),
+        if (c.recording || c.recordingLocally) const Padding(padding: EdgeInsets.only(right: 8), child: Chip(label: Text('REC'), avatar: Icon(Icons.fiber_manual_record, color: AppTheme.overdue, size: 14), visualDensity: VisualDensity.compact)),
         if (timerText != null) Padding(padding: const EdgeInsets.only(right: 8), child: Chip(label: Text(timerText), avatar: const Icon(Icons.timer, size: 14), visualDensity: VisualDensity.compact)),
         if (c.locked) const Padding(padding: EdgeInsets.only(right: 8), child: Icon(Icons.lock, color: Colors.white70, size: 18)),
         IconButton(
@@ -191,6 +291,32 @@ class _MeetingScreenState extends State<MeetingScreen> {
       ]),
     );
   }
+
+  Widget _breakoutBanner(String text, String action, VoidCallback onTap, {VoidCallback? onClose}) => Card(
+        color: Colors.black87,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+          child: Row(children: [
+            Expanded(child: Text(text, style: const TextStyle(color: Colors.white))),
+            FilledButton(onPressed: onTap, child: Text(action)),
+            if (onClose != null) IconButton(onPressed: onClose, tooltip: 'Dismiss', icon: const Icon(Icons.close, color: Colors.white70)),
+          ]),
+        ),
+      );
+
+  Widget _sharingBanner() => Card(
+        color: Colors.black87,
+        child: ListTile(
+          dense: true,
+          leading: const Icon(Icons.screen_share, color: AppTheme.done),
+          title: const Text('You are sharing your screen', style: TextStyle(color: Colors.white)),
+          trailing: FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.overdue, foregroundColor: Colors.white),
+            onPressed: c.stopScreenShare,
+            child: const Text('Stop'),
+          ),
+        ),
+      );
 
   Widget _waitingBanner() => Card(
         color: Colors.black87,
@@ -211,20 +337,20 @@ class _MeetingScreenState extends State<MeetingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: c.reactions.reversed.take(4).map((r) => Container(
               margin: const EdgeInsets.only(top: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(14)),
               child: Text('${r.emoji} ${r.name}', style: const TextStyle(color: Colors.white)),
             )).toList(),
       );
 
   // ------------------------------------------------------------------ layouts
   Widget _gridLayout(List<Peer> peers) {
-    final tiles = <Widget>[_selfTile(), ...peers.map(_peerTile)];
+    final tiles = <Widget>[if (!_hideSelf || peers.isEmpty) _selfTile(), ...peers.map(_peerTile)];
     final n = tiles.length;
     if (n == 1) return Padding(padding: const EdgeInsets.fromLTRB(8, 56, 8, 100), child: tiles.first);
     final cols = n <= 4 ? (n == 1 ? 1 : 2) : (n <= 9 ? 3 : 4);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(6, 56, 6, 100),
+      padding: const EdgeInsets.fromLTRB(8, 56, 8, 100),
       child: LayoutBuilder(builder: (context, box) {
         final rows = (n / cols).ceil();
         final w = box.maxWidth / cols;
@@ -240,14 +366,14 @@ class _MeetingScreenState extends State<MeetingScreen> {
   Widget _featuredLayout(Peer p, List<Peer> all, {required bool isShare}) {
     final others = all.where((x) => x != p).toList();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(6, 56, 6, 100),
+      padding: const EdgeInsets.fromLTRB(8, 56, 8, 100),
       child: Column(children: [
         Expanded(child: _peerTile(p, big: true, forceScreen: isShare)),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         SizedBox(
           height: 110,
           child: ListView(scrollDirection: Axis.horizontal, children: [
-            SizedBox(width: 90, child: Padding(padding: const EdgeInsets.all(3), child: _selfTile())),
+            if (!_hideSelf) SizedBox(width: 90, child: Padding(padding: const EdgeInsets.all(3), child: _selfTile())),
             ...others.map((o) => SizedBox(width: 90, child: Padding(padding: const EdgeInsets.all(3), child: _peerTile(o)))),
           ]),
         ),
@@ -261,9 +387,9 @@ class _MeetingScreenState extends State<MeetingScreen> {
       onDoubleTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF1A1D29),
+          color: const Color(0xFF211F1D),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: speaking ? Colors.greenAccent : Colors.transparent, width: 2.5),
+          border: Border.all(color: speaking ? AppTheme.done : Colors.transparent, width: 2.5),
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(fit: StackFit.expand, children: [
@@ -278,7 +404,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    if (muted) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.mic_off, size: 13, color: Colors.redAccent)),
+                    if (muted) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.mic_off, size: 13, color: AppTheme.overdue)),
                     Flexible(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 12), overflow: TextOverflow.ellipsis)),
                   ]),
                 ),
@@ -293,7 +419,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
 
   Widget _avatarFill(String name) => Center(
         child: CircleAvatar(
-          radius: 34,
+          radius: _pip ? 20 : 34,
           backgroundColor: Theme.of(context).colorScheme.primaryContainer,
           child: Text(name.isEmpty ? '?' : name[0].toUpperCase(), style: TextStyle(fontSize: 28, color: Theme.of(context).colorScheme.onPrimaryContainer)),
         ),
@@ -305,7 +431,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
       label: 'You',
       muted: !c.micOn,
       hand: c.handRaised,
-      child: show ? RTCVideoView(c.localRenderer!, mirror: c.frontCamera, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover) : _avatarFill(c.myName),
+      child: show ? RTCVideoView(c.localRenderer!, mirror: c.frontCamera && _mirrorSelf, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover) : _avatarFill(c.myName),
     );
   }
 
@@ -330,7 +456,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700)), subtitle: Text(p.role)),
+          ListTile(title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w500)), subtitle: Text(p.role)),
           ListTile(leading: const Icon(Icons.push_pin_outlined), title: Text(c.pinnedUserId == p.userId ? 'Unpin' : 'Pin'), onTap: () { Navigator.pop(ctx); c.pin(p.userId); }),
           if (c.isManager) ...[
             ListTile(leading: const Icon(Icons.center_focus_strong), title: const Text('Spotlight for everyone'), onTap: () { Navigator.pop(ctx); c.spotlight(c.spotlightUserId == p.userId ? null : p); }),
@@ -339,7 +465,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
             ListTile(leading: const Icon(Icons.record_voice_over), title: const Text('Ask to unmute'), onTap: () { Navigator.pop(ctx); c.requestUnmute(p); }),
             if (c.isHost && p.role != 'co-host') ListTile(leading: const Icon(Icons.shield_outlined), title: const Text('Make co-host'), onTap: () { Navigator.pop(ctx); c.makeCohost(p); }),
             if (c.isHost && p.role == 'co-host') ListTile(leading: const Icon(Icons.remove_moderator_outlined), title: const Text('Remove co-host'), onTap: () { Navigator.pop(ctx); c.removeCohost(p); }),
-            ListTile(leading: const Icon(Icons.person_remove, color: Colors.red), title: const Text('Remove from meeting', style: TextStyle(color: Colors.red)), onTap: () { Navigator.pop(ctx); c.removeUser(p); }),
+            ListTile(leading: const Icon(Icons.person_remove, color: AppTheme.overdue), title: const Text('Remove from meeting', style: TextStyle(color: AppTheme.overdue)), onTap: () { Navigator.pop(ctx); c.removeUser(p); }),
           ],
         ]),
       ),
@@ -350,7 +476,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
   Widget _controls() {
     Widget btn(IconData icon, String tip, VoidCallback? onTap, {bool active = true, Color? bg, int badge = 0}) {
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 2),
         child: Badge(
           isLabelVisible: badge > 0,
           label: Text('$badge'),
@@ -359,7 +485,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
             style: IconButton.styleFrom(
               backgroundColor: bg ?? (active ? Colors.white12 : Colors.white),
               foregroundColor: active || bg != null ? Colors.white : Colors.black,
-              minimumSize: const Size(50, 50),
+              minimumSize: const Size(46, 46),
             ),
             onPressed: onTap,
             icon: Icon(icon),
@@ -377,13 +503,14 @@ class _MeetingScreenState extends State<MeetingScreen> {
           if (!widget.viewOnly) ...[
             btn(c.micOn ? Icons.mic : Icons.mic_off, 'Mic', c.toggleMic, active: c.micOn),
             btn(c.camOn ? Icons.videocam : Icons.videocam_off, 'Camera', c.toggleCam, active: c.camOn),
+            if (c.canShareScreen)
+              btn(c.screenSharing ? Icons.stop_screen_share : Icons.screen_share, c.screenSharing ? 'Stop sharing' : 'Share screen',
+                  c.screenShareBusy ? null : c.toggleScreenShare, bg: c.screenSharing ? AppTheme.overdue : null),
             btn(Icons.back_hand, 'Raise hand', c.toggleHand, bg: c.handRaised ? Colors.amber.shade800 : null),
-            btn(Icons.emoji_emotions_outlined, 'React', _reactMenu),
           ],
           btn(Icons.chat_bubble_outline, 'Chat', () => _openPanel(MeetingPanel.chat), badge: c.unreadChat),
-          btn(Icons.people_outline, 'People', () => _openPanel(MeetingPanel.people), badge: c.waiting.length),
-          btn(Icons.more_horiz, 'More', _moreMenu),
-          btn(Icons.call_end, 'Leave', _leave, bg: Colors.red),
+          btn(Icons.more_horiz, 'More', _moreMenu, badge: c.waiting.length),
+          btn(Icons.call_end, 'Leave', _leave, bg: AppTheme.overdue),
         ]),
       ),
     );
@@ -416,20 +543,47 @@ class _MeetingScreenState extends State<MeetingScreen> {
       builder: (ctx) => SafeArea(
         child: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(leading: const Icon(Icons.people_outline), title: Text(c.waiting.isEmpty ? 'People' : 'People (${c.waiting.length} waiting)'), onTap: () { Navigator.pop(ctx); _openPanel(MeetingPanel.people); }),
+            if (!widget.viewOnly)
+              ListTile(leading: const Icon(Icons.emoji_emotions_outlined), title: const Text('React'), onTap: () { Navigator.pop(ctx); _reactMenu(); }),
             ListTile(leading: const Icon(Icons.poll_outlined), title: const Text('Polls'), onTap: () { Navigator.pop(ctx); _openPanel(MeetingPanel.polls); }),
             ListTile(leading: const Icon(Icons.question_answer_outlined), title: const Text('Q&A'), onTap: () { Navigator.pop(ctx); _openPanel(MeetingPanel.qa); }),
             ListTile(leading: const Icon(Icons.sticky_note_2_outlined), title: const Text('Shared notes'), onTap: () { Navigator.pop(ctx); _openPanel(MeetingPanel.notes); }),
             ListTile(leading: const Icon(Icons.timer_outlined), title: const Text('Timer'), onTap: () { Navigator.pop(ctx); _timerDialog(); }),
+            ListTile(leading: const Icon(Icons.draw_outlined), title: const Text('Whiteboard'), onTap: () { Navigator.pop(ctx); Navigator.push(context, MaterialPageRoute(builder: (_) => WhiteboardScreen(c: c))); }),
+            ListTile(leading: const Icon(Icons.meeting_room_outlined), title: const Text('Breakout rooms'), onTap: () { Navigator.pop(ctx); _breakoutSheet(); }),
+            ListTile(leading: const Icon(Icons.translate), title: const Text('Translate captions'), subtitle: c.translateTo.isEmpty ? null : Text(c.translateTo), onTap: () { Navigator.pop(ctx); showTranslationPicker(context, c); }),
+            ListTile(leading: const Icon(Icons.sensors), title: const Text('Live stream'), onTap: () { Navigator.pop(ctx); showLiveStreamSheet(context, c); }),
+            if (c.canRecordLocally && c.recordingLocally)
+              ListTile(leading: const Icon(Icons.stop_circle, color: AppTheme.overdue), title: const Text('Stop recording'), onTap: () { Navigator.pop(ctx); c.stopRecording(); }),
+            if (c.canRecordLocally && !c.recordingLocally) ...[
+              ListTile(leading: const Icon(Icons.video_camera_back_outlined), title: const Text('Record video'), subtitle: const Text('Screen and sound'), onTap: () { Navigator.pop(ctx); c.startRecording(video: true); }),
+              ListTile(leading: const Icon(Icons.mic_none), title: const Text('Record audio only'), onTap: () { Navigator.pop(ctx); c.startRecording(); }),
+            ],
+            ListTile(
+              leading: Icon(_hideSelf ? Icons.person_outline : Icons.person_off_outlined),
+              title: Text(_hideSelf ? 'Show my video tile' : 'Hide my video tile'),
+              onTap: () { Navigator.pop(ctx); setState(() => _hideSelf = !_hideSelf); },
+            ),
+            if (c.canUseBackgrounds)
+              ListTile(leading: const Icon(Icons.blur_on), title: const Text('Background effects'), onTap: () { Navigator.pop(ctx); showBackgroundPicker(context, c); }),
+            if (c.camOn)
+              ListTile(leading: const Icon(Icons.flip), title: Text(_mirrorSelf ? 'Unmirror my video' : 'Mirror my video'), onTap: () { Navigator.pop(ctx); setState(() => _mirrorSelf = !_mirrorSelf); }),
             if (c.isManager) ...[
               const Divider(),
+              ListTile(leading: const Icon(Icons.admin_panel_settings_outlined), title: const Text('Meeting settings'), onTap: () { Navigator.pop(ctx); showMeetingSettings(context, c); }),
+              ListTile(leading: const Icon(Icons.how_to_reg_outlined), title: const Text('Save attendance report'), onTap: () { Navigator.pop(ctx); saveAttendance(context, c); }),
+              ListTile(leading: const Icon(Icons.subtitles_outlined), title: Text(c.transcribing ? 'Stop transcription' : 'Start transcription'), subtitle: const Text('Captures speech from people on the web'), onTap: () { Navigator.pop(ctx); c.setTranscription(!c.transcribing); }),
+              if (c.peers.values.any((p) => p.handRaised))
+                ListTile(leading: const Icon(Icons.pan_tool_outlined), title: const Text('Lower all hands'), onTap: () { Navigator.pop(ctx); c.lowerHand(); }),
               ListTile(leading: const Icon(Icons.mic_off), title: const Text('Mute everyone'), onTap: () { Navigator.pop(ctx); c.muteAll(); }),
               ListTile(leading: const Icon(Icons.videocam_off), title: const Text('Turn off everyone\'s camera'), onTap: () { Navigator.pop(ctx); c.disableAllVideo(); }),
               ListTile(leading: Icon(c.locked ? Icons.lock_open : Icons.lock_outline), title: Text(c.locked ? 'Unlock meeting' : 'Lock meeting'), onTap: () { Navigator.pop(ctx); c.toggleLock(); }),
             ],
             if (c.isHost)
               ListTile(
-                leading: const Icon(Icons.stop_circle_outlined, color: Colors.red),
-                title: const Text('End meeting for everyone', style: TextStyle(color: Colors.red)),
+                leading: const Icon(Icons.stop_circle_outlined, color: AppTheme.overdue),
+                title: const Text('End meeting for everyone', style: TextStyle(color: AppTheme.overdue)),
                 onTap: () async {
                   Navigator.pop(ctx);
                   if (await confirm(context, 'End meeting for everyone?', ok: 'End', danger: true)) c.endForAll();
@@ -438,6 +592,16 @@ class _MeetingScreenState extends State<MeetingScreen> {
           ]),
         ),
       ),
+    );
+  }
+
+  void _breakoutSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (ctx) => FractionallySizedBox(heightFactor: 0.85, child: BreakoutSheet(c: c)),
     );
   }
 

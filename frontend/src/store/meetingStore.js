@@ -4,6 +4,9 @@ import { getSocket, initSocket, setNodeUnreachableHandler } from '../lib/socket'
 import { preferredSpatialLayer } from '../lib/subscriptionPolicy'
 import toast from 'react-hot-toast'
 import { isBreakoutRoomId } from '../lib/breakout'
+import { createCompositeVideo } from '../lib/compositeRecorder'
+import { withBackground, savedBackground, saveBackground } from '../lib/backgroundEffect'
+import { useAuthStore } from './authStore'
 import { canTransition, canMove, SCREEN_SHARE_TRANSITIONS, MEDIA_LINK_TRANSITIONS } from '../lib/sessionMachine'
 
 // Singleton mediasoup client
@@ -46,6 +49,32 @@ const mixerStop = () => {
   try { recordingMixer.ctx.close() } catch { /* already closed */ }
   recordingMixer = null
 }
+/** Everyone's picture right now, for the composite used by recording and the pop-out window. */
+export const meetingTiles = (selfSuffix = '') => {
+  const { localStream, screenStream, remoteStreams, participants, isVideoOff } = useMeetingStore.getState()
+  const me = useAuthStore.getState().user
+  const live = (stream) => stream?.getVideoTracks().find(t => t.readyState === 'live') || null
+  const tiles = [{ id: 'me', name: [me?.name || 'You', selfSuffix].filter(Boolean).join(' '), track: isVideoOff ? null : live(localStream) }]
+  if (screenStream) tiles.push({ id: 'my-screen', name: `${me?.name || 'You'}'s screen`, track: live(screenStream), isScreen: true })
+  for (const [peerId, entry] of remoteStreams) {
+    const info = participants.find(p => (p.user?.id || p.user?._id) === peerId)
+    const name = entry.user?.name || info?.user?.name || 'Participant'
+    tiles.push({ id: peerId, name, track: info?.isVideoOff ? null : live(entry.stream) })
+    if (entry.screenStream) tiles.push({ id: `${peerId}-screen`, name: `${name}'s screen`, track: live(entry.screenStream), isScreen: true })
+  }
+  // people who have sent no media yet still belong in the picture
+  for (const p of participants) {
+    const id = p.user?.id || p.user?._id
+    if (id && id !== me?.id && !remoteStreams.has(id)) tiles.push({ id, name: p.user.name, track: null })
+  }
+  return tiles
+}
+
+// A newly opened camera with the background effect applied; if that fails the camera is closed again
+const freshCamera = async (track) => {
+  try { return await withBackground(track) } catch (error) { track.stop(); throw error }
+}
+
 const stopLevelMonitor = () => {
   if (!levelMonitor) return
   clearInterval(levelMonitor.interval)
@@ -70,6 +99,7 @@ const sessionDefaults = () => ({
   mediaRecorder: null,
   recordedChunks: [],
   isPiP: false,
+  background: savedBackground().mode, // off | blur | image
 
   remoteStreams: new Map(),
   producers: { audio: null, video: null, screen: null },
@@ -322,6 +352,45 @@ export const useMeetingStore = create((set, get) => ({
       set(s => ({ producers: { ...s.producers, audio: producer } }))
       return producer
     } catch (e) { if (e?.code === 'WEBINAR_VIEW_ONLY') toast('Webinar mode: only hosts can present', { id: 'webinar-view-only', icon: '🎤' }); else console.error('Produce audio error:', e) }
+  },
+
+  /** Switch background blur / picture, for the camera that is on now and every later one. */
+  setBackground: async (mode, image) => {
+    saveBackground(mode, image)
+    set({ background: mode })
+    const { localStream, isVideoOff, producers } = get()
+    const current = localStream?.getVideoTracks()[0]
+    if (!current || isVideoOff) return
+    const raw = current.rawTrack || current
+    try {
+      const next = await withBackground(raw)
+      localStream.removeTrack(current)
+      localStream.addTrack(next)
+      if (producers.video) await producers.video.replaceTrack({ track: next })
+      current.release?.() // stops the old effect, not the camera
+    } catch (error) {
+      console.error('Background effect error:', error)
+      toast.error('Background effects are not available in this browser', { id: 'background' })
+    }
+  },
+
+  /** The pre-join screen hands over a plain camera track: apply the saved effect before it is sent. */
+  applySavedBackground: async () => {
+    const { localStream } = get()
+    const raw = localStream?.getVideoTracks()[0]
+    if (!raw || raw.rawTrack || savedBackground().mode === 'off') return
+    try {
+      const next = await withBackground(raw)
+      localStream.removeTrack(raw)
+      localStream.addTrack(next)
+    } catch (error) {
+      // never show a room the person asked to hide: turn the camera off instead
+      console.error('Background effect error:', error)
+      raw.stop()
+      localStream.removeTrack(raw)
+      set({ isVideoOff: true })
+      toast.error('Background effect failed, so your camera was left off', { id: 'background' })
+    }
   },
 
   produceVideo: async (track) => {
@@ -612,8 +681,8 @@ export const useMeetingStore = create((set, get) => ({
           videoConstraints.deviceId = { exact: selectedVideoDevice }
         }
         const gumStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints })
-        const newVideoTrack = gumStream.getVideoTracks()[0]
-        gumStream.getTracks().forEach(t => { if (t !== newVideoTrack) t.stop() })
+        gumStream.getTracks().slice(1).forEach(t => t.stop())
+        const newVideoTrack = await freshCamera(gumStream.getVideoTracks()[0])
         if (localStream) {
           localStream.getVideoTracks().forEach(t => { t.stop(); localStream.removeTrack(t) })
           localStream.addTrack(newVideoTrack)
@@ -626,7 +695,7 @@ export const useMeetingStore = create((set, get) => ({
         if (socket) socket.emit('media:toggle-video', { isVideoOff: false })
       } catch (error) {
         console.error('Failed to enable video:', error)
-        toast.error('Failed to access camera')
+        toast.error(/Background/.test(error.message) ? 'Background effect failed, so your camera was left off' : 'Failed to access camera')
       }
     } else {
       if (localStream) {
@@ -756,25 +825,24 @@ export const useMeetingStore = create((set, get) => ({
   // RECORDING
   // =============================================
 
-  startRecording: () => {
+  startRecording: ({ audioOnly = false } = {}) => {
     const { screenStream, localStream, currentMeeting, isRecording, mediaRecorder: existing } = get()
     if (isRecording || (existing && existing.state !== 'inactive')) return { success: false, message: 'Already recording' }
     const socket = getSocket()
     // You join with camera/mic off now, so your own stream may be empty: the meeting's remote audio
     // still makes a valid (audio-only) recording.
     const streamToRecord = screenStream || localStream || new MediaStream()
-    const tracks = streamToRecord.getTracks()
-    const hasRemoteAudio = [...get().remoteStreams.values()].some(e => e.stream.getAudioTracks().length > 0)
-    if (!tracks.some(t => t.readyState === 'live') && !hasRemoteAudio) {
-      return { success: false, message: 'Nothing to record yet: turn on your mic or camera, or wait for someone to speak' }
-    }
+    let composite = null
     try {
       const recordingStartedAt = Date.now()
       // vp9 isn't available everywhere (Safari, some Firefox builds): fall back instead of throwing
-      const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+      const mimeType = (audioOnly
+        ? ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+        : ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'])
         .find((t) => typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(t))
-      // Picture: the shared screen if sharing, else your camera. Sound: the mixed meeting audio.
-      const recordStream = new MediaStream(streamToRecord.getVideoTracks())
+      // Picture (unless audio only): shared screen or everyone's tiles. Sound: the mixed meeting audio.
+      if (!audioOnly) composite = createCompositeVideo(() => meetingTiles('(recording)'))
+      const recordStream = new MediaStream(composite?.stream.getVideoTracks() || [])
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 })
         ctx.resume?.()
@@ -788,18 +856,18 @@ export const useMeetingStore = create((set, get) => ({
         mixerStop()
         streamToRecord.getAudioTracks().forEach(t => recordStream.addTrack(t))
       }
-      const isScreen = !!screenStream
       const mediaRecorder = new MediaRecorder(recordStream, {
         ...(mimeType ? { mimeType } : {}),
-        videoBitsPerSecond: isScreen ? 6000000 : 3500000, // default (~2.5 Mbps) smears text and motion
+        videoBitsPerSecond: 4000000, // the default (~2.5 Mbps) smears shared text
         audioBitsPerSecond: 160000
       })
-      const blobType = (mediaRecorder.mimeType || mimeType || 'video/webm').split(';')[0]
-      const ext = blobType === 'video/mp4' ? 'mp4' : 'webm'
+      const blobType = (mediaRecorder.mimeType || mimeType || (audioOnly ? 'audio/webm' : 'video/webm')).split(';')[0]
+      const ext = blobType === 'video/mp4' ? 'mp4' : blobType === 'audio/mp4' ? 'm4a' : 'webm'
       const recordedChunks = []
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data) }
       mediaRecorder.onstop = () => {
         mixerStop()
+        composite?.stop()
         // The recorder can stop on its own (shared screen ended): bring the flags and other participants back in sync
         if (get().mediaRecorder === mediaRecorder) {
           set({ mediaRecorder: null, isRecording: false })
@@ -844,6 +912,7 @@ export const useMeetingStore = create((set, get) => ({
       if (socket) socket.emit('recording:started', { roomId: currentMeeting?.roomId })
       return { success: true }
     } catch (error) {
+      composite?.stop(); mixerStop()
       console.error('Recording error:', error); return { success: false, message: error.message }
     }
   },
@@ -999,28 +1068,6 @@ export const useMeetingStore = create((set, get) => ({
   setVideoQuality: (quality) => set({ videoQuality: quality }),
 
   // Picture-in-Picture
-  enablePiP: async () => {
-    try {
-      const videoElement = document.querySelector('video[data-local="true"]')
-      if (videoElement && document.pictureInPictureEnabled && videoElement !== document.pictureInPictureElement) {
-        await videoElement.requestPictureInPicture()
-        set({ isPiP: true })
-      }
-    } catch (error) {
-      console.error('PiP error:', error)
-    }
-  },
-
-  disablePiP: async () => {
-    try {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture()
-        set({ isPiP: false })
-      }
-    } catch (error) {
-      console.error('Exit PiP error:', error)
-    }
-  },
   // =============================================
   // DEVICE MANAGEMENT
   // =============================================
@@ -1089,8 +1136,8 @@ export const useMeetingStore = create((set, get) => ({
     if (isVideoOff) return
     try {
       const gumStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId }, width: 640, height: 480 } })
-      const newTrack = gumStream.getVideoTracks()[0]
-      gumStream.getTracks().forEach(t => { if (t !== newTrack) t.stop() })
+      gumStream.getTracks().slice(1).forEach(t => t.stop())
+      const newTrack = await freshCamera(gumStream.getVideoTracks()[0])
       if (localStream) {
         localStream.getVideoTracks().forEach(t => { t.stop(); localStream.removeTrack(t) })
         localStream.addTrack(newTrack)

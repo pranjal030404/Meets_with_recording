@@ -32,7 +32,7 @@ export default function TranslationTool({ tools, captionsEnabled, onToggleCaptio
       </div>
 
       <label className="block">
-        <span className="text-xs uppercase tracking-wide text-gray-500">Translate captions to</span>
+        <span className="text-xs text-gray-500">Translate captions to</span>
         <select value={translateTo} onChange={e => change(e.target.value)} className={`${selectClass} mt-2`}>
           <option value="">Off</option>
           {LANGUAGES.map(l => <option key={l.label} value={l.label}>{l.label}</option>)}

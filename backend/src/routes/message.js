@@ -52,7 +52,9 @@ const assertContextAccess = async (message, user) => {
 // ---------------------------------------------
 
 // Get thread (root + replies)
-router.get('/messages/:messageId/thread', protect, async (req, res) => {
+// Mounted at /api/messages. The web app calls /api/messages/:id and the phone app /api/messages/messages/:id,
+// so both are accepted.
+router.get(['/messages/:messageId/thread', '/:messageId/thread'], protect, async (req, res) => {
   try {
     const root = await Message.findByPk(req.params.messageId, { include: [senderInclude()] });
     if (!root || root.isDeleted) {
@@ -80,7 +82,7 @@ router.get('/messages/:messageId/thread', protect, async (req, res) => {
 });
 
 // Reply in thread
-router.post('/messages/:messageId/replies', protect, async (req, res) => {
+router.post(['/messages/:messageId/replies', '/:messageId/replies'], protect, async (req, res) => {
   try {
     const { content, mentions = [] } = req.body;
     if (!content || content.trim() === '') {
@@ -149,7 +151,7 @@ router.post('/messages/:messageId/replies', protect, async (req, res) => {
 // ---------------------------------------------
 
 // Edit own message
-router.put('/messages/:messageId', protect, async (req, res) => {
+router.put(['/messages/:messageId', '/:messageId'], protect, async (req, res) => {
   try {
     const { content } = req.body;
     if (!content || content.trim() === '') {
@@ -184,7 +186,7 @@ router.put('/messages/:messageId', protect, async (req, res) => {
 });
 
 // Delete own message (works across all contexts)
-router.delete('/messages/:messageId', protect, async (req, res) => {
+router.delete(['/messages/:messageId', '/:messageId'], protect, async (req, res) => {
   try {
     const message = await Message.findByPk(req.params.messageId);
     if (!message || message.isDeleted) {
@@ -224,7 +226,7 @@ router.delete('/messages/:messageId', protect, async (req, res) => {
 });
 
 // Toggle reaction (works across all contexts)
-router.post('/messages/:messageId/react', protect, async (req, res) => {
+router.post(['/messages/:messageId/react', '/:messageId/react'], protect, async (req, res) => {
   try {
     const { emoji } = req.body;
     if (!emoji) {
@@ -265,7 +267,7 @@ router.post('/messages/:messageId/react', protect, async (req, res) => {
 });
 
 // Toggle pin (moderators only)
-router.put('/messages/:messageId/pin', protect, async (req, res) => {
+router.put(['/messages/:messageId/pin', '/:messageId/pin'], protect, async (req, res) => {
   try {
     const message = await Message.findByPk(req.params.messageId);
     if (!message || message.isDeleted) {
@@ -298,7 +300,7 @@ router.put('/messages/:messageId/pin', protect, async (req, res) => {
 });
 
 // Forward a message to a conversation or team channel
-router.post('/messages/:messageId/forward', protect, async (req, res) => {
+router.post(['/messages/:messageId/forward', '/:messageId/forward'], protect, async (req, res) => {
   try {
     const { conversationId, teamId, channelType = 'general' } = req.body;
     const source = await Message.findByPk(req.params.messageId, { include: [senderInclude()] });
@@ -356,7 +358,7 @@ router.post('/messages/:messageId/forward', protect, async (req, res) => {
 // Saved messages (bookmarks)
 // ---------------------------------------------
 
-router.post('/messages/:messageId/save', protect, async (req, res) => {
+router.post(['/messages/:messageId/save', '/:messageId/save'], protect, async (req, res) => {
   try {
     const message = await Message.findByPk(req.params.messageId);
     if (!message || message.isDeleted) {

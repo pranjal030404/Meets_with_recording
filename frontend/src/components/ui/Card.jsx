@@ -20,8 +20,8 @@ const Card = forwardRef(({
       ref={ref}
       className={`
         relative rounded-2xl
-        ${gradient ? 'gradient-border' : 'bg-dark-200/80 backdrop-blur-sm border border-white/[0.06]'}
-        shadow-card
+        ${gradient ? 'gradient-border' : 'bg-dark-200/80 border border-white/[0.06]'}
+       
         ${hover ? 'card-hover cursor-pointer' : ''}
         ${paddings[padding]}
         ${className}

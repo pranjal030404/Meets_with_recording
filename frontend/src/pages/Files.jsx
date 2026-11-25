@@ -37,7 +37,7 @@ const FileGlyph = ({ mimeType, name, size = 'w-10 h-10' }) => {
 
 export default function Files() {
   return (
-    <AppShell>
+    <AppShell wide>
       <FilesPage />
     </AppShell>
   )
@@ -84,10 +84,10 @@ function FilesPage() {
   const list = showTrash ? trash : files
 
   return (
-    <div className="relative max-w-6xl mx-auto px-4 sm:px-6 py-10 lg:py-14">
+    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8 lg:py-10">
       <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold font-display tracking-tight">Files</h1>
+          <h1 className="page-title">Files</h1>
           <p className="text-gray-500 mt-1 flex items-center gap-1.5">
             <HardDrive className="w-4 h-4" /> Using {formatBytes(storage.personalBytes)} of personal storage
           </p>
@@ -110,7 +110,7 @@ function FilesPage() {
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`mb-6 rounded-2xl border-2 border-dashed p-8 text-center cursor-pointer transition-all ${
+          className={`mb-6 rounded-2xl border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
             dragOver ? 'border-primary-400 bg-primary-500/10' : 'border-white/10 hover:border-primary-500/40 hover:bg-white/[0.02]'
           }`}
         >
@@ -131,11 +131,11 @@ function FilesPage() {
       <div className="flex flex-wrap items-center gap-3 mb-6">
         {!showTrash && (
           <>
-            <div className="flex rounded-xl bg-dark-300/50 border border-white/[0.06] p-1">
-              <button onClick={() => { setScope('mine'); setTeamId('') }} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${scope === 'mine' ? 'bg-primary-500/20 text-primary-200' : 'text-gray-400 hover:text-gray-200'}`}>
+            <div className="tabs">
+              <button onClick={() => { setScope('mine'); setTeamId('') }} className={`tab ${scope === 'mine' ? 'tab-active' : ''}`}>
                 My files
               </button>
-              <button onClick={() => setScope('team')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${scope === 'team' ? 'bg-primary-500/20 text-primary-200' : 'text-gray-400 hover:text-gray-200'}`}>
+              <button onClick={() => setScope('team')} className={`tab ${scope === 'team' ? 'tab-active' : ''}`}>
                 Team files
               </button>
             </div>
@@ -150,7 +150,7 @@ function FilesPage() {
         {!showTrash && (
           <div className="relative flex-1 min-w-[200px] max-w-xs ml-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search files..." className="input pl-9 !py-2 text-sm" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search files" className="input pl-9 !py-2 text-sm" />
           </div>
         )}
       </div>
@@ -166,12 +166,12 @@ function FilesPage() {
       ) : list.length === 0 ? (
         <div className="text-center py-20 text-gray-500">
           <FileIcon className="w-10 h-10 mx-auto mb-3 text-gray-700" />
-          {showTrash ? 'Trash is empty.' : 'No files yet — upload something!'}
+          {showTrash ? 'Trash is empty.' : 'No files yet'}
         </div>
       ) : (
         <div className="space-y-2">
           {list.map(f => (
-            <div key={f.id} className="group flex items-center gap-4 rounded-2xl bg-dark-200/50 border border-white/[0.06] px-4 py-3 hover:border-primary-500/30 transition-all">
+            <div key={f.id} className="group flex items-center gap-4 rounded-2xl bg-dark-200/50 border border-white/[0.06] px-4 py-3 hover:border-primary-500/30 transition-colors">
               <FileGlyph mimeType={f.mimeType} name={f.originalName} />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-gray-200 truncate">{f.originalName}</p>

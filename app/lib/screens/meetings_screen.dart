@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import '../core/api.dart';
 import '../core/session.dart';
 import '../widgets/common.dart';
-import 'calendar_screen.dart';
 import 'meeting_detail_screen.dart';
 import 'prejoin_screen.dart';
 
@@ -19,6 +18,9 @@ String parseRoomId(String input) {
   }
   return s;
 }
+
+/// Live-stream links carry `?viewOnly=1`.
+bool isViewOnlyLink(String input) => input.contains('viewOnly=1');
 
 class MeetingsScreen extends StatefulWidget {
   const MeetingsScreen({super.key});
@@ -74,12 +76,13 @@ class MeetingsScreenState extends State<MeetingsScreen> {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, parseRoomId(c.text)), child: const Text('Join')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Join')),
         ],
       ),
     );
-    if (code == null || code.isEmpty || !mounted) return;
-    Navigator.push(context, MaterialPageRoute(builder: (_) => PreJoinScreen(roomId: code)));
+    final roomId = parseRoomId(code ?? '');
+    if (roomId.isEmpty || !mounted) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => PreJoinScreen(roomId: roomId, viewOnly: isViewOnlyLink(code!))));
   }
 
   Future<void> _schedule() async {
@@ -102,16 +105,11 @@ class MeetingsScreenState extends State<MeetingsScreen> {
         emptyText: _filter == 'upcoming' ? 'No upcoming meetings' : 'No past meetings',
         emptyIcon: Icons.event_busy,
         header: Column(children: [
+          const PageHeader('Meetings', subtitle: 'Past and scheduled meetings, recordings, transcripts and summaries'),
           Row(children: [
             Expanded(child: FilledButton.icon(onPressed: _join, icon: const Icon(Icons.login), label: const Text('Join'))),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(child: FilledButton.tonalIcon(onPressed: _schedule, icon: const Icon(Icons.event), label: const Text('Schedule'))),
-            const SizedBox(width: 10),
-            IconButton.filledTonal(
-              tooltip: 'Calendar',
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CalendarScreen())),
-              icon: const Icon(Icons.calendar_month),
-            ),
           ]),
           const SizedBox(height: 12),
           SegmentedButton<String>(
@@ -144,7 +142,7 @@ class MeetingCard extends StatelessWidget {
     final host = asMap(meeting['host']);
     final team = asMap(meeting['team']);
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
         onTap: () async {
@@ -152,13 +150,13 @@ class MeetingCard extends StatelessWidget {
           onChanged();
         },
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           child: Row(children: [
             Container(
               width: 46,
               height: 46,
-              decoration: BoxDecoration(color: live ? const Color(0xFF34D399).withOpacity(.15) : cs.primaryContainer, borderRadius: BorderRadius.circular(12)),
-              child: Icon(live ? Icons.sensors : Icons.videocam, color: live ? Colors.green : cs.onPrimaryContainer),
+              decoration: BoxDecoration(color: cs.primaryContainer, borderRadius: BorderRadius.circular(8)),
+              child: live ? const Center(child: TallyDot()) : Icon(Icons.videocam_outlined, color: cs.onPrimaryContainer),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -243,7 +241,7 @@ class _ScheduleMeetingScreenState extends State<ScheduleMeetingScreen> {
         TextField(controller: _desc, maxLines: 3, decoration: const InputDecoration(labelText: 'Description (optional)')),
         const SizedBox(height: 12),
         ListTile(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
           leading: const Icon(Icons.schedule),
           title: Text(fmtDateTime(_when.toIso8601String())),
           subtitle: const Text('Tap to change'),

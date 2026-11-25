@@ -3,44 +3,41 @@ import 'package:flutter/material.dart';
 /// Minutes design tokens: a neutral graphite ramp, one blue accent, hairline borders.
 /// Mirrors the web app so both clients read as one product.
 class AppTheme {
-  static const brand = Color(0xFF3B82F6);
+  // Tokens from the web landing page (frontend/src/pages/landing.css): warm graphite,
+  // off-white primary actions, one amber accent.
+  static const bg = Color(0xFF121110);
+  static const surface = Color(0xFF1A1917);
+  static const raised = Color(0xFF211F1D);
+  static const line = Color(0x1AF2EEE8);
+  static const text = Color(0xFFF2EEE8);
+  static const muted = Color(0xFFA8A299);
+  static const faint = Color(0xFF8A847B);
+  static const button = text;
+  static const buttonInk = Color(0xFF17140F);
+  static const accent = Color(0xFFE8A33D);
+  static const accentInk = Color(0xFF1A1307);
 
-  // Dark ramp
-  static const _dBg = Color(0xFF0E0F11);
-  static const _dSurface = Color(0xFF141517);
-  static const _dRaised = Color(0xFF1B1C1F);
-  static const _dLine = Color(0x14FFFFFF);
-  static const _dText = Color(0xFFEDEDEE);
-  static const _dMuted = Color(0xFF9A9BA1);
-
-  // Light ramp
-  static const _lBg = Color(0xFFF7F7F8);
-  static const _lSurface = Color(0xFFFFFFFF);
-  static const _lRaised = Color(0xFFF0F0F2);
-  static const _lLine = Color(0x14000000);
-  static const _lText = Color(0xFF16171A);
-  static const _lMuted = Color(0xFF6B6C73);
+  static const display = 'Manrope';
 
   /// Task / status colors (todo = slate, in progress = amber, done = green, overdue = red).
-  static const todo = Color(0xFF94A3B8);
-  static const inProgress = Color(0xFFF59E0B);
-  static const done = Color(0xFF34D399);
-  static const overdue = Color(0xFFF87171);
+  static const todo = muted;
+  static const inProgress = accent;
+  static const done = Color(0xFF6FBF8E);
+  static const overdue = Color(0xFFE5484D);
 
-  static ThemeData build(Brightness b) {
-    final dark = b == Brightness.dark;
-    final bg = dark ? _dBg : _lBg;
-    final surface = dark ? _dSurface : _lSurface;
-    final raised = dark ? _dRaised : _lRaised;
-    final line = dark ? _dLine : _lLine;
-    final text = dark ? _dText : _lText;
-    final muted = dark ? _dMuted : _lMuted;
-
-    final scheme = ColorScheme.fromSeed(seedColor: brand, brightness: b).copyWith(
-      primary: dark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB),
-      onPrimary: dark ? const Color(0xFF0B1220) : Colors.white,
-      primaryContainer: dark ? const Color(0xFF1E3A5F) : const Color(0xFFDBEAFE),
-      onPrimaryContainer: dark ? const Color(0xFFDBEAFE) : const Color(0xFF1E3A8A),
+  /// The web app is dark only, so the mobile app is too.
+  static ThemeData build() {
+    final scheme = ColorScheme.fromSeed(seedColor: accent, brightness: Brightness.dark).copyWith(
+      primary: button,
+      onPrimary: buttonInk,
+      primaryContainer: const Color(0xFF2E2A26),
+      onPrimaryContainer: text,
+      secondary: accent,
+      onSecondary: accentInk,
+      secondaryContainer: const Color(0xFF2E2A26),
+      onSecondaryContainer: text,
+      tertiary: accent,
+      onTertiary: accentInk,
       surface: surface,
       onSurface: text,
       onSurfaceVariant: muted,
@@ -51,25 +48,27 @@ class AppTheme {
       surfaceContainer: surface,
       surfaceContainerHigh: raised,
       surfaceContainerHighest: raised,
-      error: const Color(0xFFEF4444),
+      error: const Color(0xFFE5484D),
     );
 
-    final radius = BorderRadius.circular(10);
+    final radius = BorderRadius.circular(8);
     final hairline = BorderSide(color: line);
 
     return ThemeData(
       useMaterial3: true,
+      brightness: Brightness.dark,
+      fontFamily: 'Manrope',
       colorScheme: scheme,
       scaffoldBackgroundColor: bg,
       dividerTheme: DividerThemeData(color: line, space: 1, thickness: 1),
       splashFactory: InkRipple.splashFactory,
       textTheme: Typography.material2021(platform: TargetPlatform.android)
-          .black
-          .apply(bodyColor: text, displayColor: text)
+          .white
+          .apply(fontFamily: 'Manrope', bodyColor: text, displayColor: text)
           .copyWith(
-            titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: text),
-            titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: text),
-            titleSmall: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: muted),
+            titleLarge: const TextStyle(fontFamily: display, fontSize: 20, fontWeight: FontWeight.w500, color: text),
+            titleMedium: const TextStyle(fontFamily: 'Manrope', fontSize: 16, fontWeight: FontWeight.w600, color: text),
+            titleSmall: const TextStyle(fontFamily: 'Manrope', fontSize: 14, fontWeight: FontWeight.w500, color: muted),
           ),
       appBarTheme: AppBarTheme(
         centerTitle: false,
@@ -78,40 +77,25 @@ class AppTheme {
         backgroundColor: bg,
         foregroundColor: text,
         surfaceTintColor: Colors.transparent,
-        titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: text),
+        titleTextStyle: const TextStyle(fontFamily: display, fontSize: 20, fontWeight: FontWeight.w500, color: text),
         shape: Border(bottom: hairline),
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        height: 64,
-        backgroundColor: surface,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        indicatorColor: raised,
-        indicatorShape: RoundedRectangleBorder(borderRadius: radius),
-        labelTextStyle: WidgetStateProperty.resolveWith((s) => TextStyle(
-              fontSize: 12,
-              fontWeight: s.contains(WidgetState.selected) ? FontWeight.w600 : FontWeight.w500,
-              color: s.contains(WidgetState.selected) ? text : muted,
-            )),
-        iconTheme: WidgetStateProperty.resolveWith(
-            (s) => IconThemeData(size: 22, color: s.contains(WidgetState.selected) ? text : muted)),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: raised,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         border: OutlineInputBorder(borderRadius: radius, borderSide: hairline),
         enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: hairline),
-        focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: scheme.primary, width: 1.5)),
+        focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: const BorderSide(color: accent, width: 1.5)),
         errorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: scheme.error)),
         focusedErrorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: scheme.error, width: 1.5)),
-        hintStyle: TextStyle(color: muted),
+        hintStyle: const TextStyle(color: faint, fontSize: 14),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size(0, 48),
           elevation: 0,
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(fontFamily: 'Manrope', fontSize: 15, fontWeight: FontWeight.w500),
           shape: RoundedRectangleBorder(borderRadius: radius),
         ),
       ),
@@ -124,14 +108,22 @@ class AppTheme {
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: radius)),
+        style: TextButton.styleFrom(foregroundColor: accent, shape: RoundedRectangleBorder(borderRadius: radius)),
       ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: button,
+        foregroundColor: buttonInk,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: radius),
+      ),
+      drawerTheme: const DrawerThemeData(backgroundColor: surface, surfaceTintColor: Colors.transparent, shape: RoundedRectangleBorder()),
+      segmentedButtonTheme: SegmentedButtonThemeData(style: SegmentedButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: radius))),
       cardTheme: CardThemeData(
         elevation: 0,
         margin: const EdgeInsets.symmetric(vertical: 4),
         color: surface,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: hairline),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: hairline),
       ),
       listTileTheme: ListTileThemeData(
         shape: RoundedRectangleBorder(borderRadius: radius),
@@ -141,22 +133,22 @@ class AppTheme {
         backgroundColor: raised,
         side: hairline,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: text),
+        labelStyle: TextStyle(fontFamily: 'Manrope', fontSize: 12, fontWeight: FontWeight.w500, color: text),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: hairline),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: hairline),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(14))),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: raised,
-        contentTextStyle: TextStyle(color: text),
+        contentTextStyle: const TextStyle(fontFamily: 'Manrope', color: text),
         shape: RoundedRectangleBorder(borderRadius: radius),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(color: scheme.primary),

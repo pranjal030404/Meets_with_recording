@@ -36,7 +36,7 @@ export default function TimerTool({ tools, canManage }) {
       {canManage ? (
         <>
           <div>
-            <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Start a countdown</p>
+            <p className="text-xs text-gray-500 mb-2">Start a countdown</p>
             <div className="flex flex-wrap gap-2">
               {PRESET_MINUTES.map(minutes => (
                 <button key={minutes} onClick={() => startTimer(minutes * 60)}

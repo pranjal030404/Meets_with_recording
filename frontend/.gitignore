@@ -3,3 +3,6 @@ dist/
 .env
 *.log
 .DS_Store
+
+# copied from node_modules by scripts/copy-mediapipe.mjs
+public/mediapipe/wasm/

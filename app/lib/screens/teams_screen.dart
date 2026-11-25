@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../core/theme.dart';
 import 'package:flutter/services.dart';
 import '../core/api.dart';
 import '../core/files.dart';
@@ -35,7 +36,7 @@ class _TeamsScreenState extends State<TeamsScreen> {
         title: const Text('Create team'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: name, autofocus: true, decoration: const InputDecoration(labelText: 'Team name')),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           TextField(controller: desc, decoration: const InputDecoration(labelText: 'Description (optional)')),
         ]),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Create'))],
@@ -63,7 +64,11 @@ class _TeamsScreenState extends State<TeamsScreen> {
         load: _load,
         emptyText: 'You are not in any team yet',
         emptyIcon: Icons.groups_outlined,
-        header: Padding(padding: const EdgeInsets.only(bottom: 8), child: OutlinedButton.icon(onPressed: _join, icon: const Icon(Icons.vpn_key_outlined), label: const Text('Join with invite code'))),
+        header: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const PageHeader('Teams', subtitle: 'Manage your team workspaces'),
+          OutlinedButton.icon(onPressed: _join, icon: const Icon(Icons.vpn_key_outlined), label: const Text('Join with invite code')),
+          const SizedBox(height: 8),
+        ]),
         itemBuilder: (context, t, reload) => Card(
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
@@ -204,7 +209,7 @@ class _TeamDetailScreenState extends State<TeamDetailScreen> with SingleTickerPr
           ...chs.map((c) {
             final k = keyOf(c);
             return Padding(
-              padding: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.only(right: 8),
               child: GestureDetector(
                 onLongPress: (c['type'] == 'custom' && canAdmin)
                     ? () async {
@@ -325,7 +330,7 @@ class _TeamDetailScreenState extends State<TeamDetailScreen> with SingleTickerPr
         ),
       if (isOwner)
         OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+          style: OutlinedButton.styleFrom(foregroundColor: AppTheme.overdue),
           icon: const Icon(Icons.delete_forever),
           label: const Text('Delete team'),
           onPressed: () async {

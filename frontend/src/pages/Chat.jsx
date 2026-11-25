@@ -1,3 +1,4 @@
+import api from '../lib/api'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
@@ -54,6 +55,15 @@ function ChatWorkspace() {
   const [forwardMessageId, setForwardMessageId] = useState(null)
   const [taskFromMessage, setTaskFromMessage] = useState(null)
   const [showPinned, setShowPinned] = useState(false)
+  const [saved, setSaved] = useState(null) // null = closed
+  const openSaved = async () => {
+    try {
+      const { data } = await api.get('/messages/saved')
+      setSaved(data.data.saved)
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not load saved messages')
+    }
+  }
   const [pinnedMessages, setPinnedMessages] = useState([])
   const [listQuery, setListQuery] = useState('')
   const [listFilter, setListFilter] = useState('all')
@@ -118,9 +128,12 @@ function ChatWorkspace() {
   return (
     <div className="flex h-[calc(100dvh-4rem)] lg:h-screen overflow-hidden">
       {/* Conversation list */}
-      <div className={`${active ? 'hidden md:flex' : 'flex'} w-full md:max-w-[300px] min-w-0 shrink-0 border-r border-white/[0.06] bg-dark-200/40 backdrop-blur-sm flex-col h-full`}>
+      <div className={`${active ? 'hidden md:flex' : 'flex'} w-full md:max-w-[300px] min-w-0 shrink-0 border-r border-white/[0.06] bg-dark-200/40 flex-col h-full`}>
         <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-          <h1 className="text-lg font-bold font-display">Chat</h1>
+          <h1 className="text-lg font-semibold font-display">Chat</h1>
+          <button onClick={openSaved} className="btn btn-ghost ml-auto mr-1 !px-3" title="Saved messages" aria-label="Saved messages">
+            <Bookmark className="w-4 h-4" />
+          </button>
           <button onClick={() => setShowNewChat(true)} className="btn btn-primary !px-3 !py-2" title="New conversation" aria-label="New conversation">
             <Plus className="w-4 h-4" />
           </button>
@@ -161,7 +174,7 @@ function ChatWorkspace() {
               <button
                 key={conv.id}
                 onClick={() => openConv(conv)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all border ${
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors border ${
                   isActive ? 'bg-primary-500/15 border-primary-500/30' : 'hover:bg-white/[0.04] border-transparent'
                 }`}
               >
@@ -171,12 +184,12 @@ function ChatWorkspace() {
                     <p className={`text-sm truncate ${unread ? 'font-semibold text-white' : 'font-medium'} ${isActive ? 'text-primary-100' : unread ? '' : 'text-gray-200'}`}>
                       {conv.title}{st && <span className="ml-1.5" title={st.customStatus}>{st.statusEmoji}</span>}
                     </p>
-                    <span className={`text-[10px] shrink-0 ${unread ? 'text-primary-300 font-semibold' : 'text-gray-600'}`}>{relTime(conv.lastMessageAt)}</span>
+                    <span className={`timecode shrink-0 !text-[11px] ${unread ? "!text-primary-300" : ""}`}>{relTime(conv.lastMessageAt)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <p className={`text-xs truncate ${unread ? 'text-gray-300' : 'text-gray-500'}`}>{conv.lastMessagePreview || 'No messages yet'}</p>
                     {unread && (
-                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-primary-500 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-primary-500 text-white text-[10px] font-semibold flex items-center justify-center shrink-0">
                         {conv.unreadCount > 99 ? '99+' : conv.unreadCount}
                       </span>
                     )}
@@ -257,6 +270,20 @@ function ChatWorkspace() {
       )}
 
       {/* Modals */}
+      {saved && (
+        <Modal onClose={() => setSaved(null)} title="Saved messages">
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {saved.length === 0 && <p className="text-sm text-gray-500">Nothing saved yet. Use Save on any message.</p>}
+            {saved.map(({ savedId, message }) => (
+              <button key={savedId} className="card card-hover w-full p-3 text-left"
+                onClick={() => { setSaved(null); if (message.conversationId) navigate(`/chat/${message.conversationId}`) }}>
+                <p className="text-xs text-gray-500">{message.sender?.name} <span className="timecode">{new Date(message.createdAt).toLocaleString()}</span></p>
+                <p className="mt-1 text-sm text-gray-200 break-words">{message.content}</p>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
       {showNewChat && (
         <NewChatModal
           contacts={contacts}
@@ -462,14 +489,14 @@ function ConversationView({
           </p>
         </div>
         {conversation.type === 'direct' && (
-          <button onClick={onStartHuddle} className="p-2 rounded-xl text-gray-400 hover:bg-primary-500/10 hover:text-primary-300 transition-all" title="Start huddle">
+          <button onClick={onStartHuddle} className="p-2 rounded-xl text-gray-400 hover:bg-primary-500/10 hover:text-primary-300 transition-colors" title="Start huddle">
             <Phone className="w-[18px] h-[18px]" />
           </button>
         )}
-        <button onClick={onToggleMute} className="p-2 rounded-xl text-gray-400 hover:bg-white/[0.06] transition-all" title={isMuted ? 'Unmute' : 'Mute'}>
+        <button onClick={onToggleMute} className="p-2 rounded-xl text-gray-400 hover:bg-white/[0.06] transition-colors" title={isMuted ? 'Unmute' : 'Mute'}>
           {isMuted ? <BellOff className="w-[18px] h-[18px]" /> : <Bell className="w-[18px] h-[18px]" />}
         </button>
-        <button onClick={fetchPinned} className="p-2 rounded-xl text-gray-400 hover:bg-white/[0.06] transition-all" title="Pinned messages">
+        <button onClick={fetchPinned} className="p-2 rounded-xl text-gray-400 hover:bg-white/[0.06] transition-colors" title="Pinned messages">
           <Pin className="w-[18px] h-[18px]" />
         </button>
       </div>
@@ -540,7 +567,7 @@ function ConversationView({
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-white/[0.06] bg-dark-200/40 backdrop-blur-sm p-4">
+      <div className="shrink-0 border-t border-white/[0.06] bg-dark-200/40 p-4">
         {pendingFile && (
           <div className="flex items-center gap-2 mb-2 rounded-xl bg-dark-300/60 border border-white/[0.06] px-3 py-2 max-w-sm">
             <Paperclip className="w-4 h-4 text-primary-300" />
@@ -555,12 +582,12 @@ function ConversationView({
             )}
           </div>
         )}
-        <div className="relative flex items-end gap-1.5 rounded-2xl border border-white/[0.08] bg-dark-300/60 px-2 py-1.5 focus-within:border-primary-500/50 focus-within:ring-4 focus-within:ring-primary-500/10 transition-all">
+        <div className="relative flex items-end gap-1.5 rounded-2xl border border-white/[0.08] bg-dark-300/60 px-2 py-1.5 focus-within:border-primary-500/50 focus-within:ring-4 focus-within:ring-primary-500/10 transition-colors">
           <input ref={fileInputRef} type="file" className="hidden" onChange={onFileChange} />
           <button
             onClick={pick}
             disabled={isUploading}
-            className="p-2 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-all disabled:opacity-50"
+            className="p-2 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-colors disabled:opacity-50"
             title="Attach a file"
             aria-label="Attach a file"
           >
@@ -586,7 +613,7 @@ function ConversationView({
             )}
             <button
               onClick={() => setEmojiOpen(o => !o)}
-              className={`p-2 rounded-xl transition-all ${emojiOpen ? 'text-primary-300 bg-primary-500/15' : 'text-gray-400 hover:text-primary-300 hover:bg-primary-500/10'}`}
+              className={`p-2 rounded-xl transition-colors ${emojiOpen ? 'text-primary-300 bg-primary-500/15' : 'text-gray-400 hover:text-primary-300 hover:bg-primary-500/10'}`}
               title="Emoji"
               aria-label="Open emoji picker"
               aria-expanded={emojiOpen}
@@ -597,7 +624,7 @@ function ConversationView({
           <button
             onClick={handleSend}
             disabled={!draft.trim()}
-            className="p-2.5 rounded-xl bg-primary-500 text-white hover:bg-primary-400 disabled:opacity-30 disabled:hover:bg-primary-500 transition-all"
+            className="p-2.5 rounded-xl bg-primary-500 text-white hover:bg-primary-400 disabled:opacity-30 disabled:hover:bg-primary-500 transition-colors"
             title="Send (Enter)"
             aria-label="Send message"
           >
@@ -652,7 +679,7 @@ function MessageRow({
         {!compact && (
           <div className="flex items-baseline gap-2 flex-wrap">
             <button type="button" onClick={() => onProfile?.(sender)} className="text-sm font-semibold text-gray-100 hover:underline">{sender.name || 'Unknown'}</button>
-            <span className="text-[11px] text-gray-500">{new Date(m.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+            <span className="timecode !text-[11px]">{new Date(m.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
             {m.editedAt && <span className="text-[10px] text-gray-600">(edited)</span>}
             {m.isPinned && <Pin className="w-3 h-3 text-amber-400 self-center" />}
             {m.forwardedFromId && <Forward className="w-3 h-3 text-gray-600 self-center" />}
@@ -693,7 +720,7 @@ function MessageRow({
               <button
                 key={emoji}
                 onClick={() => onReact(m.id, emoji)}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-all ${
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors ${
                   info.mine ? 'bg-primary-500/20 border-primary-500/40 text-primary-200' : 'bg-white/[0.04] border-white/[0.08] text-gray-400 hover:border-white/20'
                 }`}
               >
@@ -718,12 +745,12 @@ function MessageRow({
 
           {reactionOpen && (
             <div className="absolute top-8 right-0 z-30" onClick={e => e.stopPropagation()}>
-              <div className="glass-strong border border-white/10 rounded-xl p-1.5 flex items-center gap-0.5 shadow-float">
+              <div className="glass-strong border border-white/10 rounded-xl p-1.5 flex items-center gap-0.5">
                 {REACTION_SET.map(emoji => (
                   <button
                     key={emoji}
                     onClick={() => { onReact(m.id, emoji); onToggleReactions() }}
-                    className="w-8 h-8 rounded-lg hover:bg-white/10 text-base transition-transform hover:scale-125"
+                    className="w-8 h-8 rounded-lg hover:bg-white/10 text-base transition-transform"
                   >
                     {emoji}
                   </button>
@@ -769,9 +796,9 @@ function MeetingCard({ data }) {
   const navigate = useNavigate()
   const roomId = (data.link || '').split('/meeting/')[1]
   return (
-    <div className="mt-2 rounded-2xl bg-gradient-to-br from-primary-500/10 to-accent-500/5 border border-primary-500/25 p-4 max-w-sm">
+    <div className="mt-2 rounded-2xl bg-primary-500/10 border border-primary-500/25 p-4 max-w-sm">
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 to-accent-600 flex items-center justify-center">
+        <div className="w-10 h-10 rounded-xl bg-primary-400 flex items-center justify-center">
           <Phone className="w-5 h-5 text-white" />
         </div>
         <div className="min-w-0 flex-1">
@@ -812,7 +839,7 @@ function ThreadPanel({ thread, user, onClose, onReply, onReact }) {
   }
 
   return (
-    <div className="fixed inset-0 z-40 lg:static lg:z-auto w-full lg:max-w-[380px] shrink-0 border-l border-white/[0.06] bg-dark-200 lg:bg-dark-200/60 backdrop-blur-sm flex flex-col h-full">
+    <div className="fixed inset-0 z-40 lg:static lg:z-auto w-full lg:max-w-[380px] shrink-0 border-l border-white/[0.06] bg-dark-200 lg:bg-dark-200/60 flex flex-col h-full">
       <div className="h-[68px] shrink-0 flex items-center justify-between px-4 border-b border-white/[0.06]">
         <div>
           <h3 className="font-semibold font-display text-sm">Thread</h3>
@@ -891,10 +918,10 @@ function ThreadPanel({ thread, user, onClose, onReply, onReact }) {
 function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative glass-strong rounded-3xl border border-white/10 w-full max-w-md p-6 shadow-float max-h-[85vh] overflow-y-auto">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative glass-strong rounded-2xl border border-white/10 w-full max-w-md p-6 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold font-display">{title}</h3>
+          <h3 className="text-lg font-semibold font-display">{title}</h3>
           <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06]"><X className="w-5 h-5" /></button>
         </div>
         {children}
@@ -906,7 +933,7 @@ function Modal({ title, onClose, children }) {
 function Avatar({ user, name, isGroup, size = 'md', onClick }) {
   const online = usePresenceStore(st => (user?.id ? st.onlineUserIds.includes(user.id) : false))
   const body = isGroup ? (
-    <div className={`${size === 'sm' ? 'w-8 h-8' : 'w-10 h-10'} rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shrink-0`}>
+    <div className={`${size === 'sm' ? 'w-8 h-8' : 'w-10 h-10'} rounded-xl bg-dark-400 border border-white/10 flex items-center justify-center shrink-0`}>
       <Users className="w-5 h-5 text-white/90" />
     </div>
   ) : (
@@ -943,10 +970,10 @@ function NewChatModal({ contacts, onClose, onStartDirect, onCreateGroup }) {
   return (
     <Modal title="New conversation" onClose={onClose}>
       <div className="flex gap-2 mb-4">
-        <button onClick={() => setMode('direct')} className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${mode === 'direct' ? 'bg-primary-500/20 text-primary-200 border border-primary-500/40' : 'bg-white/[0.04] text-gray-400 border border-transparent'}`}>
+        <button onClick={() => setMode('direct')} className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${mode === 'direct' ? 'bg-primary-500/20 text-primary-200 border border-primary-500/40' : 'bg-white/[0.04] text-gray-400 border border-transparent'}`}>
           Direct message
         </button>
-        <button onClick={() => setMode('group')} className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${mode === 'group' ? 'bg-primary-500/20 text-primary-200 border border-primary-500/40' : 'bg-white/[0.04] text-gray-400 border border-transparent'}`}>
+        <button onClick={() => setMode('group')} className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${mode === 'group' ? 'bg-primary-500/20 text-primary-200 border border-primary-500/40' : 'bg-white/[0.04] text-gray-400 border border-transparent'}`}>
           Group chat
         </button>
       </div>
@@ -957,7 +984,7 @@ function NewChatModal({ contacts, onClose, onStartDirect, onCreateGroup }) {
 
       <div className="relative mb-3">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search teammates..." className="input pl-9" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search teammates" className="input pl-9" />
       </div>
 
       <div className="space-y-1 max-h-72 overflow-y-auto">
@@ -970,7 +997,7 @@ function NewChatModal({ contacts, onClose, onStartDirect, onCreateGroup }) {
           <button
             key={c.id}
             onClick={() => mode === 'direct' ? onStartDirect(c.id) : toggle(c.id)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${
               selected.includes(c.id) ? 'bg-primary-500/15 border border-primary-500/30' : 'hover:bg-white/[0.04] border border-transparent'
             }`}
           >
@@ -1006,7 +1033,7 @@ function ForwardModal({ conversations, onClose, onForward }) {
           <button
             key={c.id}
             onClick={() => setTarget({ conversationId: c.id })}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${
               target?.conversationId === c.id ? 'bg-primary-500/15 border border-primary-500/30' : 'hover:bg-white/[0.04] border border-transparent'
             }`}
           >

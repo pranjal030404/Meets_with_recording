@@ -48,28 +48,19 @@ function AdminPage() {
   const tabs = TABS.filter(t => permissions.includes(t.perm))
   const [tab, setTab] = useState(tabs[0]?.key || 'overview')
   return (
-    <div className="relative max-w-6xl mx-auto px-4 sm:px-6 py-10 lg:py-14">
-      <div className="flex items-center gap-4 mb-8">
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20">
-          <Shield className="w-6 h-6 text-white" />
-        </div>
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold font-display tracking-tight">Admin console</h1>
-          <p className="text-gray-500 mt-1">Platform health, people, analytics and the audit trail.</p>
-        </div>
+    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8 lg:py-10">
+      <div className="mb-6">
+        <h1 className="page-title">Admin console</h1>
+        <p className="page-sub">Platform health, people, analytics and the audit trail</p>
       </div>
 
       {tabs.length === 0 && <p className="text-gray-500">Your admin role has no console permissions. Ask a super admin to update it.</p>}
-      <div className="flex flex-wrap gap-2 mb-8">
+      <div className="tabs mb-8">
         {tabs.map(t => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-              tab === t.key
-                ? 'bg-amber-500/15 text-amber-200 border-amber-500/40'
-                : 'bg-white/[0.03] text-gray-400 border-white/[0.06] hover:text-gray-200'
-            }`}
+            className={`tab flex items-center gap-2 ${tab === t.key ? 'tab-active' : ''}`}
           >
             <t.icon className="w-4 h-4" /> {t.label}
           </button>
@@ -119,7 +110,7 @@ function Overview() {
             <div className="flex items-center justify-between mb-3">
               <c.icon className={`w-5 h-5 ${c.tone}`} />
             </div>
-            <p className="text-2xl font-bold font-display">{c.value}</p>
+            <p className="text-2xl font-semibold font-display">{c.value}</p>
             <p className="text-sm text-gray-400">{c.label}</p>
             <p className="text-xs text-gray-600 mt-1">{c.sub}</p>
           </div>
@@ -132,9 +123,9 @@ function Overview() {
           <div className="space-y-2">
             {data.recentUsers.map(u => (
               <div key={u.id} className="flex items-center gap-3">
-                {u.avatar ? <img src={u.avatar} className="w-8 h-8 rounded-full" alt="" /> : <div className="w-8 h-8 rounded-full bg-dark-300" />}
+                <Avatar user={u} size="sm" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-gray-200 truncate">{u.name} {u.role !== 'user' && <span className="text-[10px] uppercase text-amber-300">({u.role})</span>}</p>
+                  <p className="text-sm text-gray-200 truncate">{u.name} {u.role !== 'user' && <span className="text-[10px] text-amber-300">({u.role})</span>}</p>
                   <p className="text-xs text-gray-500 truncate">{u.email}</p>
                 </div>
                 {u.isOnline && <span className="w-2 h-2 rounded-full bg-green-400" />}
@@ -178,9 +169,9 @@ function Analytics() {
   return (
     <div className="space-y-6">
       <div className="grid lg:grid-cols-3 gap-6">
-        <BarChart title="Meetings per day" data={data.meetingsPerDay} color="from-fuchsia-500 to-purple-600" />
-        <BarChart title="Messages per day" data={data.messagesPerDay} color="from-primary-500 to-accent-600" />
-        <BarChart title="New signups per day" data={data.signupsPerDay} color="from-emerald-500 to-teal-600" />
+        <BarChart title="Meetings per day" data={data.meetingsPerDay} color="bg-primary-500/70" />
+        <BarChart title="Messages per day" data={data.messagesPerDay} color="bg-primary-500/70" />
+        <BarChart title="New signups per day" data={data.signupsPerDay} color="bg-primary-500/70" />
       </div>
 
       <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-5">
@@ -191,7 +182,7 @@ function Analytics() {
               <span className="text-sm text-gray-300 w-40 truncate">{t.teamName}</span>
               <div className="flex-1 h-2.5 rounded-full bg-white/[0.05] overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-primary-500 to-accent-500"
+                  className="h-full rounded-full bg-primary-500"
                   style={{ width: `${Math.min(100, (t.messageCount / Math.max(...data.topTeams.map(x => Number(x.messageCount)))) * 100)}%` }}
                 />
               </div>
@@ -216,7 +207,7 @@ function BarChart({ title, data, color }) {
           <div key={d.day} className="flex-1 flex flex-col items-center gap-1 group relative">
             <span className="text-[9px] text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity">{d.count}</span>
             <div
-              className={`w-full rounded-t-md bg-gradient-to-t ${color} min-h-[3px]`}
+              className={`w-full rounded-t ${color} min-h-[3px]`}
               style={{ height: `${(Number(d.count) / max) * 100}%` }}
             />
             <span className="text-[8px] text-gray-600">{d.day?.slice(8)}</span>
@@ -288,7 +279,7 @@ function UsersTab() {
         {isSuper && <button onClick={() => setCreating(true)} className="btn btn-primary !py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4" /> Add user</button>}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-          <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search users..." className="input pl-9 !py-2 text-sm w-56" />
+          <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search users" className="input pl-9 !py-2 text-sm w-56" />
         </div>
         </div>
       </div>
@@ -296,7 +287,7 @@ function UsersTab() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[40rem]">
             <thead>
-              <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-white/[0.06]">
+              <tr className="text-left text-xs text-gray-500 border-b border-white/[0.06]">
                 <th className="pb-2 pr-4">User</th>
                 <th className="pb-2 pr-4">Role</th>
                 <th className="pb-2 pr-4">Status</th>
@@ -428,7 +419,7 @@ function RolesTab() {
         <div>
           <div className="flex gap-2 mb-2">
             {[['user', 'User roles'], ['admin', 'Admin roles']].map(([k, l]) => (
-              <button key={k} onClick={() => setScope(k)} className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${scope === k ? 'bg-amber-500/15 text-amber-200 border-amber-500/40' : 'border-white/[0.06] text-gray-400'}`}>{l}</button>
+              <button key={k} onClick={() => setScope(k)} className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${scope === k ? 'border-white/10 bg-white/[0.08] text-white' : 'border-white/[0.06] text-gray-400'}`}>{l}</button>
             ))}
           </div>
           <p className="text-sm text-gray-400">
@@ -449,8 +440,8 @@ function RolesTab() {
               <div>
                 <h4 className="font-semibold text-gray-100">
                   {r.name}
-                  {r.isDefault && <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 uppercase">default</span>}
-                  {r.isSystem && <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] text-gray-400 uppercase">system</span>}
+                  {r.isDefault && <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">default</span>}
+                  {r.isSystem && <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] text-gray-400">system</span>}
                 </h4>
                 <p className="text-xs text-gray-500 mt-1">{r.description || 'No description'} · {r.userCount} user{r.userCount === 1 ? '' : 's'}</p>
               </div>
@@ -532,7 +523,7 @@ function MeetingsTab() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[40rem]">
             <thead>
-              <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-white/[0.06]">
+              <tr className="text-left text-xs text-gray-500 border-b border-white/[0.06]">
                 <th className="pb-2 pr-4">Meeting</th><th className="pb-2 pr-4">Host</th><th className="pb-2 pr-4">Status</th>
                 <th className="pb-2 pr-4">Started</th><th className="pb-2 pr-4">Ended</th><th className="pb-2">Duration</th>
               </tr>
@@ -608,7 +599,7 @@ function AuditTab({ userId, compact = false }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[40rem]">
             <thead>
-              <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-white/[0.06]">
+              <tr className="text-left text-xs text-gray-500 border-b border-white/[0.06]">
                 <th className="pb-2 pr-4">Time</th><th className="pb-2 pr-4">Actor</th><th className="pb-2 pr-4">Action</th>
                 <th className="pb-2 pr-4">Request</th><th className="pb-2">Result</th>
               </tr>
@@ -733,7 +724,7 @@ function AdminsTab() {
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[40rem]">
           <thead>
-            <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-white/[0.06]">
+            <tr className="text-left text-xs text-gray-500 border-b border-white/[0.06]">
               <th className="pb-2 pr-4">Admin</th><th className="pb-2 pr-4">Role</th><th className="pb-2 pr-4">Last login</th><th className="pb-2">Actions</th>
             </tr>
           </thead>

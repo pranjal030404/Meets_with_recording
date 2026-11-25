@@ -86,23 +86,19 @@ export default function MeetingHistory() {
 
   return (
     <AppShell wide>
-      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-10 lg:py-14">
+      <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8 lg:py-10">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold font-display tracking-tight">Meetings</h1>
-          <p className="text-gray-500 mt-1">Your past &amp; scheduled meetings, recordings, transcripts and AI summaries.</p>
+          <h1 className="page-title">Meetings</h1>
+          <p className="page-sub">Past and scheduled meetings, recordings, transcripts and summaries</p>
         </div>
 
         {/* Filters */}
-        <div className="flex flex-wrap gap-2 mb-8 animate-fade-in-up stagger-1">
+        <div className="tabs mb-6">
           {['all', 'active', 'ended', 'scheduled'].map((status, i) => (
             <button
               key={status}
               onClick={() => setFilter(status)}
-              className={`px-5 py-2.5 rounded-xl text-sm font-semibold capitalize transition-all duration-300 border animate-scale-in stagger-${i + 1} ${
-                filter === status
-                  ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white border-transparent shadow-lg shadow-primary-500/30'
-                  : 'bg-dark-300/70 border-white/[0.06] text-gray-400 hover:text-white hover:border-primary-500/30 hover:-translate-y-0.5'
-              }`}
+              className={`tab capitalize ${filter === status ? 'tab-active' : ''}`}
             >
               {status}
             </button>
@@ -118,11 +114,11 @@ export default function MeetingHistory() {
             </div>
           </div>
         ) : meetings.length === 0 ? (
-          <div className="text-center py-24 animate-fade-in-up stagger-2">
-            <div className="inline-flex w-20 h-20 rounded-3xl bg-gradient-to-br from-primary-500/15 to-accent-500/10 border border-white/[0.06] items-center justify-center mb-6 animate-float">
+          <div className="text-center py-24">
+            <div className="inline-flex w-20 h-20 rounded-2xl bg-primary-500/15 border border-white/[0.06] items-center justify-center mb-6">
               <Calendar className="w-9 h-9 text-primary-300" />
             </div>
-            <h3 className="text-2xl font-bold font-display mb-2">No meetings yet</h3>
+            <h3 className="text-2xl font-semibold font-display mb-2">No meetings yet</h3>
             <p className="text-gray-400 mb-8">Your meeting history will appear here</p>
             <Link to="/app" className="btn btn-primary inline-flex px-6 py-3">
               Start a new meeting
@@ -171,6 +167,71 @@ function formatRecordingDuration(seconds) {
   return `${mins}m ${secs}s`
 }
 
+// Invite by email and cancel (host), accept or decline (invitee): same actions as the phone app
+function InviteActions({ meeting, currentUserId }) {
+  const { getMeetings } = useMeetingStore()
+  const { user } = useAuthStore()
+  const [inviting, setInviting] = useState(false)
+  const [emails, setEmails] = useState('')
+  const [busy, setBusy] = useState(false)
+  const myId = currentUserId || user?.id
+  const isHost = (meeting.hostId || meeting.host?.id) === user?.id || (meeting.hostId || meeting.host?._id) === myId
+  const open = meeting.status === 'scheduled' || meeting.status === 'active'
+  const mine = (meeting.invitees || []).find(i => i.userId === user?.id)
+
+  const run = async (request, done) => {
+    setBusy(true)
+    try {
+      await request()
+      toast.success(done)
+      setInviting(false)
+      setEmails('')
+      await getMeetings()
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'That did not work')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const send = (e) => {
+    e.preventDefault()
+    const list = emails.split(/[\s,;]+/).filter(Boolean)
+    if (!list.length || list.some(a => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a))) return toast.error('Enter valid email addresses')
+    run(() => api.post(`/meetings/${meeting.roomId}/invite`, { invitees: list.map(email => ({ email })) }), 'Invitations sent')
+  }
+
+  if (!open) return null
+  return (
+    <>
+      {!isHost && mine?.status === 'pending' && (
+        <>
+          <button disabled={busy} className="btn btn-primary" onClick={() => run(() => api.put(`/meetings/${meeting.roomId}/respond`, { status: 'accepted' }), 'Invitation accepted')}>Accept</button>
+          <button disabled={busy} className="btn btn-secondary" onClick={() => run(() => api.put(`/meetings/${meeting.roomId}/respond`, { status: 'declined' }), 'Invitation declined')}>Decline</button>
+        </>
+      )}
+      {!isHost && mine && mine.status !== 'pending' && <span className="text-xs text-gray-400">You {mine.status}</span>}
+      {isHost && <button className="btn btn-secondary" onClick={() => setInviting(true)}>Invite</button>}
+      {isHost && meeting.status === 'scheduled' && (
+        <button disabled={busy} className="btn btn-ghost !text-red-300" onClick={() => window.confirm(`Cancel "${meeting.title}"?`) && run(() => api.put(`/meetings/${meeting.roomId}/cancel`), 'Meeting cancelled')}>Cancel meeting</button>
+      )}
+      {inviting && (
+        <div className="modal-backdrop" onClick={() => setInviting(false)}>
+          <form className="modal-content" onSubmit={send} onClick={e => e.stopPropagation()}>
+            <h3 className="font-display text-lg font-semibold">Invite to {meeting.title}</h3>
+            <label className="field-label mt-4" htmlFor={`invite-${meeting.roomId}`}>Email addresses, separated by commas</label>
+            <input id={`invite-${meeting.roomId}`} autoFocus value={emails} onChange={e => setEmails(e.target.value)} className="input" placeholder="a@example.com, b@example.com" />
+            <div className="mt-4 flex gap-2">
+              <button type="button" className="btn btn-ghost flex-1" onClick={() => setInviting(false)}>Close</button>
+              <button type="submit" disabled={busy} className="btn btn-primary flex-1">Send invites</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  )
+}
+
 function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration, onRetryTranscription, index = 0 }) {
   const isHost = meeting.host?._id === currentUserId
   const participantCount = meeting.participants?.length || 0
@@ -193,17 +254,17 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
 
   return (
     <div
-      className={`group relative bg-dark-200/70 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-6 transition-all duration-300 hover:border-primary-500/25 hover:shadow-glow hover:-translate-y-0.5 animate-fade-in-up`}
+      className={`group relative bg-dark-200/70 border border-white/[0.06] rounded-2xl p-6 transition-colors hover:border-primary-500/25`}
       style={{ animationDelay: `${Math.min(index * 0.07, 0.35)}s` }}
     >
       {/* Left accent line */}
-      <div className="absolute left-0 top-6 bottom-6 w-[3px] rounded-full bg-gradient-to-b from-primary-500 to-accent-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+      <div className="absolute left-0 top-6 bottom-6 w-[3px] rounded-full bg-primary-500 opacity-0 group-hover:opacity-100 transition-opacity" />
 
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2.5 mb-3">
             <h3 className="text-lg font-semibold font-display">{meeting.title}</h3>
-            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide border ${getStatusStyle(meeting.status)}`}>
+            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${getStatusStyle(meeting.status)}`}>
               {meeting.status}
             </span>
             {isHost && (
@@ -216,7 +277,7 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
           <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-400">
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-primary-400/70" />
-              {formatDate(meeting.createdAt)}
+              <span className="timecode !text-gray-400">{formatDate(meeting.createdAt)}</span>
             </div>
             {meeting.endedAt && (
               <div className="flex items-center gap-2">
@@ -235,10 +296,11 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+          <InviteActions meeting={meeting} currentUserId={currentUserId} />
           {meeting.status === 'active' && (
             <button onClick={handleJoinOrView} className="btn btn-primary group/btn">
-              <ExternalLink className="w-4 h-4 transition-transform duration-300 group-hover/btn:rotate-12" />
+              <ExternalLink className="w-4 h-4 transition-transform group-hover/btn:rotate-12" />
               Rejoin
             </button>
           )}
@@ -249,7 +311,7 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
         <div className="flex items-center justify-between mb-3.5">
           <h4 className="text-sm font-semibold text-white flex items-center gap-2">
             <Download className="w-4 h-4 text-primary-400" />
-            Recordings & Transcripts
+            Recordings & transcripts
           </h4>
           <span className="text-xs text-gray-500">
             {recordings.length} file set{recordings.length !== 1 ? 's' : ''}
@@ -273,7 +335,7 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
               ].filter(file => file.url)
 
               return (
-                <div key={`${recording.filename || 'recording'}-${index}`} className="bg-dark-300/60 border border-white/[0.04] rounded-xl p-3.5 transition-all duration-300 hover:border-primary-500/20">
+                <div key={`${recording.filename || 'recording'}-${index}`} className="bg-dark-300/60 border border-white/[0.04] rounded-xl p-3.5 transition-colors hover:border-primary-500/20">
                   <div className="flex flex-wrap items-center gap-2 justify-between">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-white truncate">
@@ -293,7 +355,7 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
                         className="btn btn-secondary text-xs shrink-0"
                       >
                         <Download className="w-3.5 h-3.5" />
-                        Download Recording
+                        Download recording
                       </a>
                     )}
                   </div>
@@ -331,7 +393,7 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
                             href={file.url}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-400/70 border border-white/[0.06] hover:bg-primary-500/15 hover:border-primary-500/30 hover:-translate-y-0.5 text-gray-200 text-xs font-medium transition-all duration-200"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-400/70 border border-white/[0.06] hover:bg-primary-500/15 hover:border-primary-500/30 text-gray-200 text-xs font-medium transition-colors"
                           >
                             <Icon className="w-3.5 h-3.5 text-primary-300" />
                             {file.label}
@@ -382,10 +444,10 @@ function CompleteTranscriptPanel({ meeting, navigate }) {
         <button
           onClick={() => generate(false)}
           disabled={isLoading}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-primary-500/15 to-accent-500/15 border border-primary-400/30 text-sm font-medium text-primary-200 hover:from-primary-500/25 hover:to-accent-500/25 transition-all disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary-500/15 border border-primary-400/30 text-sm font-medium text-primary-200 hover:from-primary-500/25 hover:to-accent-500/25 transition-colors disabled:opacity-50"
         >
           {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-          {isLoading ? 'Generating full transcript...' : 'Generate Complete Meeting Transcript'}
+          {isLoading ? 'Generating full transcript...' : 'Generate complete meeting transcript'}
         </button>
         {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
       </div>
@@ -404,7 +466,7 @@ function CompleteTranscriptPanel({ meeting, navigate }) {
       <div className="flex items-center justify-between mb-3">
         <h4 className="text-sm font-semibold text-white flex items-center gap-2">
           <FileText className="w-4 h-4 text-primary-300" />
-          Complete Meeting Transcript
+          Complete meeting transcript
           {complete.sources && <span className="text-[10px] font-normal text-gray-500">({complete.sources} recording{complete.sources!==1?'s':''})</span>}
         </h4>
         <button onClick={() => generate(true)} disabled={isLoading} className="text-xs text-gray-500 hover:text-primary-300 transition-colors disabled:opacity-50">
@@ -422,7 +484,7 @@ function CompleteTranscriptPanel({ meeting, navigate }) {
                 href={file.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-400/70 border border-white/[0.06] hover:bg-primary-500/15 hover:border-primary-500/30 hover:-translate-y-0.5 text-gray-200 text-xs font-medium transition-all duration-200"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-400/70 border border-white/[0.06] hover:bg-primary-500/15 hover:border-primary-500/30 text-gray-200 text-xs font-medium transition-colors"
               >
                 <Icon className="w-3.5 h-3.5 text-primary-300" />
                 {file.label}
@@ -476,10 +538,10 @@ function AiSummaryPanel({ meeting, navigate }) {
         <button
           onClick={() => generate(false)}
           disabled={isLoading}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-fuchsia-500/15 to-primary-500/15 border border-fuchsia-400/30 text-sm font-medium text-fuchsia-200 hover:from-fuchsia-500/25 hover:to-primary-500/25 transition-all disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-fuchsia-500/15 border border-fuchsia-400/30 text-sm font-medium text-fuchsia-200 hover:from-fuchsia-500/25 hover:to-primary-500/25 transition-colors disabled:opacity-50"
         >
           {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-          {isLoading ? 'Analyzing transcript...' : 'Generate AI Summary'}
+          {isLoading ? 'Analyzing transcript...' : 'Generate AI summary'}
         </button>
         {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
       </div>
@@ -503,7 +565,7 @@ function AiSummaryPanel({ meeting, navigate }) {
 
       {summary.topics?.length > 0 && (
         <div className="mb-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Discussion topics</p>
+          <p className="text-xs font-semibold text-gray-500 mb-1.5">Discussion topics</p>
           <div className="space-y-2">
             {summary.topics.map((t, i) => (
               <div key={i}>
@@ -521,7 +583,7 @@ function AiSummaryPanel({ meeting, navigate }) {
 
       {summary.keyPoints?.length > 0 && (
         <div className="mb-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Key points</p>
+          <p className="text-xs font-semibold text-gray-500 mb-1.5">Key points</p>
           <ul className="space-y-1">
             {summary.keyPoints.map((point, i) => (
               <li key={i} className="text-sm text-gray-400 flex gap-2">
@@ -534,7 +596,7 @@ function AiSummaryPanel({ meeting, navigate }) {
 
       {summary.decisions?.length > 0 && (
         <div className="mb-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Decisions</p>
+          <p className="text-xs font-semibold text-gray-500 mb-1.5">Decisions</p>
           <ul className="space-y-1">
             {summary.decisions.map((d, i) => (
               <li key={i} className="text-sm text-emerald-300/90 flex gap-2">
@@ -547,7 +609,7 @@ function AiSummaryPanel({ meeting, navigate }) {
 
       {summary.actionItems?.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Action items</p>
+          <p className="text-xs font-semibold text-gray-500 mb-1.5">Action items</p>
           <div className="space-y-1.5">
             {summary.actionItems.map((item, i) => {
               const done = createdTasks.includes(item.title)
@@ -561,7 +623,7 @@ function AiSummaryPanel({ meeting, navigate }) {
                   <button
                     onClick={() => createTaskFromItem(item)}
                     disabled={done}
-                    className={`text-xs px-3 py-1 rounded-lg border transition-all shrink-0 ${
+                    className={`text-xs px-3 py-1 rounded-lg border transition-colors shrink-0 ${
                       done
                         ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10'
                         : 'border-primary-500/30 text-primary-300 hover:bg-primary-500/15'
@@ -578,7 +640,7 @@ function AiSummaryPanel({ meeting, navigate }) {
 
       {summary.openQuestions?.length > 0 && (
         <div className="mt-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Open questions</p>
+          <p className="text-xs font-semibold text-gray-500 mb-1.5">Open questions</p>
           <ul className="space-y-1">
             {summary.openQuestions.map((q, i) => (
               <li key={i} className="text-sm text-amber-300/80 flex gap-2"><span className="mt-0.5">?</span> {q}</li>

@@ -99,7 +99,7 @@ export default function BreakoutTool({ meetingId, parentRoomId, inBreakout, canM
         <p className="text-sm text-gray-500 text-center">Loading…</p>
       ) : rooms.length > 0 ? (
         <div className="space-y-3">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Open rooms</p>
+          <p className="text-xs text-gray-500">Open rooms</p>
           {rooms.map(room => {
             const members = (room.assignedParticipants || []).map(p => names.get(p.userId) || 'Participant')
             return (
@@ -128,7 +128,7 @@ export default function BreakoutTool({ meetingId, parentRoomId, inBreakout, canM
 
       {canManage && !inBreakout && (
         <div className="space-y-3">
-          <p className="text-xs uppercase tracking-wide text-gray-500">{rooms.length > 0 ? 'Replace with new rooms' : 'Create rooms'}</p>
+          <p className="text-xs text-gray-500">{rooms.length > 0 ? 'Replace with new rooms' : 'Create rooms'}</p>
           <label className="block">
             <span className="text-sm text-gray-300">Number of rooms</span>
             <select value={roomCount} onChange={e => setRoomCount(Number(e.target.value))} className={`${selectClass} mt-1.5`}>

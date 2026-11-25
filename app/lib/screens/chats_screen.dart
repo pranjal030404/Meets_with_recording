@@ -58,12 +58,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
         load: _load,
         emptyText: 'No conversations yet',
         emptyIcon: Icons.chat_bubble_outline,
+        header: const PageHeader('Chat', subtitle: 'Direct and group conversations'),
         itemBuilder: (context, c, reload) {
           final unread = (c['unreadCount'] ?? 0) as int;
           final partner = asMap(c['partner']);
           return ListTile(
-            leading: c['type'] == 'group' ? const CircleAvatar(child: Icon(Icons.group)) : UserAvatar(name: c['title']?.toString(), url: partner['avatar']?.toString()),
-            title: Text((c['title'] ?? '').toString(), style: TextStyle(fontWeight: unread > 0 ? FontWeight.w700 : null)),
+            leading: c['type'] == 'group' ? const CircleAvatar(child: Icon(Icons.group_outlined)) : UserAvatar(name: c['title']?.toString(), url: partner['avatar']?.toString()),
+            title: Text((c['title'] ?? '').toString(), style: TextStyle(fontWeight: unread > 0 ? FontWeight.w600 : null)),
             subtitle: Text((c['lastMessagePreview'] ?? 'No messages yet').toString(), maxLines: 1, overflow: TextOverflow.ellipsis),
             trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
               Text(fmtRelative(c['lastMessageAt']), style: const TextStyle(fontSize: 12)),

@@ -63,7 +63,8 @@ const includeTeam = () => ({
 
 router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQuota, async (req, res) => {
   try {
-    const { title, description, scheduledAt, settings, teamId, invitees, reminders, recurrence } = req.body;
+    const { title, description, scheduledAt, settings, invitees, reminders, recurrence } = req.body;
+    const teamId = req.body.teamId || null; // "No team" arrives as an empty string
 
     if (teamId) {
       const team = await Team.findByPk(teamId);
@@ -743,12 +744,18 @@ router.post('/:roomId/invite', protect, async (req, res) => {
     }
 
     if (invitees && Array.isArray(invitees)) {
-      const currentInvitees = meeting.invitees || [];
-      const currentInviteeIds = meeting.inviteeIds || [];
+      // copies: Sequelize does not notice (or save) a JSON array edited in place
+      const currentInvitees = [...(meeting.invitees || [])];
+      const currentInviteeIds = [...(meeting.inviteeIds || [])];
 
       for (const inv of invitees) {
+        const email = (inv.email || '').trim().toLowerCase();
+        if (!inv.userId && email) {
+          const account = await User.findOne({ where: { email }, attributes: ['id'] });
+          if (account) inv.userId = account.id;
+        }
         const alreadyInvited = currentInvitees.some(
-          existing => existing.userId && existing.userId === inv.userId
+          existing => (inv.userId && existing.userId === inv.userId) || (email && (existing.email || '').toLowerCase() === email)
         );
 
         if (!alreadyInvited) {
@@ -813,7 +820,7 @@ router.put('/:roomId/respond', protect, async (req, res) => {
       });
     }
 
-    const invitees = meeting.invitees || [];
+    const invitees = (meeting.invitees || []).map(i => ({ ...i })); // copy, or the new status is not saved
     const invitee = invitees.find(
       inv => inv.userId && inv.userId === req.user.id
     );
@@ -837,7 +844,7 @@ router.put('/:roomId/respond', protect, async (req, res) => {
     invitee.respondedAt = new Date().toISOString();
 
     if (status === 'accepted') {
-      const participants = meeting.participants || [];
+      const participants = [...(meeting.participants || [])];
       const alreadyParticipant = participants.some(
         p => p.userId === req.user.id
       );

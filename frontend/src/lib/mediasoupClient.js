@@ -266,6 +266,8 @@ class MediasoupClientService {
           videoGoogleStartBitrate: 1000,
         },
         appData: { mediaType: 'video' },
+        // the app stops camera tracks itself: swapping in a background effect must not stop the camera behind it
+        stopTracks: false,
       });
 
       this.producers.video.on('transportclose', () => {

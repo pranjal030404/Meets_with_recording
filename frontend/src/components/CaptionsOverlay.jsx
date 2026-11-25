@@ -6,7 +6,7 @@ export default function CaptionsOverlay({ captions = [] }) {
 
   return (
     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 z-20 pointer-events-none">
-      <div className="bg-black/80 backdrop-blur-md rounded-xl p-3 space-y-1">
+      <div className="bg-black/80 rounded-xl p-3 space-y-1">
         {recentCaptions.map((caption, i) => (
           <div key={`${caption.userId}-${caption.timestamp}`}
             className={`text-sm ${i === recentCaptions.length - 1 ? 'text-white' : 'text-gray-400'}`}>

@@ -42,6 +42,7 @@ import androidx.annotation.RequiresApi;
 
 import com.cloudwebrtc.webrtc.audio.AudioSwitchManager;
 import com.cloudwebrtc.webrtc.record.AudioChannel;
+import com.cloudwebrtc.webrtc.record.AudioMixRecorder;
 import com.cloudwebrtc.webrtc.record.AudioSamplesInterceptor;
 import com.cloudwebrtc.webrtc.record.MediaRecorderImpl;
 import com.cloudwebrtc.webrtc.record.OutputAudioSamplesInterceptor;
@@ -489,7 +490,30 @@ class GetUserMediaImpl {
                             return;
                         }
 
+                        ScreenCaptureService.start(applicationContext, new ResultReceiver(new Handler(Looper.getMainLooper())) {
+                            @Override
+                            protected void onReceiveResult(int code, Bundle data) {
+                                if (code != ScreenCaptureService.RESULT_STARTED) {
+                                    resultError("getDisplayMedia", "Screen sharing could not start: "
+                                            + (data == null ? "" : data.getString("message")), result);
+                                    return;
+                                }
+                                try {
+                                    startScreenCapture(mediaProjectionData, result, mediaStream);
+                                } catch (RuntimeException e) {
+                                    Log.e(TAG, "getDisplayMedia failed", e);
+                                    ScreenCaptureService.stop(applicationContext);
+                                    resultError("getDisplayMedia", "Screen sharing could not start: " + e.getMessage(), result);
+                                }
+                            }
+                        });
+                    }
+                });
+    }
+
+    private void startScreenCapture(final Intent mediaProjectionData, final Result result, final MediaStream mediaStream) {
                         MediaStreamTrack[] tracks = new MediaStreamTrack[1];
+                        final String trackId = stateProvider.getNextTrackUUID();
                         VideoCapturer videoCapturer = null;
                         videoCapturer =
                                 new OrientationAwareScreenCapturer(
@@ -498,9 +522,15 @@ class GetUserMediaImpl {
                                             @Override
                                             public void onStop() {
                                                 super.onStop();
-                                                // After Huawei P30 and Android 10 version test, the onstop method is called, which will not affect the next process, 
-                                                // and there is no need to call the resulterror method
-                                                //resultError("MediaProjection.Callback()", "User revoked permission to capture the screen.", result);
+                                                // Stopped from the system UI (or by us): tell Dart so it can close the share
+                                                new Handler(Looper.getMainLooper()).post(() -> {
+                                                    ConstraintsMap event = new ConstraintsMap();
+                                                    event.putString("event", "onScreenCaptureEnded");
+                                                    event.putString("trackId", trackId);
+                                                    if (FlutterWebRTCPlugin.sharedSingleton != null) {
+                                                        FlutterWebRTCPlugin.sharedSingleton.sendEvent(event.toMap());
+                                                    }
+                                                });
                                             }
                                         });
                         if (videoCapturer == null) {
@@ -524,18 +554,19 @@ class GetUserMediaImpl {
                         Point size = new Point();
                         display.getRealSize(size);
 
+                        float scale = Math.min(1f, 1600f / Math.max(size.x, size.y));
                         VideoCapturerInfo info = new VideoCapturerInfo();
-                        info.width= size.x;
-                        info.height = size.y;
-                        info.fps = DEFAULT_FPS;
+                        info.width = Math.round(size.x * scale) & ~1;
+                        info.height = Math.round(size.y * scale) & ~1;
+                        info.fps = 15;
                         info.isScreenCapture = true;
                         info.capturer = videoCapturer;
 
                         videoCapturer.startCapture(info.width, info.height, info.fps);
                         Log.d(TAG, "OrientationAwareScreenCapturer.startCapture: " + info.width + "x" + info.height + "@" + info.fps);
 
-                        String trackId = stateProvider.getNextTrackUUID();
                         mVideoCapturers.put(trackId, info);
+                        mSurfaceTextureHelpers.put(trackId, surfaceTextureHelper);
 
                         tracks[0] = pcFactory.createVideoTrack(trackId, videoSource);
 
@@ -582,8 +613,6 @@ class GetUserMediaImpl {
                         successResult.putArray("audioTracks", audioTracks.toArrayList());
                         successResult.putArray("videoTracks", videoTracks.toArrayList());
                         result.success(successResult.toMap());
-                    }
-                });
     }
 
     /**
@@ -765,6 +794,7 @@ class GetUserMediaImpl {
 
         String trackId = stateProvider.getNextTrackUUID();
         mVideoCapturers.put(trackId, info);
+        mCameraSources.put(trackId, videoSource);
         mSurfaceTextureHelpers.put(trackId, surfaceTextureHelper);
         Log.d(TAG, "changeCaptureFormat: " + info.width + "x" + info.height + "@" + info.fps);
         videoSource.adaptOutputFormat(info.width, info.height, info.fps);
@@ -795,6 +825,19 @@ class GetUserMediaImpl {
         return trackParams;
     }
 
+    private final Map<String, VideoSource> mCameraSources = new HashMap<>();
+    private final Map<String, BackgroundProcessor> mBackgrounds = new HashMap<>();
+
+    /** mode: off | blur | image. Applies to a camera track from getUserMedia. */
+    void setBackgroundEffect(String trackId, String mode, String imagePath) {
+        VideoSource source = mCameraSources.get(trackId);
+        if (source == null) throw new IllegalStateException("No camera track " + trackId);
+        BackgroundProcessor next = "off".equals(mode) ? null : new BackgroundProcessor("image".equals(mode) ? imagePath : null);
+        source.setVideoProcessor(next);
+        BackgroundProcessor old = next == null ? mBackgrounds.remove(trackId) : mBackgrounds.put(trackId, next);
+        if (old != null) old.release();
+    }
+
     void removeVideoCapturerSync(String id) {
         synchronized (mVideoCapturers) {
             VideoCapturerInfo info = mVideoCapturers.get(id);
@@ -806,6 +849,12 @@ class GetUserMediaImpl {
                 } finally {
                     info.capturer.dispose();
                     mVideoCapturers.remove(id);
+                    mCameraSources.remove(id);
+                    BackgroundProcessor background = mBackgrounds.remove(id);
+                    if (background != null) background.release();
+                    if (info.isScreenCapture) {
+                        ScreenCaptureService.stop(applicationContext);
+                    }
                     SurfaceTextureHelper helper = mSurfaceTextureHelpers.get(id);
                     if (helper != null) {
                         helper.stopListening();
@@ -914,6 +963,42 @@ class GetUserMediaImpl {
      * @param audioChannel channel for recording or null
      * @throws Exception lot of different exceptions, pass back to dart layer to print them at least
      */
+    // ---- meeting audio recording: microphone + what the phone plays, mixed (see AudioMixRecorder) ----
+    private static final int MIX_MIC_ID = -101;
+    private volatile AudioMixRecorder mixRecorder;
+
+    /** Called by WebRTC's playback thread with every buffer it sends to the speaker. */
+    void onPlaybackSamples(JavaAudioDeviceModule.AudioSamples samples) {
+        AudioMixRecorder recorder = mixRecorder;
+        if (recorder != null) recorder.remoteCallback.onWebRtcAudioRecordSamplesReady(samples);
+    }
+
+    void startAudioRecording(String path, boolean micEnabled, @Nullable String videoTrackId) throws Exception {
+        if (mixRecorder != null) throw new IllegalStateException("Already recording");
+        VideoTrack picture = null;
+        if (videoTrackId != null) {
+            MediaStreamTrack track = stateProvider.getLocalTrack(videoTrackId);
+            if (!(track instanceof VideoTrack)) throw new IllegalStateException("No screen picture to record");
+            picture = (VideoTrack) track;
+        }
+        AudioMixRecorder recorder = new AudioMixRecorder();
+        recorder.start(path, micEnabled, picture, EglUtils.getRootEglBaseContext());
+        inputSamplesInterceptor.attachCallback(MIX_MIC_ID, recorder.micCallback);
+        mixRecorder = recorder;
+    }
+
+    void setAudioRecordingMic(boolean enabled) {
+        if (mixRecorder != null) mixRecorder.setMicEnabled(enabled);
+    }
+
+    void stopAudioRecording() {
+        AudioMixRecorder recorder = mixRecorder;
+        if (recorder == null) return;
+        mixRecorder = null;
+        inputSamplesInterceptor.detachCallback(MIX_MIC_ID);
+        recorder.stop();
+    }
+
     void startRecordingToFile(
             String path, Integer id, @Nullable VideoTrack videoTrack, @Nullable AudioChannel audioChannel)
             throws Exception {

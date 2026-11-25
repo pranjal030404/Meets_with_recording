@@ -54,9 +54,9 @@ export default function FileAttachment({ fileUrl, fileName, fileType, fileSize }
           src={url}
           alt={fileName || 'Image'}
           onLoad={() => setLoaded(true)}
-          className="rounded-2xl border border-white/[0.08] max-h-72 w-auto object-cover transition-transform duration-300 group-hover/img:scale-[1.02]"
+          className="rounded-2xl border border-white/[0.08] max-h-72 w-auto object-cover transition-transform group-hover/img:scale-[1.02]"
         />
-        <span className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-sm opacity-0 group-hover/img:opacity-100 transition-opacity">
+        <span className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/60 opacity-0 group-hover/img:opacity-100 transition-opacity">
           <Download className="w-3.5 h-3.5 text-white" />
         </span>
       </a>

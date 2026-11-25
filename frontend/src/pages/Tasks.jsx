@@ -57,15 +57,15 @@ export function TasksPage({ teamId: fixedTeamId } = {}) {
   }
 
   return (
-    <div className={embedded ? 'relative p-5 sm:p-6' : 'relative w-full min-h-screen flex flex-col px-4 sm:px-8 lg:px-10 py-8 lg:py-10'}>
+    <div className={embedded ? 'relative p-5 sm:p-6' : 'mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-8 sm:px-8 lg:py-10'}>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className={`${embedded ? 'text-xl' : 'text-3xl'} font-bold font-display tracking-tight`}>{embedded ? 'Team tasks' : 'Tasks'}</h1>
+          <h1 className={embedded ? 'font-display text-xl font-semibold' : 'page-title'}>{embedded ? 'Team tasks' : 'Tasks'}</h1>
           <p className="text-gray-500 mt-1">{embedded ? 'Shared work for everyone in this team.' : 'Personal and team work, in one board.'}</p>
         </div>
         <button onClick={() => setShowCreate(true)} className="btn btn-primary">
-          <Plus className="w-4 h-4" /> New Task
+          <Plus className="w-4 h-4" /> New task
         </button>
       </div>
 
@@ -79,16 +79,16 @@ export function TasksPage({ teamId: fixedTeamId } = {}) {
 
       {/* Filters */}
       {!embedded && <div className="flex flex-wrap items-center gap-3 mb-6">
-        <div className="flex rounded-xl bg-dark-300/50 border border-white/[0.06] p-1">
+        <div className="tabs">
           <button
             onClick={() => { setScope('mine'); setTeamId('') }}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${scope === 'mine' ? 'bg-primary-500/20 text-primary-200' : 'text-gray-400 hover:text-gray-200'}`}
+            className={`tab ${scope === 'mine' ? 'tab-active' : ''}`}
           >
             My tasks
           </button>
           <button
             onClick={() => setScope('team')}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${scope === 'team' ? 'bg-primary-500/20 text-primary-200' : 'text-gray-400 hover:text-gray-200'}`}
+            className={`tab ${scope === 'team' ? 'tab-active' : ''}`}
           >
             Team tasks
           </button>
@@ -161,7 +161,7 @@ function StatCard({ label, value, icon: Icon, tone }) {
         <Icon className="w-5 h-5" />
       </div>
       <div>
-        <p className="text-2xl font-bold font-display">{value}</p>
+        <p className="text-2xl font-semibold font-display">{value}</p>
         <p className="text-xs text-gray-500">{label}</p>
       </div>
     </div>
@@ -172,7 +172,7 @@ function TaskCard({ task, onClick, onMove }) {
   return (
     <div
       onClick={onClick}
-      className={`group rounded-xl bg-dark-300/60 border p-3.5 cursor-pointer transition-all hover:-translate-y-0.5 hover:border-primary-500/30 ${
+      className={`group rounded-xl bg-dark-300/60 border p-3.5 cursor-pointer transition-colors hover:border-primary-500/30 ${
         isOverdue(task) ? 'border-red-500/30' : 'border-white/[0.06]'
       }`}
     >
@@ -256,10 +256,10 @@ function CreateTaskModal({ teams, presetTeamId, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative glass-strong rounded-3xl border border-white/10 w-full max-w-lg p-6 shadow-float max-h-[85vh] overflow-y-auto">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative glass-strong rounded-2xl border border-white/10 w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-bold font-display">New task</h3>
+          <h3 className="text-lg font-semibold font-display">New task</h3>
           <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06]"><X className="w-5 h-5" /></button>
         </div>
         <div className="space-y-3">
@@ -353,10 +353,10 @@ function TaskDetailModal({ task, teams, onClose, onDelete }) {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative glass-strong rounded-3xl border border-white/10 w-full max-w-lg p-6 shadow-float max-h-[85vh] overflow-y-auto">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative glass-strong rounded-2xl border border-white/10 w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-bold font-display">Task details</h3>
+          <h3 className="text-lg font-semibold font-display">Task details</h3>
           <div className="flex items-center gap-1">
             <button onClick={onDelete} className="p-1.5 rounded-lg text-gray-500 hover:bg-red-500/10 hover:text-red-400" title="Delete task">
               <Trash2 className="w-4 h-4" />
@@ -394,7 +394,7 @@ function TaskDetailModal({ task, teams, onClose, onDelete }) {
 
           {/* Subtasks */}
           <div className="rounded-2xl bg-dark-300/40 border border-white/[0.06] p-3.5">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            <p className="text-xs font-semibold text-gray-400 mb-2">
               Subtasks {subtasks.length > 0 && `(${subtasks.filter(s => s.status === 'done').length}/${subtasks.length})`}
             </p>
             <div className="space-y-1.5">

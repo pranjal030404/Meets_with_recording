@@ -63,7 +63,7 @@ export default function TranscribeTool({ tools, canManage, title }) {
         )}
 
         <label className="block">
-          <span className="text-xs uppercase tracking-wide text-gray-500">Language you speak</span>
+          <span className="text-xs text-gray-500">Language you speak</span>
           <select value={speechLang} onChange={e => setSpeechLang(e.target.value)} className={`${selectClass} mt-1.5`}>
             {LANGUAGES.map(l => <option key={l.speech} value={l.speech}>{l.label}</option>)}
           </select>

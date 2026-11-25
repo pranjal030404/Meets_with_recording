@@ -51,18 +51,14 @@ export default function Pricing() {
     billingInterval === 'yearly' ? Number(plan.yearlyPrice) / 12 : Number(plan.monthlyPrice)
 
   return (
-    <div className="min-h-screen bg-dark-100 aurora-bg noise text-white">
-      {/* Animated aurora background */}
-      <div className="blob -top-40 left-1/4 h-[30rem] w-[30rem] bg-primary-600/20 animate-aurora" />
-      <div className="blob top-1/3 -right-32 h-96 w-96 bg-accent-600/15 animate-aurora-slow" />
+    <div className="min-h-screen bg-dark-100 text-white">
 
       {/* Header */}
       <header className="sticky top-0 z-40 glass-strong">
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary-400/30 to-transparent" />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3 group">
             <BrandMark />
-            <span className="text-xl font-bold font-display tracking-tight">{branding.appName}</span>
+            <span className="text-xl font-semibold font-display">{branding.appName}</span>
           </Link>
           <div className="flex items-center gap-2">
             {isAuthenticated ? (
@@ -84,29 +80,29 @@ export default function Pricing() {
 
       {/* Hero */}
       <section className="relative max-w-3xl mx-auto px-4 sm:px-6 pt-16 pb-10 text-center">
-<h1 className="text-4xl sm:text-5xl font-bold font-display leading-tight animate-fade-in-up">
-          Plans that scale with your meetings
+<h1 className="text-4xl sm:text-5xl font-semibold font-display leading-tight">
+          Plans and pricing
         </h1>
-        <p className="text-gray-400 mt-5 max-w-xl mx-auto animate-fade-in-up stagger-1">
+        <p className="text-gray-400 mt-5 max-w-xl mx-auto">
           Start free, upgrade when you need recording, transcription, and bigger rooms.
-          Cancel anytime — no hidden fees.
+          Cancel anytime.
         </p>
 
         {/* Billing interval toggle */}
-        <div className="mt-8 inline-flex items-center gap-1 rounded-full glass p-1 animate-fade-in-up stagger-2">
+        <div className="mt-8 tabs">
           {['monthly', 'yearly'].map((interval) => (
             <button
               key={interval}
               onClick={() => setBillingInterval(interval)}
-              className={`px-5 py-2 rounded-full text-sm font-semibold transition-all duration-200 ${
+              className={`tab ${
                 billingInterval === interval
-                  ? 'bg-gradient-to-r from-primary-500 to-accent-600 text-white shadow-lg shadow-primary-500/25'
-                  : 'text-gray-400 hover:text-white'
+                  ? 'tab-active'
+                  : ''
               }`}
             >
               {interval === 'monthly' ? 'Monthly' : 'Yearly'}
               {interval === 'yearly' && (
-                <span className="ml-2 text-[11px] font-bold text-emerald-300">2 months free</span>
+                <span className="ml-2 text-[11px] font-semibold text-emerald-300">2 months free</span>
               )}
             </button>
           ))}
@@ -124,15 +120,15 @@ export default function Pricing() {
             return (
               <div
                 key={plan.slug}
-                className={`relative rounded-3xl p-7 flex flex-col animate-fade-in-up stagger-${Math.min(i + 1, 6)} ${
+                className={`relative rounded-2xl p-7 flex flex-col ${
                   isPopular
-                    ? 'gradient-border bg-dark-200/60 shadow-glow'
-                    : 'glass rounded-3xl'
+                    ? 'card !border-primary-500/60'
+                    : 'card'
                 }`}
               >
                 {isPopular && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-primary-500 to-accent-600 px-4 py-1 text-xs font-bold text-white shadow-lg shadow-primary-500/30">
-                    MOST POPULAR
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary-500 px-4 py-1 text-xs font-semibold text-white">
+                    Most popular
                   </span>
                 )}
 
@@ -140,7 +136,7 @@ export default function Pricing() {
                 <p className="text-gray-400 text-sm mt-1.5 min-h-[40px]">{plan.description}</p>
 
                 <div className="mt-5 flex items-end gap-1.5">
-                  <span className="text-4xl font-bold font-display tracking-tight">
+                  <span className="text-4xl font-semibold font-display">
                     ${priceFor(plan).toFixed(0)}
                   </span>
                   <span className="text-sm text-gray-400 mb-1.5">
@@ -156,9 +152,7 @@ export default function Pricing() {
                 <ul className="mt-6 space-y-3 flex-1">
                   {(plan.features || []).map((feature) => (
                     <li key={feature} className="flex items-start gap-2.5 text-sm text-gray-200">
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary-500/15 border border-primary-500/30 shrink-0 mt-0.5">
-                        <Check className="h-3 w-3 text-primary-300" />
-                      </span>
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" strokeWidth={1.5} />
                       {feature}
                     </li>
                   ))}
@@ -188,7 +182,7 @@ export default function Pricing() {
 
         <p className="mt-10 flex items-center justify-center gap-2 text-sm text-gray-400">
           <ShieldCheck className="w-4 h-4 text-emerald-400" />
-          Checkout is currently in demo mode — no real payment is processed.
+          Checkout is in demo mode. No real payment is processed.
         </p>
       </section>
     </div>

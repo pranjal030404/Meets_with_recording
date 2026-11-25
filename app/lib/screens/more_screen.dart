@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
+import '../core/theme.dart';
 import '../core/api.dart';
 import '../core/session.dart';
 import '../widgets/common.dart';
-import 'auth_screens.dart';
-import 'billing_screen.dart';
-import 'calendar_screen.dart';
-import 'files_screen.dart';
-import 'meetings_screen.dart';
 
 const _statusPresets = [
   ('✅', 'Available'),
@@ -31,7 +27,7 @@ class MoreScreen extends StatelessWidget {
         return ListView(padding: const EdgeInsets.all(12), children: [
           Card(
             child: ListTile(
-              contentPadding: const EdgeInsets.all(14),
+              contentPadding: const EdgeInsets.all(16),
               leading: UserAvatar(name: s.name, url: u['avatar']?.toString(), radius: 28),
               title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18)),
               subtitle: Text('${s.email}${plan != null ? '\nPlan: $plan' : ''}${(u['customStatus'] ?? '').toString().isNotEmpty ? '\n${u['statusEmoji'] ?? ''} ${u['customStatus']}' : ''}'),
@@ -60,19 +56,17 @@ class MoreScreen extends StatelessWidget {
                 }),
               ),
           ]),
-          const SectionTitle('Workspace'),
-          _tile(context, Icons.calendar_month, 'Calendar', const CalendarScreen()),
-          _tile(context, Icons.folder_outlined, 'Files', const FilesScreen(standalone: true)),
-          _tile(context, Icons.history, 'Meeting history', const _HistoryScreen()),
+          const SectionTitle('Messages'),
           _tile(context, Icons.bookmark_border, 'Saved messages', const _SavedScreen()),
-          _tile(context, Icons.workspace_premium_outlined, 'Plan & billing', const BillingScreen()),
           const SectionTitle('App'),
-          ListTile(leading: const Icon(Icons.dns_outlined), title: const Text('Server address'), subtitle: const Text('Change the backend this app connects to'), onTap: () => showServerDialog(context)),
           ListTile(
-            leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text('Sign out', style: TextStyle(color: Colors.red)),
+            leading: const Icon(Icons.logout, color: AppTheme.overdue),
+            title: const Text('Sign out', style: TextStyle(color: AppTheme.overdue)),
             onTap: () async {
-              if (await confirm(context, 'Sign out?', ok: 'Sign out')) Session.instance.logout();
+              if (await confirm(context, 'Sign out?', ok: 'Sign out') && context.mounted) {
+                Navigator.of(context).popUntil((r) => r.isFirst);
+                Session.instance.logout();
+              }
             },
           ),
           const SizedBox(height: 24),
@@ -161,20 +155,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 }
 
-class _HistoryScreen extends StatelessWidget {
-  const _HistoryScreen();
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Meeting history')),
-        body: AsyncList<Map<String, dynamic>>(
-          load: () async => asList(Api.unwrap(await Api.instance.get('/meetings', query: {'status': 'ended', 'limit': 100}))['meetings']).map(asMap).toList(),
-          emptyText: 'No finished meetings yet',
-          emptyIcon: Icons.history,
-          itemBuilder: (_, m, reload) => MeetingCard(meeting: m, onChanged: reload),
-        ),
-      );
-}
-
 class _SavedScreen extends StatelessWidget {
   const _SavedScreen();
   @override
@@ -185,7 +165,7 @@ class _SavedScreen extends StatelessWidget {
             final d = Api.unwrap(await Api.instance.get('/messages/saved'));
             return asList(d['messages'] ?? d['saved']).map(asMap).toList();
           },
-          emptyText: 'Nothing saved yet. Long-press a message and choose Save.',
+          emptyText: 'Long-press a message and choose Save to keep it here',
           emptyIcon: Icons.bookmark_border,
           itemBuilder: (_, m, reload) {
             final msg = m['message'] is Map ? asMap(m['message']) : m;

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../core/theme.dart';
 import '../core/api.dart';
 import '../core/meeting_controller.dart';
 import '../widgets/common.dart';
@@ -92,7 +93,7 @@ class _ChatPanelState extends State<_ChatPanel> {
                       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * .75),
                       decoration: BoxDecoration(color: mine ? cs.primaryContainer : cs.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        if (!mine) Text(m.senderName, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: cs.primary)),
+                        if (!mine) Text(m.senderName, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: cs.primary)),
                         SelectableText(m.text),
                         Text(fmtTime(m.at), style: TextStyle(fontSize: 10, color: cs.outline)),
                       ]),
@@ -104,9 +105,9 @@ class _ChatPanelState extends State<_ChatPanel> {
       Padding(
         padding: EdgeInsets.fromLTRB(12, 6, 12, 8 + MediaQuery.of(context).viewInsets.bottom),
         child: Row(children: [
-          Expanded(child: TextField(controller: _text, textInputAction: TextInputAction.send, onSubmitted: (_) => _send(), decoration: const InputDecoration(hintText: 'Message everyone', isDense: true))),
+          Expanded(child: TextField(controller: _text, enabled: widget.c.settings['allowChat'] != false, textInputAction: TextInputAction.send, onSubmitted: (_) => _send(), decoration: InputDecoration(hintText: widget.c.settings['allowChat'] != false ? 'Message everyone' : 'The host turned chat off', isDense: true))),
           const SizedBox(width: 8),
-          IconButton.filled(onPressed: _send, icon: const Icon(Icons.send)),
+          IconButton.filled(onPressed: widget.c.settings['allowChat'] != false ? _send : null, icon: const Icon(Icons.send)),
         ]),
       ),
     ]);
@@ -141,7 +142,7 @@ class _PeoplePanel extends StatelessWidget {
             leading: UserAvatar(name: c.myName),
             title: Text('${c.myName} (you)'),
             subtitle: Text(c.myRole),
-            trailing: Icon(c.micOn ? Icons.mic : Icons.mic_off, color: c.micOn ? null : Colors.red),
+            trailing: Icon(c.micOn ? Icons.mic : Icons.mic_off, color: c.micOn ? null : AppTheme.overdue),
           ),
           ...peers.map((p) => ListTile(
                 leading: UserAvatar(name: p.name, url: p.avatar),
@@ -149,8 +150,8 @@ class _PeoplePanel extends StatelessWidget {
                 subtitle: Text(p.role),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (p.handRaised) const Text('✋ '),
-                  Icon(p.muted ? Icons.mic_off : Icons.mic, size: 20, color: p.muted ? Colors.red : null),
-                  Icon(p.videoOff ? Icons.videocam_off : Icons.videocam, size: 20, color: p.videoOff ? Colors.red : null),
+                  Icon(p.muted ? Icons.mic_off : Icons.mic, size: 20, color: p.muted ? AppTheme.overdue : null),
+                  Icon(p.videoOff ? Icons.videocam_off : Icons.videocam, size: 20, color: p.videoOff ? AppTheme.overdue : null),
                   if (c.isManager)
                     PopupMenuButton<String>(
                       onSelected: (v) {
@@ -161,6 +162,7 @@ class _PeoplePanel extends StatelessWidget {
                           case 'cohost': c.makeCohost(p);
                           case 'uncohost': c.removeCohost(p);
                           case 'spot': c.spotlight(p);
+                          case 'hand': c.lowerHand(p);
                           case 'remove': c.removeUser(p);
                         }
                       },
@@ -169,6 +171,7 @@ class _PeoplePanel extends StatelessWidget {
                         const PopupMenuItem(value: 'video', child: Text('Turn camera off')),
                         const PopupMenuItem(value: 'unmute', child: Text('Ask to unmute')),
                         const PopupMenuItem(value: 'spot', child: Text('Spotlight')),
+                        if (p.handRaised) const PopupMenuItem(value: 'hand', child: Text('Lower hand')),
                         if (c.isHost) PopupMenuItem(value: p.role == 'co-host' ? 'uncohost' : 'cohost', child: Text(p.role == 'co-host' ? 'Remove co-host' : 'Make co-host')),
                         const PopupMenuItem(value: 'remove', child: Text('Remove')),
                       ],
@@ -292,10 +295,10 @@ class _PollsPanelState extends State<_PollsPanel> {
                 child: Stack(children: [
                   if (showResults) Positioned.fill(child: FractionallySizedBox(alignment: Alignment.centerLeft, widthFactor: pct.clamp(0, 1), child: Container(decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary.withOpacity(.2), borderRadius: BorderRadius.circular(8))))),
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(border: Border.all(color: Theme.of(context).colorScheme.outlineVariant), borderRadius: BorderRadius.circular(8)),
                     child: Row(children: [
-                      if (o['mine'] == true) const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.check_circle, size: 18)),
+                      if (o['mine'] == true) const Padding(padding: EdgeInsets.only(right: 8), child: Icon(Icons.check_circle, size: 18)),
                       Expanded(child: Text(o['text'].toString())),
                       if (showResults) Text('${o['votes']} · ${o['percentage']}%'),
                     ]),
@@ -378,7 +381,7 @@ class _QAPanelState extends State<_QAPanel> {
                           title: Text(q['question'].toString()),
                           subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Text('Asked by ${q['askedByName']}', style: TextStyle(fontSize: 12, color: cs.outline)),
-                            if (answered) Container(margin: const EdgeInsets.only(top: 6), padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: cs.primaryContainer, borderRadius: BorderRadius.circular(8)), child: Text(q['answer'].toString())),
+                            if (answered) Container(margin: const EdgeInsets.only(top: 8), padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: cs.primaryContainer, borderRadius: BorderRadius.circular(8)), child: Text(q['answer'].toString())),
                           ]),
                           trailing: Column(mainAxisSize: MainAxisSize.min, children: [
                             IconButton(

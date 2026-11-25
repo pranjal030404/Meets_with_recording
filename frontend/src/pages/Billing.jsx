@@ -25,7 +25,7 @@ const formatDate = (value) =>
 function UsageMeter({ icon: Icon, label, used, limit, note }) {
   const unlimited = limit === -1 || limit === undefined
   const pct = unlimited ? 0 : Math.min(100, limit > 0 ? (used / limit) * 100 : 0)
-  const barColor = pct >= 100 ? 'from-red-500 to-red-600' : pct >= 80 ? 'from-amber-400 to-orange-500' : 'from-primary-400 to-accent-600'
+  const barColor = pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-400' : 'bg-primary-400'
 
   return (
     <div className="glass rounded-2xl p-5">
@@ -43,10 +43,10 @@ function UsageMeter({ icon: Icon, label, used, limit, note }) {
       </div>
       <div className="h-2 rounded-full bg-white/5 overflow-hidden">
         {unlimited ? (
-          <div className="h-full w-full bg-gradient-to-r from-emerald-400/40 to-emerald-500/20" />
+          <div className="h-full w-full bg-emerald-400/40" />
         ) : (
           <div
-            className={`h-full rounded-full bg-gradient-to-r ${barColor} transition-all duration-500`}
+            className={`h-full rounded-full ${barColor} transition-colors`}
             style={{ width: `${pct}%` }}
           />
         )}
@@ -106,11 +106,11 @@ export default function Billing() {
 
   return (
     <AppShell wide>
-      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-10 lg:py-14 space-y-8">
+      <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8 lg:py-10 space-y-8">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold font-display tracking-tight">Billing</h1>
-            <p className="text-gray-500 mt-1">Your subscription, usage and payment history.</p>
+            <h1 className="page-title">Billing</h1>
+            <p className="page-sub">Subscription, usage and payment history</p>
           </div>
           <Link to="/pricing" className="btn btn-primary">
             Change plan
@@ -119,12 +119,11 @@ export default function Billing() {
         </div>
 
         {/* Current plan */}
-        <section className="gradient-border rounded-3xl p-6 sm:p-8 relative overflow-hidden">
-          <div className="blob -top-24 -right-24 h-72 w-72 bg-primary-600/15 animate-aurora" />
+        <section className="card p-6">
           <div className="relative flex flex-wrap items-start justify-between gap-6">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Current plan</p>
-              <h1 className="text-3xl font-bold font-display">{plan?.name || 'Free'}</h1>
+              <p className="text-xs font-semibold text-gray-400 mb-2">Current plan</p>
+              <h2 className="font-display text-2xl font-semibold">{plan?.name || 'Free'}</h2>
               <p className="text-gray-400 mt-2">{plan?.description}</p>
 
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-5 text-sm">
@@ -147,7 +146,7 @@ export default function Billing() {
                       : 'bg-emerald-500/10 border-emerald-400/25 text-emerald-200'
                   }`}
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-current" />
                   {subscription?.cancelAtPeriodEnd ? 'Canceling' : 'Active'}
                 </span>
               </div>
@@ -181,7 +180,7 @@ export default function Billing() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold font-display">Usage this period</h2>
             <span className="text-xs text-gray-500">
-              {formatDate(usage?.periodStart)} — {formatDate(usage?.periodEnd)}
+              {formatDate(usage?.periodStart)} to {formatDate(usage?.periodEnd)}
             </span>
           </div>
           <div className="grid md:grid-cols-3 gap-4">
@@ -197,7 +196,7 @@ export default function Billing() {
           </div>
           {!limits.canRecord && (
             <p className="mt-3 text-sm text-amber-200/90">
-              Recording and transcription are not included in the {plan?.name} plan — upgrade to unlock them.
+              Recording and transcription are not included in the {plan?.name} plan. Upgrade to unlock them.
             </p>
           )}
         </section>
@@ -216,7 +215,7 @@ export default function Billing() {
             <div className="glass rounded-2xl overflow-hidden table-scroll">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs uppercase tracking-wider text-gray-400 border-b border-white/10">
+                  <tr className="text-left text-xs text-gray-400 border-b border-white/10">
                     <th className="px-5 py-3.5">Date</th>
                     <th className="px-5 py-3.5">Description</th>
                     <th className="px-5 py-3.5">Amount</th>

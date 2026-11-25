@@ -39,10 +39,10 @@ const STEPS = [
 ]
 
 const TILES = [
-  { name: 'You', tone: '#2a2622', fig: '#3d3731', speaking: true },
-  { name: 'Aisha', tone: '#232826', fig: '#343c38' },
-  { name: 'Marcus', tone: '#25242b', fig: '#383642' },
-  { name: 'Sam', tone: '#2b2723', fig: '#40382f' },
+  { name: 'You', tone: '#1f2229', fig: '#333844', speaking: true },
+  { name: 'Aisha', tone: '#1d2224', fig: '#303a3d' },
+  { name: 'Marcus', tone: '#211f27', fig: '#383543' },
+  { name: 'Sam', tone: '#222224', fig: '#393a3f' },
 ]
 
 const TRANSCRIPT = [

@@ -1,3 +1,4 @@
+import Avatar from './Avatar'
 import { X, Mic, MicOff, Video, VideoOff, Crown, MoreVertical, UserMinus, VolumeX, Hand, VideoIcon, Shield, Check, XCircle } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { getSocket } from '../lib/socket'
@@ -37,16 +38,25 @@ export default function ParticipantsList({
             onClick={() => setTab('participants')}
             className={`flex-1 py-2 text-sm font-medium transition-colors ${tab === 'participants' ? 'text-primary-400 border-b-2 border-primary-400' : 'text-gray-400 hover:text-white'}`}
           >
-            In Meeting
+            In meeting
           </button>
           <button
             onClick={() => setTab('waiting')}
             className={`flex-1 py-2 text-sm font-medium transition-colors relative ${tab === 'waiting' ? 'text-primary-400 border-b-2 border-primary-400' : 'text-gray-400 hover:text-white'}`}
           >
             Waiting ({waitingRoomUsers.length})
-            <span className="absolute top-1 right-4 w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+            <span className="absolute top-1 right-4 w-2 h-2 bg-yellow-500 rounded-full" />
           </button>
         </div>
+      )}
+
+      {canManage && handRaisedUsers.length > 0 && (
+        <button
+          onClick={() => getSocket()?.emit('host:lower-hand', { roomId })}
+          className="mx-3 mt-3 rounded-lg bg-dark-300 px-3 py-2 text-sm font-medium hover:bg-dark-400 transition-colors"
+        >
+          Lower all hands ({handRaisedUsers.length})
+        </button>
       )}
 
       {/* Participants List */}
@@ -97,7 +107,7 @@ export default function ParticipantsList({
           )}
           {waitingRoomUsers.map(({ user: waitingUser, socketId }) => (
             <div key={socketId} className="flex items-center gap-3 p-3 hover:bg-dark-300 rounded-lg transition-colors">
-              <img src={waitingUser.avatar} alt={waitingUser.name} className="w-10 h-10 rounded-full" />
+              <Avatar user={waitingUser} size="md" />
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate">{waitingUser.name}</p>
                 <p className="text-xs text-gray-400">Waiting to join</p>
@@ -201,7 +211,7 @@ function ParticipantItem({ participant, isCurrentUser, isHost, isCoHost, canCont
     <div className="flex items-center gap-3 p-3 hover:bg-dark-300 rounded-lg transition-colors">
       {/* Avatar */}
       <div className="relative">
-        <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-full" />
+        <Avatar user={user} size="md" />
         {role === 'host' && (
           <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-yellow-500 rounded-full flex items-center justify-center">
             <Crown className="w-3 h-3 text-black" />
@@ -224,7 +234,7 @@ function ParticipantItem({ participant, isCurrentUser, isHost, isCoHost, canCont
 
       {/* Hand raise indicator */}
       {isHandRaised && (
-        <span className="text-lg" title="Hand raised">✋</span>
+        <span title="Hand raised"><Hand className="w-4 h-4 text-amber-300" /></span>
       )}
 
       {/* Status indicators */}
@@ -250,7 +260,13 @@ function ParticipantItem({ participant, isCurrentUser, isHost, isCoHost, canCont
           </button>
 
           {showMenu && (
-            <div className="absolute right-0 top-full mt-1 bg-dark-300 rounded-lg shadow-lg py-1 min-w-[180px] z-10 animate-fade-in">
+            <div className="absolute right-0 top-full mt-1 bg-dark-300 rounded-lg py-1 min-w-[180px] z-10">
+              {isHandRaised && (
+                <button onClick={() => { getSocket()?.emit('host:lower-hand', { roomId, targetSocketId: socketId }); setShowMenu(false) }}
+                  className="w-full px-3 py-2 flex items-center gap-2 hover:bg-dark-400 transition-colors text-left text-sm">
+                  <Hand className="w-4 h-4" /> Lower hand
+                </button>
+              )}
               <button onClick={handleMuteUser}
                 className="w-full px-3 py-2 flex items-center gap-2 hover:bg-dark-400 transition-colors text-left text-sm">
                 <VolumeX className="w-4 h-4" /> Mute
