@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore'
 import { useMeetingStore } from '../store/meetingStore'
 import AppShell from '../components/AppShell'
 import toast from 'react-hot-toast'
+import { mySessions, totalMinutes, isLive, spokenDuration } from '../lib/meetingTime'
 
 const DAY = 24 * 60 * 60 * 1000
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
@@ -13,17 +14,9 @@ const clock = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digi
 const shortDate = (d) => d.toLocaleDateString([], { day: 'numeric', month: 'short' })
 const minuteOfDay = (d) => d.getHours() * 60 + d.getMinutes()
 const startOf = (m) => new Date(m.startedAt || m.scheduledAt || m.createdAt)
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 const fileUrl = (path) => /^https?:\/\//.test(path)
   ? path
   : `${import.meta.env.VITE_API_URL || window.location.origin}${path.startsWith('/') ? path : `/${path}`}`
-
-// How long a meeting actually ran, in minutes. Meetings nobody started don't count.
-const ranFor = (m, now) => {
-  if (!m.startedAt) return 0
-  const end = m.endedAt ? new Date(m.endedAt) : m.status === 'active' ? now : null
-  return end ? Math.max(1, Math.round((end - new Date(m.startedAt)) / 60000)) : 0
-}
 
 const KINDS = {
   recorded: { label: 'Recorded', color: 'bg-primary-500' },
@@ -86,10 +79,19 @@ export default function Home() {
   const all = meetings || []
   const today = startOfDay(now)
   const days = Array.from({ length: 7 }, (_, i) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6 + i))
+  const userId = user?.id || user?._id
+  // only this user's own time: one tape block per stay, plus a marker where the end was never recorded
   const week = all
-    .map((m) => ({ ...m, start: startOf(m), minutes: ranFor(m, now) }))
-    .filter((m) => m.minutes && m.start >= days[0] && m.start <= now)
-  const total = week.reduce((sum, m) => sum + m.minutes, 0)
+    .flatMap((m) => mySessions(m, userId, now).map((session, i) => ({
+      ...m,
+      key: `${m.id}-${i}`,
+      session,
+      start: new Date(session.start),
+      minutes: session.end === null ? null : Math.max(1, Math.round((session.end - session.start) / 60000)),
+    })))
+    .filter((v) => v.start >= days[0] && v.start <= now)
+  const total = totalMinutes(all.flatMap((m) => mySessions(m, userId, now)), days[0])
+  const unknown = week.filter((v) => v.minutes === null).length
 
   // meetings with something to read or play come first, then the list reads newest first
   const hasNotes = (m) => Boolean(m.aiSummary || m.recordings?.length)
@@ -98,7 +100,7 @@ export default function Home() {
     .slice(0, 3)
     .sort((a, b) => startOf(b) - startOf(a))
 
-  const live = all.find((m) => m.status === 'active')
+  const live = all.find((m) => isLive(m, now))
   const upcoming = all
     .filter((m) => m.status === 'scheduled' && m.scheduledAt && new Date(m.scheduledAt) > now - 60 * 60 * 1000)
     .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt))[0]
@@ -117,9 +119,9 @@ export default function Home() {
               {meetings === null || loadFailed ? (
                 `Welcome back${firstName ? `, ${firstName}` : ''}.`
               ) : total ? (
-                <>{firstName ? `${firstName}, you` : 'You'} spent <span className="text-primary-500">{plural(total, 'minute')}</span> in meetings over the last 7 days.</>
+                <>{firstName ? `${firstName}, you` : 'You'} spent <span className="text-primary-500">{spokenDuration(total)}</span> in meetings over the last 7 days.</>
               ) : (
-                `${firstName ? `${firstName}, no` : 'No'} meetings in the last 7 days.`
+                `${firstName ? `${firstName}, no` : 'No'} meeting time recorded in the last 7 days.`
               )}
             </h1>
           </div>
@@ -136,7 +138,7 @@ export default function Home() {
           </div>
         </div>
 
-        <WeekTape days={days} meetings={week} now={now} loading={meetings === null} failed={loadFailed} />
+        <WeekTape days={days} visits={week} unknown={unknown} now={now} loading={meetings === null} failed={loadFailed} />
 
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
           <section className="card p-4 sm:p-6">
@@ -147,7 +149,7 @@ export default function Home() {
                 {loadFailed ? 'Meetings could not be loaded' : 'No past meetings yet. Start one and it shows up here'}
               </p>
             )}
-            {entries.map((m) => <Entry key={m.id} meeting={m} now={now} />)}
+            {entries.map((m) => <Entry key={m.id} meeting={m} sessions={mySessions(m, userId, now)} />)}
           </section>
 
           <div className="space-y-4">
@@ -172,9 +174,9 @@ function CardHead({ title, to, link }) {
 }
 
 // The last seven days, one row each: every meeting sits at its real time and is as wide as it ran
-function WeekTape({ days, meetings, now, loading, failed }) {
+function WeekTape({ days, visits, unknown, now, loading, failed }) {
   // 08:00 to midnight, opening earlier (on an even hour) only if something started before that
-  const first = Math.min(8, ...meetings.map((m) => Math.floor(m.start.getHours() / 2) * 2))
+  const first = Math.min(8, ...visits.map((m) => Math.floor(m.start.getHours() / 2) * 2))
   const from = first * 60
   const span = 24 * 60 - from
   const pct = (minute) => ((minute - from) / span) * 100
@@ -205,16 +207,16 @@ function WeekTape({ days, meetings, now, loading, failed }) {
                   {isToday ? 'Today' : `${day.toLocaleDateString([], { weekday: 'short' })} ${day.getDate()}`}
                 </span>
                 <div className="relative h-5 flex-1" style={ticks}>
-                  {meetings.filter((m) => startOfDay(m.start).getTime() === day.getTime()).map((m) => {
+                  {visits.filter((m) => startOfDay(m.start).getTime() === day.getTime()).map((m) => {
                     const left = Math.min(pct(minuteOfDay(m.start)), 99.5)
-                    const tip = `${m.title} · ${clock(m.start)} · ${m.minutes} min`
+                    const tip = `${m.title} · ${clock(m.start)} · ${m.minutes === null ? 'end not recorded' : `${m.minutes} min`}`
                     return (
                       <button
-                        key={m.id}
+                        key={m.key}
                         type="button"
                         aria-label={`${tip}, ${KINDS[kindOf(m)].label}`}
-                        className={`group absolute top-0 h-5 min-w-1 rounded-[3px] outline-offset-1 hover:z-10 hover:outline hover:outline-2 hover:outline-white focus:z-10 focus:outline focus:outline-2 focus:outline-white ${KINDS[kindOf(m)].color}`}
-                        style={{ left: `${left}%`, width: `${Math.min((m.minutes / span) * 100, 100 - left)}%` }}
+                        className={`group absolute top-0 h-5 min-w-1 rounded-[3px] outline-offset-1 hover:z-10 hover:outline hover:outline-2 hover:outline-white focus:z-10 focus:outline focus:outline-2 focus:outline-white ${m.minutes === null ? 'border border-dashed border-gray-400' : KINDS[kindOf(m)].color}`}
+                        style={{ left: `${left}%`, width: `${Math.min(((m.minutes || 0) / span) * 100, 100 - left)}%` }}
                       >
                         <span className={`pointer-events-none absolute bottom-7 hidden whitespace-nowrap rounded-md border border-white/10 bg-dark-400 px-2 py-1 font-mono text-xs text-gray-100 group-hover:block group-focus:block ${left > 60 ? 'right-0' : left < 30 ? 'left-0' : 'left-1/2 -translate-x-1/2'}`}>
                           {tip}
@@ -236,13 +238,18 @@ function WeekTape({ days, meetings, now, loading, failed }) {
               </span>
             ))}
           </div>
+          {unknown > 0 && (
+            <p className="mt-3 text-xs text-gray-500">
+              Dashed marks ({unknown}) are visits with no reliable end time. They are not counted.
+            </p>
+          )}
         </>
       )}
     </section>
   )
 }
 
-function Entry({ meeting, now }) {
+function Entry({ meeting, sessions }) {
   const [summary, setSummary] = useState(meeting.aiSummary || null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -251,7 +258,8 @@ function Entry({ meeting, now }) {
   const recording = recordings[recordings.length - 1]
   const seconds = Number(recording?.duration)
   const length = seconds > 0 ? (seconds < 60 ? `${Math.floor(seconds)} sec` : `${Math.round(seconds / 60)} min`) : 'recording'
-  const ran = ranFor(meeting, now)
+  const mine = totalMinutes(sessions)
+  const endMissing = sessions.some((s) => s.end === null)
   const chip = 'focus-ring inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-xs text-gray-200 transition-colors hover:border-white/25 hover:bg-white/[0.04] disabled:opacity-50'
 
   const createSummary = async () => {
@@ -276,7 +284,7 @@ function Entry({ meeting, now }) {
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-sm font-semibold text-gray-100">{meeting.title}</h3>
         <p className={`mt-1 text-sm leading-relaxed text-gray-400 ${open ? '' : 'line-clamp-2'}`}>
-          {summary?.summary || (recording ? 'Recorded, no summary yet.' : ran ? `Ran for ${plural(ran, 'minute')}.` : 'No notes from this meeting.')}
+          {summary?.summary || (recording ? 'Recorded, no summary yet.' : mine ? `You were in for ${spokenDuration(mine)}.` : endMissing ? 'The end time was not recorded.' : 'No notes from this meeting.')}
         </p>
         {open && summary?.decisions?.length > 0 && (
           <ul className="mt-2 list-disc pl-5 text-sm text-gray-400">
