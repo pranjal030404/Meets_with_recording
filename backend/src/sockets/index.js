@@ -9,7 +9,7 @@ import { getPermissions } from '../lib/permissions.js';
 import mediasoupService from '../lib/mediasoup.js';
 import { canManageMeeting, isMeetingHost, getMeetingRole, contributorAllowed } from '../lib/meetingPermissions.js';
 import { saveRuntime, loadRuntime, deleteRuntime } from '../services/roomRuntimeStore.js';
-import { endMeeting } from '../services/meetingLifecycle.js';
+import { endMeeting, isUpcoming } from '../services/meetingLifecycle.js';
 import { syncMeetingStatus } from '../services/meetingStatus.js';
 import { persistLiveTranscript, scheduleTranscriptCheckpoint, cancelTranscriptCheckpoint } from '../services/liveTranscriptStore.js';
 import { socketConnections, socketDisconnects, socketEvents, socketRateLimited } from '../observability/metrics.js';
@@ -254,6 +254,11 @@ export const initializeSocketHandlers = (io) => {
 
         if (meeting.status === 'ended' || meeting.status === 'cancelled') {
           socket.emit('error', { message: meeting.status === 'cancelled' ? 'This meeting was cancelled' : 'This meeting has ended' });
+          return;
+        }
+
+        if (meeting.status === 'scheduled' && isUpcoming(meeting) && !canManageMeeting(meeting, socket.user.id)) {
+          socket.emit('error', { message: 'This meeting has not started yet' });
           return;
         }
 

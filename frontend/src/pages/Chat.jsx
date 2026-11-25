@@ -18,6 +18,8 @@ import EmojiPicker from '../components/EmojiPicker'
 import ProfileCard from '../components/ProfileCard'
 import FileAttachment from '../components/FileAttachment'
 import useChatUpload from '../hooks/useChatUpload'
+import AttachMenu from '../components/AttachMenu'
+import useMentions, { MentionText, mentionedIds } from '../hooks/useMentions'
 import toast from 'react-hot-toast'
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '👀', '✅']
@@ -358,10 +360,11 @@ function ConversationView({
   const { statuses } = usePresenceStore()
 
   // File attachment support (uploads scoped to this conversation)
-  const {
-    fileInputRef, pendingFile, isUploading, progress,
-    pick, clearPending, onFileChange, sendAttachment,
-  } = useChatUpload(() => ({ conversationId: conversation.id }))
+  const { pendingFile, isUploading, selectFile, clearPending, sendAttachment } = useChatUpload(() => ({ conversationId: conversation.id }))
+
+  // "@name" tagging
+  const people = (conversation.members || []).filter(m => m.user?.name).map(m => ({ ...m.user, id: m.userId }))
+  const mentions = useMentions({ value: draft, setValue: setDraft, inputRef, people: people.filter(p => p.id !== user.id) })
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -405,7 +408,7 @@ function ConversationView({
     setDraft('')
     setEmojiOpen(false)
     onTyping(conversation.id, false)
-    const res = await onSend({ content })
+    const res = await onSend({ content, mentions: mentionedIds(content, people) })
     if (!res.success) toast.error(res.message)
   }
 
@@ -527,6 +530,7 @@ function ConversationView({
               <MessageRow
                 key={m.id}
                 compact={compact}
+                people={people}
                 onProfile={(u) => u?.id && setProfileFor(u)}
                 message={m}
                 isMine={m.senderId === user.id}
@@ -583,21 +587,15 @@ function ConversationView({
           </div>
         )}
         <div className="relative flex items-end gap-1.5 rounded-2xl border border-white/[0.08] bg-dark-300/60 px-2 py-1.5 focus-within:border-primary-500/50 focus-within:ring-4 focus-within:ring-primary-500/10 transition-colors">
-          <input ref={fileInputRef} type="file" className="hidden" onChange={onFileChange} />
-          <button
-            onClick={pick}
-            disabled={isUploading}
-            className="p-2 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-colors disabled:opacity-50"
-            title="Attach a file"
-            aria-label="Attach a file"
-          >
-            <Paperclip className="w-5 h-5" />
-          </button>
+          {mentions.menu}
+          <AttachMenu onFile={selectFile} disabled={isUploading} />
           <textarea
             ref={inputRef}
             value={draft}
-            onChange={handleDraftChange}
+            onChange={(e) => { handleDraftChange(e); mentions.onChange(e) }}
+            onSelect={mentions.onSelect}
             onKeyDown={(e) => {
+              if (mentions.onKeyDown(e)) return
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 handleSend()
@@ -646,7 +644,7 @@ function ConversationView({
 // ============================================================
 
 function MessageRow({
-  compact = false, onProfile,
+  compact = false, onProfile, people = [],
   message: m, isMine, user, editing, editDraft, setEditDraft, onSubmitEdit, onCancelEdit,
   reactionOpen, onToggleReactions, menuOpen, onToggleMenu,
   onReact, onEdit, onDelete, onPin, onSave, onForward, onThread, onCreateTask, canModerate
@@ -709,7 +707,7 @@ function MessageRow({
           />
         ) : (
           <p className={`text-sm mt-0.5 whitespace-pre-wrap break-words ${m.isDeleted ? 'text-gray-600 italic' : 'text-gray-300'}`}>
-            {m.content}
+            <MentionText text={m.content} people={people} />
           </p>
         )}
 

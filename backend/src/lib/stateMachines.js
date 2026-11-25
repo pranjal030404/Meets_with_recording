@@ -34,7 +34,7 @@ const define = (name, initial, transitions) => {
 
 export const meetingMachine = define('meeting', 'scheduled', {
   scheduled: ['active', 'ended', 'cancelled'],
-  active: ['ended', 'cancelled'],
+  active: ['scheduled', 'ended', 'cancelled'], // back to scheduled: see leaveOutcome()
   ended: [],
   cancelled: []
 });

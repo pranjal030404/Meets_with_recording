@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Video, Plus, Loader2, CalendarDays, Clock } from 'lucide-react'
 import api from '../lib/api'
+import ScheduleMeetingModal from './ScheduleMeetingModal'
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
@@ -14,6 +15,8 @@ export default function TeamCalendar({ teamId }) {
   const [selected, setSelected] = useState(today)
   const [meetings, setMeetings] = useState([])
   const [loading, setLoading] = useState(true)
+  const [scheduling, setScheduling] = useState(false)
+  const [version, setVersion] = useState(0) // bumped after scheduling to reload the list
 
   useEffect(() => {
     let cancelled = false
@@ -23,7 +26,7 @@ export default function TeamCalendar({ teamId }) {
       .catch(() => { if (!cancelled) setMeetings([]) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [teamId])
+  }, [teamId, version])
 
   const cells = useMemo(() => {
     const first = new Date(month.getFullYear(), month.getMonth(), 1)
@@ -43,10 +46,15 @@ export default function TeamCalendar({ teamId }) {
           <h2 className="text-xl font-semibold font-display">Team calendar</h2>
           <p className="text-gray-500 text-sm mt-1">Meetings scheduled for this team.</p>
         </div>
-        <button onClick={() => navigate(`/meeting/create?teamId=${teamId}`)} className="btn btn-primary text-sm">
+        <button onClick={() => setScheduling(true)} className="btn btn-primary text-sm">
           <Plus className="w-4 h-4" /> Schedule meeting
         </button>
       </div>
+
+      {scheduling && (
+        <ScheduleMeetingModal teamId={teamId} day={selected > new Date() ? selected : null}
+          onScheduled={() => setVersion(v => v + 1)} onClose={() => setScheduling(false)} />
+      )}
 
       {loading ? (
         <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 text-gray-600 animate-spin" /></div>

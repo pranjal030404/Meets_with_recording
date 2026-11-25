@@ -2,40 +2,21 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Clock, Users, Video, Sparkles, CheckSquare } from 'lucide-react';
 import api from '../lib/api';
 import { useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import { useMeetingStore } from '../store/meetingStore';
-import useTeamStore from '../store/teamStore';
-import { useAuthStore } from '../store/authStore';
+import ScheduleMeetingModal from '../components/ScheduleMeetingModal';
 import AppShell from '../components/AppShell';
 
 const Calendar = () => {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
-  const { createMeeting } = useMeetingStore();
-  const { teams, fetchTeams } = useTeamStore();
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState('month'); // month, week, day
   const [meetings, setMeetings] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const [newMeeting, setNewMeeting] = useState({
-    title: '',
-    description: '',
-    scheduledAt: '',
-    teamId: '',
-    invitees: [],
-    reminders: [
-      { time: 15, unit: 'minutes' },
-      { time: 1, unit: 'hours' }
-    ]
-  });
-
   useEffect(() => {
-    fetchTeams();
     fetchMeetings();
     api.get('/tasks', { params: { scope: 'mine' } })
       .then(res => setTasks((res.data?.data?.tasks || []).filter(t => t.dueDate)))
@@ -109,46 +90,8 @@ const Calendar = () => {
     });
   };
 
-  const handleScheduleMeeting = async (e) => {
-    e.preventDefault();
-    try {
-      const scheduledDateTime = new Date(newMeeting.scheduledAt);
-
-      const meetingData = {
-        ...newMeeting,
-        scheduledAt: scheduledDateTime.toISOString(),
-        isInstant: false
-      };
-
-      const result = await createMeeting({ ...meetingData, teamId: meetingData.teamId || undefined });
-      if (!result.success) {
-        toast.error(result.message || 'Could not schedule the meeting');
-        return;
-      }
-      toast.success('Meeting scheduled');
-      setShowScheduleModal(false);
-      setNewMeeting({
-        title: '',
-        description: '',
-        scheduledAt: '',
-        teamId: '',
-        invitees: [],
-        reminders: [
-          { time: 15, unit: 'minutes' },
-          { time: 1, unit: 'hours' }
-        ]
-      });
-      fetchMeetings();
-    } catch (error) {
-      toast.error('Failed to schedule meeting');
-    }
-  };
-
   const handleDateClick = (date) => {
     setSelectedDate(date);
-    // Pre-fill datetime for scheduling
-    const dateTimeStr = date.toISOString().slice(0, 16);
-    setNewMeeting({ ...newMeeting, scheduledAt: dateTimeStr });
     setShowScheduleModal(true);
   };
 
@@ -175,7 +118,7 @@ const Calendar = () => {
             </h1>
             <p className="page-sub">Meetings and task deadlines</p>
           </div>
-          <button onClick={() => setShowScheduleModal(true)} className="btn btn-primary">
+          <button onClick={() => { setSelectedDate(null); setShowScheduleModal(true); }} className="btn btn-primary">
             <Plus className="w-5 h-5" />
             Schedule meeting
           </button>
@@ -298,106 +241,8 @@ const Calendar = () => {
         </div>
       </div>
 
-      {/* Schedule Meeting Modal */}
       {showScheduleModal && (
-        <div className="modal-backdrop">
-          <div className="modal-content max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-semibold font-display mb-5">Schedule meeting</h2>
-            <form onSubmit={handleScheduleMeeting}>
-              <div className="space-y-4">
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-300 mb-2 transition-colors group-focus-within:text-primary-300">Title *</label>
-                  <input
-                    type="text"
-                    value={newMeeting.title}
-                    onChange={(e) => setNewMeeting({ ...newMeeting, title: e.target.value })}
-                    className="input"
-                    required
-                    placeholder="Team Standup"
-                  />
-                </div>
-
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-300 mb-2 transition-colors group-focus-within:text-primary-300">Description</label>
-                  <textarea
-                    value={newMeeting.description}
-                    onChange={(e) => setNewMeeting({ ...newMeeting, description: e.target.value })}
-                    className="input"
-                    rows="3"
-                    placeholder="Optional meeting description"
-                  />
-                </div>
-
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-300 mb-2 transition-colors group-focus-within:text-primary-300">Date & Time *</label>
-                  <input
-                    type="datetime-local"
-                    value={newMeeting.scheduledAt}
-                    onChange={(e) => setNewMeeting({ ...newMeeting, scheduledAt: e.target.value })}
-                    className="input"
-                    required
-                    min={new Date().toISOString().slice(0, 16)}
-                  />
-                </div>
-
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-300 mb-2 transition-colors group-focus-within:text-primary-300">Team (Optional)</label>
-                  <select
-                    value={newMeeting.teamId}
-                    onChange={(e) => setNewMeeting({ ...newMeeting, teamId: e.target.value })}
-                    className="input"
-                  >
-                    <option value="">None (Personal Meeting)</option>
-                    {teams.map(team => (
-                      <option key={team._id} value={team._id}>{team.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2.5">Reminders</label>
-                  <div className="space-y-2">
-                    {newMeeting.reminders.map((reminder, index) => (
-                      <div key={index} className="flex items-center gap-2.5 text-gray-300 bg-dark-300/60 border border-white/[0.05] rounded-xl px-3.5 py-2.5">
-                        <Clock className="w-4 h-4 text-primary-400" />
-                        <span className="text-sm">
-                          {reminder.time} {reminder.unit} before
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex gap-3 mt-7">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowScheduleModal(false);
-                    setNewMeeting({
-                      title: '',
-                      description: '',
-                      scheduledAt: '',
-                      teamId: '',
-                      invitees: [],
-                      reminders: [
-                        { time: 15, unit: 'minutes' },
-                        { time: 1, unit: 'hours' }
-                      ]
-                    });
-                  }}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary flex-1">
-                  <Plus className="w-4 h-4" />
-                  Schedule meeting
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <ScheduleMeetingModal day={selectedDate} onScheduled={fetchMeetings} onClose={() => setShowScheduleModal(false)} />
       )}
       </div>
     </AppShell>

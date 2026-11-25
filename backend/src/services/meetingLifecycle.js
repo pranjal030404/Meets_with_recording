@@ -14,6 +14,33 @@ import { recordUsage } from './subscriptionService.js';
 export const isPresent = (p) => !!p.joinedAt && !p.leftAt;
 export const presentParticipants = (meeting) => (meeting.participants || []).filter(isPresent);
 
+/** Scheduled for a time that hasn't arrived yet. */
+export const isUpcoming = (meeting, now = Date.now()) => !!meeting.scheduledAt && new Date(meeting.scheduledAt) > now;
+
+/**
+ * What someone leaving does to the meeting: 'end', 'reschedule' or 'keep'.
+ * A scheduled meeting is not over just because somebody opened its link and left: until its time has
+ * come and the host has actually been in it, an empty room goes back to 'scheduled'.
+ */
+export const leaveOutcome = (meeting, userId, now = Date.now()) => {
+  const participants = meeting.participants || [];
+  const present = presentParticipants(meeting);
+  const hostCame = participants.some((p) => p.userId === meeting.hostId && p.joinedAt);
+  if (meeting.scheduledAt && (isUpcoming(meeting, now) || !hostCame)) {
+    return present.length === 0 ? 'reschedule' : 'keep';
+  }
+  const hostGone = userId === meeting.hostId && !present.some((p) => p.role === 'co-host');
+  return present.length === 0 || hostGone ? 'end' : 'keep';
+};
+
+/** active → scheduled, for a scheduled meeting whose room emptied before it really took place. */
+export const rescheduleMeeting = async (meeting) => {
+  if (meeting.status !== 'active') return;
+  meetingMachine.assertTransition(meeting.status, 'scheduled');
+  await Meeting.update({ status: 'scheduled', startedAt: null }, { where: { id: meeting.id, status: 'active' } });
+  await meeting.reload();
+};
+
 /** scheduled → active. No-op in any other state. Returns true if it started. */
 export const startMeeting = async (meeting) => {
   if (meeting.status !== 'scheduled') return false;

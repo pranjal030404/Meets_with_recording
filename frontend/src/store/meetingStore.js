@@ -192,7 +192,7 @@ export const useMeetingStore = create((set, get) => ({
     } catch (error) {
       const message = error.response?.data?.message || 'Failed to join meeting'
       set({ isLoading: false, error: message })
-      return { success: false, message }
+      return { success: false, message, code: error.response?.data?.code }
     }
   },
 

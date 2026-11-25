@@ -17,7 +17,7 @@ import { buildCompleteTranscriptArtifacts } from '../services/transcriptionServi
 import { canManageMeeting, canAccessMeeting, hostHasJoined } from '../lib/meetingPermissions.js';
 import { requirePermission } from '../lib/permissions.js';
 import { inviteeMachine, StateTransitionError } from '../lib/stateMachines.js';
-import { startMeeting, endMeeting, cancelMeeting, presentParticipants } from '../services/meetingLifecycle.js';
+import { startMeeting, endMeeting, cancelMeeting, presentParticipants, isUpcoming, leaveOutcome, rescheduleMeeting } from '../services/meetingLifecycle.js';
 import { parseBreakoutRoomId, resolveBreakoutAccess } from '../lib/breakoutRoomId.js';
 import { sanitizeSettings } from '../lib/meetingSettings.js';
 import { resolveOwner } from '../media/meetingPlacementService.js';
@@ -66,8 +66,9 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
     const { title, description, scheduledAt, settings, invitees, reminders, recurrence } = req.body;
     const teamId = req.body.teamId || null; // "No team" arrives as an empty string
 
+    let team = null;
     if (teamId) {
-      const team = await Team.findByPk(teamId);
+      team = await Team.findByPk(teamId);
       if (!team) {
         return res.status(404).json({
           success: false,
@@ -113,22 +114,23 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
     await recordUsage(req.user.id, 'meeting_created', 1, meeting.id, { title: meeting.title });
     meeting.meetingLink = `${req.protocol}://${req.get('host')}/meeting/${meeting.roomId}`;
 
-    if (invitees && Array.isArray(invitees)) {
-      const inviteeEntries = [];
-      const inviteeIdEntries = [];
-      for (const inv of invitees) {
-        const entry = {
-          id: uuidv4(),
-          userId: inv.userId,
-          email: inv.email,
-          status: 'pending'
-        };
-        inviteeEntries.push(entry);
-        if (inv.userId) inviteeIdEntries.push(inv.userId);
-      }
-      meeting.invitees = inviteeEntries;
-      meeting.inviteeIds = inviteeIdEntries;
+    // A scheduled team meeting invites the whole team, so it shows up on everyone's calendar
+    const requested = [
+      ...(Array.isArray(invitees) ? invitees : []),
+      ...(team && scheduledAt ? (team.members || []).map((m) => ({ userId: m.userId })) : [])
+    ];
+    const entries = [];
+    for (const inv of requested) {
+      const email = (inv.email || '').trim().toLowerCase();
+      let { userId } = inv;
+      if (!userId && email) userId = (await User.findOne({ where: { email }, attributes: ['id'] }))?.id;
+      if (!userId && !email) continue;
+      if (userId === req.user.id) continue;
+      if (entries.some((e) => (userId && e.userId === userId) || (email && e.email === email))) continue;
+      entries.push({ id: uuidv4(), userId, email: email || undefined, status: 'pending' });
     }
+    meeting.invitees = entries;
+    meeting.inviteeIds = entries.map((e) => e.userId).filter(Boolean);
 
     if (scheduledAt) {
       meeting.reminders = reminders || [
@@ -145,24 +147,20 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
 
     await meeting.save();
 
-    if (invitees && scheduledAt) {
-      const notificationPromises = invitees.map(inv => {
-        if (inv.userId) {
-          return Notification.create({
-            recipientId: inv.userId,
-            type: 'meeting_scheduled',
-            title: 'Meeting Invitation',
-            message: `You've been invited to "${meeting.title}"`,
-            data: {
-              meetingId: meeting.id,
-              senderId: req.user.id,
-              link: meeting.meetingLink
-            },
-            priority: 'normal'
-          });
-        }
-      });
-      await Promise.all(notificationPromises.filter(Boolean));
+    if (scheduledAt) {
+      await Promise.all(meeting.inviteeIds.map((recipientId) =>
+        Notification.create({
+          recipientId,
+          type: 'meeting_scheduled',
+          title: 'Meeting Invitation',
+          message: `You've been invited to "${meeting.title}"`,
+          data: {
+            meetingId: meeting.id,
+            senderId: req.user.id,
+            link: meeting.meetingLink
+          },
+          priority: 'normal'
+        })));
     }
 
     const fullMeeting = await Meeting.findByPk(meeting.id, {
@@ -376,7 +374,8 @@ router.post('/:roomId/join', protect, requirePermission('meetings.join'), async 
       console.warn(`Join failed: meeting ${meeting.roomId} has status '${meeting.status}'`);
       return res.status(400).json({
         success: false,
-        message: meeting.status === 'cancelled' ? 'This meeting was cancelled' : 'This meeting has ended'
+        message: meeting.status === 'cancelled' ? 'This meeting was cancelled' : 'This meeting has ended',
+        code: 'MEETING_ENDED'
       });
     }
 
@@ -387,6 +386,15 @@ router.post('/:roomId/join', protect, requirePermission('meetings.join'), async 
       });
     }
 
+    // Guests wait for the start time; the host or a co-host can open the room early
+    if (meeting.status === 'scheduled' && isUpcoming(meeting) && !canManageMeeting(meeting, req.user.id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'This meeting has not started yet',
+        code: 'MEETING_NOT_STARTED'
+      });
+    }
+
     if (
       meeting.settings?.hostMustJoinFirst &&
       !canManageMeeting(meeting, req.user.id) &&
@@ -394,7 +402,8 @@ router.post('/:roomId/join', protect, requirePermission('meetings.join'), async 
     ) {
       return res.status(403).json({
         success: false,
-        message: 'The host has not joined yet. Please try again shortly.'
+        message: 'The host has not joined yet. Please try again shortly.',
+        code: 'HOST_NOT_JOINED'
       });
     }
 
@@ -482,19 +491,16 @@ router.post('/:roomId/leave', protect, async (req, res) => {
       participant.leftAt = new Date().toISOString();
     }
 
-    const isHost = meeting.hostId === req.user.id;
-    const present = participants.filter(p => p.joinedAt && !p.leftAt);
-    const coHostRemains = present.some(p => p.role === 'co-host');
-
     meeting.participants = participants;
+    meeting.changed('participants', true); // leftAt was set in place
     await meeting.save();
 
     // The last person leaving ends the meeting, as does the host leaving with no co-host to carry on
-    // (once, and it gets billed).
+    // (once, and it gets billed). Scheduled meetings that haven't really happened stay open.
     let ended = false;
-    if (present.length === 0 || (isHost && !coHostRemains)) {
-      ended = (await endMeeting(meeting)).changed;
-    }
+    const outcome = leaveOutcome(meeting, req.user.id);
+    if (outcome === 'end') ended = (await endMeeting(meeting)).changed;
+    else if (outcome === 'reschedule') await rescheduleMeeting(meeting);
     if (ended) {
       req.app.get('io')?.to(meeting.roomId).emit('meeting:ended', { roomId: meeting.roomId, endedBy: req.user.id });
     }

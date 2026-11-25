@@ -6,6 +6,8 @@ import { protect, generateToken, clearAssetCookie, revokeToken } from '../middle
 import { ensureSubscription, getSubscriptionDetails } from '../services/subscriptionService.js';
 import { getSetting } from '../services/settingsService.js';
 import { isSmtpConfigured, sendVerificationEmail } from '../services/mailService.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
+import { revokeUserSessions } from '../lib/sessionRevocation.js';
 import { handleAvatarUpload, saveAvatar, clearAvatar, pickProfileFields } from '../services/avatarService.js';
 
 const router = express.Router();
@@ -243,6 +245,40 @@ router.put('/profile', protect, async (req, res) => {
   } catch (error) {
     console.error('Update profile error:', error);
     res.status(500).json({ success: false, message: 'Error updating profile' });
+  }
+});
+
+// Per account, so a stolen session can't be used to guess the current password
+const passwordAttempts = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 5, prefix: 'rl:password' });
+
+router.post('/change-password', protect, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || !currentPassword) {
+      return res.status(400).json({ success: false, message: 'Current and new password are required' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    }
+    if (await passwordAttempts.hit(req.user.id) > 5) {
+      return res.status(429).json({ success: false, message: 'Too many attempts. Try again in 15 minutes.' });
+    }
+    // 400, not 401: the client treats 401 as "session expired" and would sign the user out
+    if (!(await req.user.comparePassword(currentPassword))) {
+      return res.status(400).json({ success: false, message: 'Current password is incorrect' });
+    }
+    if (newPassword === currentPassword) {
+      return res.status(400).json({ success: false, message: 'Choose a password different from the current one' });
+    }
+
+    req.user.password = newPassword; // hashed by the model hook
+    await req.user.save();
+    await revokeUserSessions(req.user.id);
+
+    res.json({ success: true, message: 'Password changed', data: { token: generateToken(req.user.id) } });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ success: false, message: 'Error changing password' });
   }
 });
 

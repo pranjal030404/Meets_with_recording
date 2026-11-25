@@ -263,6 +263,11 @@ export default function Meeting() {
         const joinResult = await joinPromise
         if (!joinResult.success) {
           useMeetingStore.getState().setSessionPhase('idle')
+          // Not open (yet, or any more): the join page explains that better than a toast on the home page
+          if (['MEETING_ENDED', 'MEETING_NOT_STARTED', 'HOST_NOT_JOINED'].includes(joinResult.code)) {
+            navigate(`/join/${roomId}`, { replace: true })
+            return
+          }
           toast.error(joinResult.message || 'Failed to join meeting')
           navigate('/app')
           return
