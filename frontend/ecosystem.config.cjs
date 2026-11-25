@@ -1,7 +1,7 @@
 // Frontend: serves the built Vite app (dist/) as a SPA.
 // Build first:  npm run build
 // Start:        pm2 start ecosystem.config.cjs
-// Requires:     npm install serve   (in frontend/)
+// Requires:     npm ci   (serve is listed in package.json)
 const PORT = process.env.FRONTEND_PORT || 5005;
 
 module.exports = {
