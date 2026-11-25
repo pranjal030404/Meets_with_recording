@@ -66,6 +66,8 @@ class _FilesScreenState extends State<FilesScreen> {
         emptyText: _trash ? 'Trash is empty' : 'No files yet',
         emptyIcon: _trash ? Icons.delete_outline : Icons.folder_open,
         header: Column(children: [
+          if (widget.teamId == null)
+            PageHeader('Files', subtitle: _storage?['personalBytes'] != null ? 'Using ${fmtBytes(_storage!['personalBytes'])} of personal storage' : 'Your personal files'),
           Row(children: [
             Expanded(
               child: TextField(
@@ -82,7 +84,7 @@ class _FilesScreenState extends State<FilesScreen> {
           ]),
           if (_storage != null && !_trash && _storage!['used'] != null)
             Padding(padding: const EdgeInsets.only(top: 8), child: Text('Storage used: ${fmtBytes(_storage!['used'])}${_storage!['limit'] != null && _storage!['limit'] != -1 ? ' of ${fmtBytes(_storage!['limit'])}' : ''}', style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12))),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
         ]),
         itemBuilder: (context, f, reload) => ListTile(
           leading: Icon(fileIcon(f['mimeType']?.toString(), f['originalName']?.toString())),

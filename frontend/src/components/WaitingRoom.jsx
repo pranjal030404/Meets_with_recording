@@ -1,12 +1,13 @@
+import Avatar from './Avatar'
 import { X, Check, XCircle } from 'lucide-react'
 
 export default function WaitingRoom({ waitingUsers = [], onAdmit, onDeny, onClose }) {
   if (waitingUsers.length === 0) return null
 
   return (
-    <div className="absolute top-4 right-4 bg-dark-200 border border-dark-400 rounded-xl shadow-2xl p-4 w-80 z-30 animate-slide-down">
+    <div className="absolute top-16 right-4 bg-dark-200 border border-dark-400 rounded-xl p-4 w-80 z-30 animate-slide-down">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-sm">Waiting Room ({waitingUsers.length})</h3>
+        <h3 className="font-semibold text-sm">Waiting room ({waitingUsers.length})</h3>
         {onClose && (
           <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded">
             <X className="w-4 h-4" />
@@ -17,7 +18,7 @@ export default function WaitingRoom({ waitingUsers = [], onAdmit, onDeny, onClos
         {waitingUsers.map(({ user, socketId }) => (
           <div key={socketId} className="flex items-center justify-between bg-dark-300 rounded-lg p-2">
             <div className="flex items-center gap-2">
-              <img src={user.avatar} alt={user.name} className="w-8 h-8 rounded-full" />
+              <Avatar user={user} size="sm" />
               <span className="text-sm font-medium">{user.name}</span>
             </div>
             <div className="flex gap-1">
@@ -35,7 +36,7 @@ export default function WaitingRoom({ waitingUsers = [], onAdmit, onDeny, onClos
       </div>
       <button onClick={() => waitingUsers.forEach(u => onAdmit(u.socketId))}
         className="mt-2 w-full btn btn-primary text-sm py-1.5">
-        Admit All
+        Admit all
       </button>
     </div>
   )

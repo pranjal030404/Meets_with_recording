@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../core/api.dart';
 import '../core/config.dart';
+import '../core/theme.dart';
 
 void toast(BuildContext context, String msg, {bool error = false}) {
   if (!context.mounted) return;
@@ -11,6 +12,7 @@ void toast(BuildContext context, String msg, {bool error = false}) {
     content: Text(msg),
     behavior: SnackBarBehavior.floating,
     backgroundColor: error ? Theme.of(context).colorScheme.error : null,
+    showCloseIcon: false,
   ));
 }
 
@@ -120,7 +122,7 @@ class AsyncListState<T> extends State<AsyncList<T>> {
     return RefreshIndicator(
       onRefresh: reload,
       child: list.isEmpty
-          ? ListView(children: [
+          ? ListView(padding: EdgeInsets.fromLTRB(widget.padding.left, widget.padding.top, widget.padding.right, 0), children: [
               if (widget.header != null) widget.header!,
               SizedBox(
                 height: 320,
@@ -215,10 +217,55 @@ class SectionTitle extends StatelessWidget {
   const SectionTitle(this.text, {super.key});
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 16, 4, 6),
-        child: Text(text, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w700)),
+        padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+        child: Text(text, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.outline, fontWeight: FontWeight.w600)),
       );
 }
 
 List<dynamic> asList(dynamic v) => v is List ? v : const [];
 Map<String, dynamic> asMap(dynamic v) => v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+
+/// The Arthvex emblem, in dark ink on the off-white brand square.
+class BrandMark extends StatelessWidget {
+  final double size;
+  const BrandMark({super.key, this.size = 40});
+  @override
+  Widget build(BuildContext context) => Container(
+        width: size,
+        height: size,
+        padding: EdgeInsets.all(size * .08),
+        decoration: BoxDecoration(color: AppTheme.button, borderRadius: BorderRadius.circular(size * .28)),
+        child: Image.asset('assets/brand/emblem.png', color: AppTheme.buttonInk, filterQuality: FilterQuality.medium, semanticLabel: 'Arthvex'),
+      );
+}
+
+/// Page title + one line of context, as at the top of every web page.
+class PageHeader extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final Widget? action;
+  final EdgeInsets padding;
+  const PageHeader(this.title, {super.key, this.subtitle, this.action, this.padding = const EdgeInsets.fromLTRB(4, 12, 4, 16)});
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: padding,
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: const TextStyle(fontFamily: AppTheme.display, fontSize: 28, fontWeight: FontWeight.w500, letterSpacing: -.5)),
+              if (subtitle != null)
+                Padding(padding: const EdgeInsets.only(top: 4), child: Text(subtitle!, style: const TextStyle(color: AppTheme.faint, fontSize: 14))),
+            ]),
+          ),
+          if (action != null) ...[const SizedBox(width: 12), action!],
+        ]),
+      );
+}
+
+/// Red recording tally from the web landing page. Only for meetings that are live.
+class TallyDot extends StatelessWidget {
+  const TallyDot({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppTheme.overdue, shape: BoxShape.circle));
+}

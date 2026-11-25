@@ -9,6 +9,10 @@ import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.Intent;
 import android.media.projection.MediaProjection;
+import android.os.Handler;
+import android.os.SystemClock;
+import android.hardware.display.VirtualDisplay;
+import java.lang.reflect.Field;
 import android.util.Log;
 import android.view.Surface;
 import android.view.WindowManager;
@@ -25,6 +29,19 @@ public class OrientationAwareScreenCapturer
     private int width;
     private int height;
     private boolean isPortrait;
+    // Android only sends a frame when the screen changes. A share started on a running capture, or a
+    // viewer joining while the screen is still, would see black: nudge a redraw when it goes quiet.
+    private static final long IDLE_MS = 1000;
+    private Handler captureHandler;
+    private volatile long lastFrameAt;
+    private int density = 400;
+    private final Runnable keepAlive = new Runnable() {
+        @Override
+        public void run() {
+            if (SystemClock.elapsedRealtime() - lastFrameAt >= IDLE_MS) redraw();
+            captureHandler.postDelayed(this, IDLE_MS);
+        }
+    };
 
     /**
      * Constructs a new Screen Capturer.
@@ -44,6 +61,7 @@ public class OrientationAwareScreenCapturer
     public synchronized void initialize(SurfaceTextureHelper surfaceTextureHelper, Context applicationContext, CapturerObserver capturerObserver) {
         super.initialize(surfaceTextureHelper, applicationContext, capturerObserver);
         this.applicationContext = applicationContext;
+        this.captureHandler = surfaceTextureHelper.getHandler();
         Log.d("OrientationAwareSC", "OrientationAwareScreenCapturer: initialized and orientation isPortrait? " + this.isPortrait);
     }
 
@@ -60,21 +78,59 @@ public class OrientationAwareScreenCapturer
             this.width = height;
         }
         super.startCapture(width, height, ignoredFramerate);
+        captureHandler.removeCallbacks(keepAlive);
+        captureHandler.postDelayed(keepAlive, IDLE_MS);
+    }
+
+    @Override
+    public synchronized void stopCapture() {
+        if (captureHandler != null) captureHandler.removeCallbacks(keepAlive);
+        super.stopCapture();
+    }
+
+    // A density change of one dpi leaves the picture identical but makes the system compose it again
+    private void redraw() {
+        try {
+            Field field = ScreenCapturerAndroid.class.getDeclaredField("virtualDisplay");
+            field.setAccessible(true);
+            VirtualDisplay display = (VirtualDisplay) field.get(this);
+            if (display == null) return;
+            density = density == 400 ? 401 : 400;
+            boolean portrait = this.isPortrait;
+            display.resize(portrait ? this.width : this.height, portrait ? this.height : this.width, density);
+        } catch (ReflectiveOperationException e) {
+            Log.w("OrientationAwareSC", "Could not redraw the capture", e);
+        }
     }
 
     @Override
     public void onFrame(VideoFrame frame) {
+        lastFrameAt = SystemClock.elapsedRealtime();
         final boolean isOrientationPortrait = isDeviceOrientationPortrait();
         if (isOrientationPortrait != this.isPortrait) {
             this.isPortrait = isOrientationPortrait;
 
-            if (this.isPortrait) {
-                super.changeCaptureFormat(this.width, this.height, 15);
-            } else {
-                super.changeCaptureFormat(this.height, this.width, 15);
-            }
+            resizeCapture(this.isPortrait ? this.width : this.height, this.isPortrait ? this.height : this.width);
         }
         super.onFrame(frame);
+    }
+
+    // Runs on the capture thread (onFrame). org.webrtc is kept by proguard-rules.pro, so reflection is safe.
+    private void resizeCapture(int width, int height) {
+        try {
+            Field displayField = ScreenCapturerAndroid.class.getDeclaredField("virtualDisplay");
+            displayField.setAccessible(true);
+            VirtualDisplay virtualDisplay = (VirtualDisplay) displayField.get(this);
+            Field helperField = ScreenCapturerAndroid.class.getDeclaredField("surfaceTextureHelper");
+            helperField.setAccessible(true);
+            SurfaceTextureHelper helper = (SurfaceTextureHelper) helperField.get(this);
+            if (virtualDisplay == null || helper == null) return;
+            helper.setTextureSize(width, height);
+            virtualDisplay.resize(width, height, density);
+        } catch (ReflectiveOperationException e) {
+            // keep the old size: the picture is letterboxed but the share stays up
+            Log.w("OrientationAwareSC", "Could not resize the capture", e);
+        }
     }
 
     private boolean isDeviceOrientationPortrait() {

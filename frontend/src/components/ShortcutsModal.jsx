@@ -16,7 +16,7 @@ export default function ShortcutsModal({ onClose }) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-content" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold font-display">Keyboard shortcuts</h3>
+          <h3 className="text-xl font-semibold font-display">Keyboard shortcuts</h3>
           <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded" aria-label="Close"><X className="w-5 h-5" /></button>
         </div>
         <div className="space-y-2 text-sm">

@@ -1,6 +1,13 @@
 import 'dart:async';
+import 'dart:io' show Directory, File, Platform;
+import 'package:dio/dio.dart' show FormData, MultipartFile;
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+// ignore: implementation_imports
+import 'package:flutter_webrtc/src/native/event_channel.dart' show FlutterWebRTCEventChannel;
+// ignore: implementation_imports
+import 'package:flutter_webrtc/src/native/utils.dart' show WebRTC;
 import 'package:mediasoup_client_flutter/mediasoup_client_flutter.dart' as ms;
 // ignore: implementation_imports
 import 'package:mediasoup_client_flutter/src/handlers/handler_interface.dart' show RTCIceServer, RTCIceCredentialType;
@@ -53,6 +60,22 @@ class WaitingUser {
 
 enum RoomPhase { connecting, waiting, connected, ended, failed }
 
+/// Breakout rooms live at `<parent roomId>--br-<id>` (mirrors backend/src/lib/breakoutRoomId.js).
+const breakoutSeparator = '--br-';
+
+/// One line segment on the shared whiteboard, in board coordinates (1600 x 900, same as the web).
+class BoardStroke {
+  final double x0, y0, x1, y1, width;
+  final String color; // #RRGGBB
+  final String tool; // pen | eraser | line | rect | ellipse | text
+  final String text;
+  const BoardStroke(this.x0, this.y0, this.x1, this.y1, this.color, this.width, this.tool, [this.text = '']);
+  static BoardStroke from(Map d) {
+    double n(Object? v) => v is num ? v.toDouble() : 0;
+    return BoardStroke(n(d['x0']), n(d['y0']), n(d['x1']), n(d['y1']), (d['color'] ?? '#000000').toString(), n(d['width']), (d['tool'] ?? 'pen').toString(), (d['text'] ?? '').toString());
+  }
+}
+
 /// Owns the whole lifetime of one meeting: REST join, Socket.IO signalling, the
 /// mediasoup device/transports and every local + remote track.
 class MeetingController extends ChangeNotifier {
@@ -70,9 +93,45 @@ class MeetingController extends ChangeNotifier {
   String myRole = 'participant';
   bool get isHost => myRole == 'host';
   bool get isManager => myRole == 'host' || myRole == 'co-host';
+  Map get settings => meeting?['settings'] is Map ? meeting!['settings'] as Map : const {};
+
+  /// Contributor limits apply only while host management is on, never to hosts (same rule as the server).
+  bool allowed(String key) => isManager || settings['hostManagement'] != true || settings[key] != false;
+
+  bool _refuse(String key, String what) {
+    if (allowed(key)) return false;
+    infoMessage = 'The host has turned off $what for participants';
+    _notify();
+    return true;
+  }
+
+  bool transcribing = false;
   bool micOn = false;
   bool camOn = false;
   bool handRaised = false;
+  bool screenSharing = false;
+  bool screenShareBusy = false; // permission dialog open / publishing
+  // breakout rooms
+  bool get inBreakout => roomId.contains(breakoutSeparator);
+  String get parentRoomId => roomId.split(breakoutSeparator).first;
+  Map<String, dynamic>? assignedRoom; // a room the host just put us in, not joined yet
+  String? switchTo; // set when the screen should move to another room
+  // whiteboard: its own notifier so drawing doesn't rebuild the whole meeting
+  final List<BoardStroke> board = [];
+  final ValueNotifier<int> boardVersion = ValueNotifier(0);
+  // captions translation ('' = off)
+  String translateTo = '';
+  // live stream
+  Map<String, dynamic>? stream;
+  // recording on this phone
+  bool recordingLocally = false;
+  bool recordingBusy = false;
+  String? _recordingPath;
+  DateTime? _recordingStarted;
+  bool get canRecordLocally => !viewOnly && Platform.isAndroid;
+
+  /// iOS needs a separate Broadcast Upload Extension, which this app does not ship yet.
+  bool get canShareScreen => !viewOnly && Platform.isAndroid;
   bool frontCamera = true;
   bool locked = false;
   bool recording = false;
@@ -104,6 +163,9 @@ class MeetingController extends ChangeNotifier {
   MediaStream? _localStream;
   ms.Producer? _audioProducer;
   ms.Producer? _videoProducer;
+  ms.Producer? _screenProducer;
+  MediaStream? _screenStream;
+  StreamSubscription<Map<String, dynamic>>? _captureEvents;
   final Map<String, ms.Consumer> _consumers = {}; // consumerId -> consumer
   final Map<String, ({String userId, String mediaType, String consumerId})> _producerMap = {};
   bool _disposed = false;
@@ -158,6 +220,7 @@ class MeetingController extends ChangeNotifier {
       myRole = hostId == myId ? 'host' : (me?['role']?.toString() ?? 'participant');
       locked = meeting!['settings']?['locked'] == true;
 
+      transcribing = false;
       // Local preview + media
       localRenderer = RTCVideoRenderer();
       await localRenderer!.initialize();
@@ -217,13 +280,16 @@ class MeetingController extends ChangeNotifier {
   }
 
   Future<void> _acquireInitialMedia() async {
-    if (!startMic && !startCam) return;
+    // "mute on entry" applies to everyone but the host
+    final wantMic = startMic && !(settings['muteOnEntry'] == true && !isHost) && allowed('allowMic');
+    final wantCam = startCam && allowed('allowVideo');
+    if (!wantMic && !wantCam) return;
     try {
       _localStream = await navigator.mediaDevices.getUserMedia({
-        'audio': startMic
+        'audio': wantMic
             ? {'echoCancellation': true, 'noiseSuppression': true, 'autoGainControl': true}
             : false,
-        'video': startCam
+        'video': wantCam
             ? {
                 'facingMode': 'user',
                 'width': {'ideal': 1280},
@@ -232,8 +298,8 @@ class MeetingController extends ChangeNotifier {
               }
             : false,
       });
-      micOn = startMic && _localStream!.getAudioTracks().isNotEmpty;
-      camOn = startCam && _localStream!.getVideoTracks().isNotEmpty;
+      micOn = wantMic && _localStream!.getAudioTracks().isNotEmpty;
+      camOn = wantCam && _localStream!.getVideoTracks().isNotEmpty && await _protectBackground(_localStream!);
       if (camOn) localRenderer!.srcObject = _localStream;
     } catch (e) {
       infoMessage = 'Could not access the microphone/camera: $e';
@@ -307,6 +373,9 @@ class MeetingController extends ChangeNotifier {
         });
         data['callback'](resp['producerId']);
       } catch (e) {
+        // The library swallows this error, so fail whoever is waiting for the producer right away
+        final key = (data['appData'] as Map?)?['mediaType']?.toString();
+        _produceWaiters.remove(key)?.completeError(e);
         data['errback'](e);
       }
     });
@@ -375,13 +444,15 @@ class MeetingController extends ChangeNotifier {
   final Map<String, Completer<ms.Producer>> _produceWaiters = {};
 
   void _onProducerCreated(ms.Producer p) {
-    final key = p.source == 'mic' ? 'audio' : 'video';
+    final key = p.source == 'mic' ? 'audio' : (p.source == 'screen' ? 'screen' : 'video');
     if (key == 'audio') {
       _audioProducer = p;
+    } else if (key == 'screen') {
+      _screenProducer = p;
     } else {
       _videoProducer = p;
     }
-    p.on('trackended', () => _closeProducer(key));
+    p.on('trackended', () => key == 'screen' ? stopScreenShare() : _closeProducer(key));
     _produceWaiters.remove(key)?.complete(p);
   }
 
@@ -413,8 +484,101 @@ class MeetingController extends ChangeNotifier {
     }
     try {
       p.close();
-      _socket?.emit('mediasoup:closeProducer', {'producerId': p.id});
+      _socket?.emitWithAck('mediasoup:closeProducer', {'producerId': p.id}, ack: (_) {});
     } catch (_) {}
+  }
+
+  // ---- screen sharing ----
+  Future<void> toggleScreenShare() => screenSharing ? stopScreenShare() : startScreenShare();
+
+  Future<void> startScreenShare() async {
+    if (!canShareScreen || screenSharing || screenShareBusy) return;
+    if (_refuse('allowScreenShare', 'screen sharing')) return;
+    screenShareBusy = true;
+    _notify();
+    MediaStream? stream;
+    try {
+      final t = await _ensureSend();
+      stream = await _acquireCapture();
+      if (stream == null) return;
+      final track = stream.getVideoTracks().first;
+
+      final c = Completer<ms.Producer>();
+      _produceWaiters['screen'] = c;
+      // stopTracks: false because a recording may be using the same capture
+      t.produce(track: track, stream: stream, source: 'screen', appData: {'mediaType': 'screen'}, stopTracks: false);
+      await c.future.timeout(const Duration(seconds: 20));
+
+      screenSharing = true;
+      _socket!.emit('media:screen-share', {'isScreenSharing': true});
+    } catch (e) {
+      _produceWaiters.remove('screen');
+      await _releaseCaptureIfUnused();
+      final text = e.toString();
+      infoMessage = text.contains("didn't give permission")
+          ? 'Screen sharing was not allowed'
+          : 'Could not share the screen: ${e is SocketRequestError ? e.message : text}';
+    } finally {
+      screenShareBusy = false;
+      _notify();
+    }
+  }
+
+  Future<void> stopScreenShare() async {
+    if (!screenSharing && _screenProducer == null) return;
+    final producer = _screenProducer;
+    // clear first: the stop button and the system's "stopped" event can both land here
+    _screenProducer = null;
+    screenSharing = false;
+    if (producer != null) {
+      try {
+        _socket?.emitWithAck('mediasoup:closeProducer', {'producerId': producer.id}, ack: (_) {});
+        producer.close();
+      } catch (_) {}
+    }
+    _socket?.emit('media:screen-share', {'isScreenSharing': false});
+    await _releaseCaptureIfUnused();
+    _notify();
+  }
+
+  // ---- screen capture, shared by screen sharing and recording (Android allows only one) ----
+  Future<MediaStream?> _acquireCapture() async {
+    final existing = _screenStream;
+    if (existing != null) return existing;
+    // Shows Android's "start recording or casting" dialog and starts the foreground service
+    final stream = await navigator.mediaDevices.getDisplayMedia({'video': true, 'audio': false});
+    if (_disposed || _socket == null) {
+      await _releaseStream(stream);
+      return null;
+    }
+    final trackId = stream.getVideoTracks().first.id;
+    // The person can also end the capture from the system, which ends everything built on it
+    _captureEvents = FlutterWebRTCEventChannel.instance.handleEvents.stream.listen((event) async {
+      if (event['onScreenCaptureEnded']?['trackId'] != trackId) return;
+      await stopRecording();
+      await stopScreenShare();
+      await _releaseCaptureIfUnused();
+    });
+    return _screenStream = stream;
+  }
+
+  Future<void> _releaseCaptureIfUnused() async {
+    final stream = _screenStream;
+    if (stream == null || screenSharing || recordingLocally) return;
+    _screenStream = null;
+    await _captureEvents?.cancel();
+    _captureEvents = null;
+    await _releaseStream(stream);
+  }
+
+  /// Stopping the track releases the capturer, which also stops the foreground service.
+  Future<void> _releaseStream(MediaStream stream) async {
+    try {
+      for (final track in stream.getTracks()) {
+        await track.stop();
+      }
+      await stream.dispose();
+    } catch (_) {/* already released */}
   }
 
   // ---- consuming ----
@@ -563,6 +727,9 @@ class MeetingController extends ChangeNotifier {
 
     _on('room:participants', (d) {
       phase = RoomPhase.connected;
+      s.emit('whiteboard:request', {'roomId': roomId});
+      s.emit('tools:request', {'roomId': roomId});
+      if (!inBreakout) _checkAssignment();
       for (final p in (d['participants'] as List? ?? [])) {
         final u = p['user'] ?? {};
         final peer = _ensurePeer(u['id'].toString(), (u['name'] ?? '').toString(),
@@ -676,6 +843,22 @@ class MeetingController extends ChangeNotifier {
       locked = d['isLocked'] == true;
       _notify();
     });
+    _on('meeting:settings-updated', (d) {
+      final changed = d['settings'];
+      if (changed is! Map || meeting == null) return;
+      meeting!['settings'] = {...settings, ...changed};
+      _notify();
+    });
+    _on('host:lower-hand', (_) {
+      if (!handRaised) return;
+      toggleHand();
+      infoMessage = 'The host lowered your hand';
+      _notify();
+    });
+    _on('transcribe:state', (d) {
+      transcribing = d['enabled'] == true;
+      _notify();
+    });
     _on('host:spotlight', (d) {
       spotlightUserId = d['userId']?.toString();
       _notify();
@@ -708,14 +891,47 @@ class MeetingController extends ChangeNotifier {
       _notify();
     });
 
-    _on('caption:text', (d) {
-      caption = d['text']?.toString();
-      captionBy = d['userName']?.toString();
+    _on('caption:text', (d) async {
+      var text = d['text']?.toString() ?? '';
+      final by = d['userName']?.toString();
+      if (translateTo.isNotEmpty) text = await _translate(text);
+      if (_disposed) return;
+      caption = text;
+      captionBy = by;
       _captionTimer?.cancel();
-      _captionTimer = Timer(const Duration(seconds: 5), () {
+      _captionTimer = Timer(const Duration(seconds: 6), () {
         caption = null;
         _notify();
       });
+      _notify();
+    });
+
+    _on('whiteboard:draw', (d) {
+      board.add(BoardStroke.from(d as Map));
+      boardVersion.value++;
+    });
+    _on('whiteboard:history', (d) {
+      board
+        ..clear()
+        ..addAll((d['strokes'] as List? ?? []).map((e) => BoardStroke.from(e as Map)));
+      boardVersion.value++;
+    });
+    _on('whiteboard:clear', (_) {
+      board.clear();
+      boardVersion.value++;
+    });
+
+    _on('stream:state', (d) {
+      stream = d['stream'] is Map ? Map<String, dynamic>.from(d['stream']) : null;
+      _notify();
+    });
+
+    _on('breakout:changed', (_) {
+      if (!inBreakout) _checkAssignment();
+    });
+    _on('breakout:closed', (d) {
+      switchTo = (d['returnRoomId'] ?? parentRoomId).toString();
+      infoMessage = 'The host closed the breakout rooms';
       _notify();
     });
     _on('notes:update', (d) {
@@ -759,6 +975,7 @@ class MeetingController extends ChangeNotifier {
         'audio': audio ? {'echoCancellation': true, 'noiseSuppression': true, 'autoGainControl': true} : false,
         'video': video ? {'facingMode': frontCamera ? 'user' : 'environment', 'width': {'ideal': 1280}, 'height': {'ideal': 720}} : false,
       });
+      if (video && !await _protectBackground(s)) return false;
       if (_localStream == null) {
         _localStream = s;
       } else {
@@ -774,6 +991,46 @@ class MeetingController extends ChangeNotifier {
     }
   }
 
+  // ---- background blur / picture (Android) ----
+  bool get canUseBackgrounds => !viewOnly && Platform.isAndroid;
+
+  Future<void> _applyBackground(MediaStreamTrack track, String mode) => WebRTC.invokeMethod(
+      'setBackgroundEffect', {'trackId': track.id, 'mode': mode, 'imagePath': Config.backgroundImage});
+
+  /// Applies the saved effect to a newly opened camera, before it is sent. If that fails the camera
+  /// is closed again: never show a room the person asked to hide.
+  Future<bool> _protectBackground(MediaStream stream) async {
+    if (!canUseBackgrounds || Config.backgroundMode == 'off') return true;
+    final tracks = stream.getVideoTracks();
+    try {
+      await _applyBackground(tracks.first, Config.backgroundMode);
+      return true;
+    } catch (e) {
+      for (final t in tracks) {
+        await t.stop();
+        await stream.removeTrack(t);
+      }
+      infoMessage = 'Background effect failed, so your camera was left off';
+      _notify();
+      return false;
+    }
+  }
+
+  Future<void> setBackground(String mode, [String? imagePath]) async {
+    await Config.setBackground(mode, imagePath);
+    try {
+      for (final t in _localStream?.getVideoTracks() ?? <MediaStreamTrack>[]) {
+        await _applyBackground(t, mode);
+      }
+    } catch (e) {
+      // the person asked to hide their room and we could not: stop showing it
+      if (mode != 'off' && camOn) await toggleCam();
+      infoMessage = 'Background effect failed, so your camera was turned off';
+      debugPrint('background effect: $e');
+    }
+    _notify();
+  }
+
   Future<void> toggleMic() async {
     if (viewOnly) return;
     try {
@@ -784,6 +1041,7 @@ class MeetingController extends ChangeNotifier {
         }
         micOn = false;
       } else {
+        if (_refuse('allowMic', 'microphones')) return;
         if (_audioProducer == null) {
           final hasTrack = _localStream?.getAudioTracks().isNotEmpty ?? false;
           if (!hasTrack && !await _ensureLocalStream(audio: true, video: false)) return;
@@ -795,6 +1053,8 @@ class MeetingController extends ChangeNotifier {
         micOn = true;
       }
       _socket!.emit('media:toggle-mute', {'isMuted': !micOn});
+      // a muted mic must never end up in the recording
+      if (recordingLocally) await WebRTC.invokeMethod('setAudioRecordingMic', {'enabled': micOn});
     } catch (e) {
       infoMessage = 'Microphone error: $e';
     }
@@ -811,6 +1071,7 @@ class MeetingController extends ChangeNotifier {
         }
         camOn = false;
       } else {
+        if (_refuse('allowVideo', 'cameras')) return;
         if (_videoProducer == null) {
           final hasTrack = _localStream?.getVideoTracks().isNotEmpty ?? false;
           if (!hasTrack && !await _ensureLocalStream(audio: false, video: true)) return;
@@ -847,7 +1108,10 @@ class MeetingController extends ChangeNotifier {
     _notify();
   }
 
-  void sendReaction(String emoji) => _socket?.emit('reaction:emoji', {'roomId': roomId, 'emoji': emoji});
+  void sendReaction(String emoji) {
+    if (_refuse('allowReactions', 'reactions')) return;
+    _socket?.emit('reaction:emoji', {'roomId': roomId, 'emoji': emoji});
+  }
 
   void sendChat(String text) {
     final t = text.trim();
@@ -869,6 +1133,164 @@ class MeetingController extends ChangeNotifier {
   void updateNotes(String text) {
     notes = text;
     _socket?.emit('notes:update', {'roomId': roomId, 'text': text});
+  }
+
+  // ---- breakout rooms ----
+  Future<List<Map<String, dynamic>>> breakoutRooms() async {
+    final data = Api.unwrap(await Api.instance.get('/breakout/meeting/$meetingDbId'));
+    return ((data['breakoutRooms'] as List?) ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<void> _checkAssignment() async {
+    try {
+      final mine = (await breakoutRooms()).where((r) => r['assignedToMe'] == true).toList();
+      assignedRoom = mine.isEmpty ? null : mine.first;
+      _notify();
+    } catch (_) {/* no rooms, or the request failed: nothing to offer */}
+  }
+
+  Future<void> joinBreakout(Map<String, dynamic> room) async {
+    try {
+      if (room['assignedToMe'] == true) await Api.instance.post('/breakout/${room['id']}/join');
+    } catch (_) {/* attendance only */}
+    assignedRoom = null;
+    switchTo = room['joinRoomId'].toString();
+    _notify();
+  }
+
+  void dismissAssignment() {
+    assignedRoom = null;
+    _notify();
+  }
+
+  void returnToMainRoom() {
+    switchTo = parentRoomId;
+    _notify();
+  }
+
+  /// [groups] holds the user ids for each room, in order.
+  Future<void> openBreakoutRooms(List<List<String>> groups) => Api.instance.post('/breakout', {
+        'meetingId': meetingDbId,
+        'rooms': [for (var i = 0; i < groups.length; i++) {'name': 'Room ${i + 1}', 'participantIds': groups[i]}],
+      });
+
+  Future<void> closeBreakoutRooms() => Api.instance.post('/breakout/close-all', {'meetingId': meetingDbId});
+
+  // ---- whiteboard ----
+  void drawStroke(BoardStroke s) {
+    if (!allowed('allowAddOns')) {
+      infoMessage = 'The host has turned off activities for participants';
+      _notify();
+      return;
+    }
+    board.add(s);
+    boardVersion.value++;
+    _socket?.emit('whiteboard:draw', {
+      'roomId': roomId, 'x0': s.x0, 'y0': s.y0, 'x1': s.x1, 'y1': s.y1,
+      'color': s.color, 'width': s.width, 'tool': s.tool,
+      if (s.tool == 'text') 'text': s.text,
+    });
+  }
+
+  void clearBoard() {
+    if (!allowed('allowAddOns')) return;
+    board.clear();
+    boardVersion.value++;
+    _socket?.emit('whiteboard:clear', {'roomId': roomId});
+  }
+
+  // ---- captions translation ----
+  void setTranslateTo(String language) {
+    translateTo = language;
+    _notify();
+  }
+
+  Future<String> _translate(String text) async {
+    try {
+      final data = Api.unwrap(await Api.instance.post('/ai/translate', {'text': text, 'targetLanguage': translateTo}));
+      return (data['translation'] ?? text).toString();
+    } on ApiException catch (e) {
+      // only a missing engine switches translation off; one failed line just shows the original
+      if (e.code == 'TRANSLATION_UNAVAILABLE') {
+        translateTo = '';
+        infoMessage = '${e.message}. Showing original captions.';
+      }
+      return text;
+    }
+  }
+
+  // ---- live stream ----
+  void setStreaming(bool on) => _socket?.emit('stream:set', {'roomId': roomId, 'enabled': on});
+
+  // ---- recording on this phone ----
+  // Sound is always your mic mixed with everyone you hear; with video, the screen picture too.
+  Future<void> startRecording({bool video = false}) async {
+    if (!canRecordLocally || recordingLocally || recordingBusy) return;
+    if (!isManager && settings['allowRecording'] == false) {
+      infoMessage = 'The host has turned off recording';
+      _notify();
+      return;
+    }
+    recordingBusy = true;
+    _notify();
+    try {
+      String? trackId;
+      if (video) {
+        final capture = await _acquireCapture();
+        if (capture == null) return;
+        trackId = capture.getVideoTracks().first.id;
+      }
+      final Directory dir = await getTemporaryDirectory();
+      _recordingPath = '${dir.path}/meeting-${DateTime.now().millisecondsSinceEpoch}.${video ? 'mp4' : 'm4a'}';
+      await WebRTC.invokeMethod('startAudioRecording', {'path': _recordingPath, 'micEnabled': micOn, 'videoTrackId': trackId});
+      _recordingStarted = DateTime.now();
+      recordingLocally = true;
+      _socket?.emit('recording:started', {'roomId': roomId});
+      infoMessage = video ? 'Recording the screen and sound' : 'Recording audio';
+    } catch (e) {
+      await _releaseCaptureIfUnused();
+      infoMessage = e.toString().contains("didn't give permission") ? 'Screen recording was not allowed' : 'Could not start recording: $e';
+    } finally {
+      recordingBusy = false;
+      _notify();
+    }
+  }
+
+  Future<void> stopRecording() async {
+    if (!recordingLocally) return;
+    recordingLocally = false;
+    final path = _recordingPath!;
+    final seconds = DateTime.now().difference(_recordingStarted!).inMilliseconds / 1000;
+    final target = parentRoomId; // breakout recordings belong to the meeting
+    _socket?.emit('recording:stopped', {'roomId': roomId});
+    try {
+      await WebRTC.invokeMethod('stopAudioRecording');
+      infoMessage = 'Recording saved. Uploading…';
+      _notify();
+      // not awaited: leaving the meeting must not wait for (or cancel) the upload
+      unawaited(_uploadRecording(target, path, seconds));
+    } catch (e) {
+      infoMessage = 'Could not save the recording: $e';
+    }
+    await _releaseCaptureIfUnused();
+    _notify();
+  }
+
+  Future<void> _uploadRecording(String room, String path, double seconds) async {
+    try {
+      await Api.instance.post(
+        '/meetings/${Uri.encodeComponent(room)}/recordings',
+        FormData.fromMap({
+          'duration': seconds,
+          'recording': await MultipartFile.fromFile(path, filename: 'meeting-recording.${path.split('.').last}'),
+        }),
+      );
+      await File(path).delete();
+      infoMessage = 'Recording uploaded. The transcript will appear in meeting details.';
+    } catch (e) {
+      infoMessage = 'Upload failed, the recording is kept on this phone: $e';
+    }
+    _notify();
   }
 
   // ---- host actions ----
@@ -896,6 +1318,44 @@ class MeetingController extends ChangeNotifier {
   void toggleLock() => _socket?.emit('host:lock-meeting', {'roomId': roomId, 'isLocked': !locked});
   void endForAll() => _socket?.emit('host:end-meeting', {'roomId': roomId});
 
+  /// Omit [p] to lower everyone's hand.
+  void lowerHand([Peer? p]) {
+    _socket?.emit('host:lower-hand', {'roomId': roomId, if (p != null) 'targetSocketId': p.socketId});
+  }
+
+  void updateSetting(String key, Object value) {
+    if (!isManager || meeting == null) return;
+    meeting!['settings'] = {...settings, key: value};
+    _socket?.emit('host:update-settings', {'roomId': roomId, 'settings': {key: value}});
+    _notify();
+  }
+
+  void setTranscription(bool on) => _socket?.emit('transcribe:set', {'roomId': roomId, 'enabled': on});
+
+  /// Same columns as the web report (frontend/src/lib/attendance.js).
+  Future<String> attendanceCsv() async {
+    final data = Api.unwrap(await Api.instance.get('/meetings/${Uri.encodeComponent(parentRoomId)}'));
+    final people = ((data['meeting'] ?? data)['participants'] as List?) ?? const [];
+    String cell(Object? v) => '"${(v ?? '').toString().replaceAll('"', '""')}"';
+    final rows = <List<Object?>>[
+      ['Name', 'Email', 'Role', 'Joined', 'Left', 'Duration (min)'],
+      for (final p in people.cast<Map>())
+        () {
+          final joined = DateTime.tryParse('${p['joinedAt'] ?? ''}');
+          final left = DateTime.tryParse('${p['leftAt'] ?? ''}');
+          return [
+            p['user']?['name'] ?? p['name'] ?? p['userId'],
+            p['user']?['email'] ?? p['email'],
+            p['role'] ?? 'participant',
+            joined?.toUtc().toIso8601String(),
+            left?.toUtc().toIso8601String() ?? 'Still in meeting',
+            joined == null ? '' : (left ?? DateTime.now()).difference(joined).inMinutes,
+          ];
+        }(),
+    ];
+    return rows.map((r) => r.map(cell).join(',')).join('\n');
+  }
+
   void startTimer(int seconds, String label) => _socket?.emit('timer:start', {'roomId': roomId, 'seconds': seconds, 'label': label});
   void stopTimer() => _socket?.emit('timer:stop', {'roomId': roomId});
 
@@ -919,6 +1379,8 @@ class MeetingController extends ChangeNotifier {
     }
     _handlers.clear();
     _captionTimer?.cancel();
+    await stopRecording();
+    await stopScreenShare();
     try {
       _audioProducer?.close();
       _videoProducer?.close();
@@ -947,7 +1409,14 @@ class MeetingController extends ChangeNotifier {
     peers.clear();
     await localRenderer?.dispose();
     localRenderer = null;
-    if (_ownsSocket) _socket?.dispose();
+    if (_ownsSocket) {
+      _socket?.dispose();
+    } else {
+      // The server only releases a client's streams when it disconnects; without this the shared
+      // socket would carry them into the next room (main room <-> breakout, or the next meeting).
+      _socket?.disconnect();
+      _socket?.connect();
+    }
     _socket = null;
   }
 

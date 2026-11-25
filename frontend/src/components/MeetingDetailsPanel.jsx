@@ -1,3 +1,4 @@
+import Avatar from './Avatar'
 import { X, Copy, Users, Clock, Link, Key, Shield, User } from 'lucide-react'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
@@ -123,7 +124,7 @@ export default function MeetingDetailsPanel({
           </div>
           <div className="space-y-1 max-h-40 overflow-y-auto bg-dark-300/40 rounded p-2">
             <div className="flex items-center gap-2 py-1">
-              <img src={user?.avatar} alt={user?.name} className="w-6 h-6 rounded-full" />
+              <Avatar user={user} size="xs" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm truncate">{user?.name} (You)</p>
               </div>
@@ -131,7 +132,7 @@ export default function MeetingDetailsPanel({
             </div>
             {participants.map((p) => (
               <div key={p.user?.id || p.user?._id} className="flex items-center gap-2 py-1">
-                <img src={p.user?.avatar} alt={p.user?.name} className="w-6 h-6 rounded-full" />
+                <Avatar user={p.user} size="xs" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm truncate">{p.user?.name}</p>
                 </div>

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import '../core/theme.dart';
 import '../widgets/common.dart';
 
 const _statuses = ['todo', 'in_progress', 'done'];
 const _statusLabel = {'todo': 'To do', 'in_progress': 'In progress', 'done': 'Done'};
-const _priorityColor = {'low': Colors.blueGrey, 'medium': Colors.blue, 'high': Colors.orange, 'urgent': Colors.red};
+const _priorityColor = {'low': AppTheme.faint, 'medium': AppTheme.muted, 'high': AppTheme.accent, 'urgent': AppTheme.overdue};
 
 /// Task board: personal tasks (scope "mine"/"assigned") or a team's shared board.
 class TasksScreen extends StatelessWidget {
@@ -23,23 +24,62 @@ class TaskBoard extends StatefulWidget {
 }
 
 class _TaskBoardState extends State<TaskBoard> {
-  final _key = GlobalKey<AsyncListState<Map<String, dynamic>>>();
-  String _status = 'todo';
-  String _scope = 'mine';
+  List<Map<String, dynamic>> _tasks = [];
+  List<Map<String, dynamic>> _teams = [];
   Map<String, dynamic> _stats = {};
+  String _scope = 'mine'; // mine | team
+  String? _teamId;
+  bool _loading = true;
+  String? _error;
 
-  Future<List<Map<String, dynamic>>> _load() async {
-    final q = <String, dynamic>{
-      'scope': widget.teamId != null ? 'team' : _scope,
-      if (widget.teamId != null) 'teamId': widget.teamId,
-    };
-    final d = Api.unwrap(await Api.instance.get('/tasks', query: q));
+  bool get _embedded => widget.teamId != null;
+  String? get _activeTeam => widget.teamId ?? (_scope == 'team' ? _teamId : null);
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    if (!_embedded) _loadTeams();
+  }
+
+  Future<void> _loadTeams() async {
     try {
-      final s = Api.unwrap(await Api.instance.get('/tasks/stats/summary'));
-      _stats = asMap(s);
+      final d = await Api.instance.get('/teams');
+      final list = asList(Api.unwrap(d) is Map ? Api.unwrap(d)['teams'] : d).map(asMap).toList();
+      if (mounted) setState(() => _teams = list);
     } catch (_) {}
-    if (mounted) setState(() {});
-    return asList(d['tasks']).map(asMap).where((t) => t['status'] == _status).toList();
+  }
+
+  Future<void> _load() async {
+    if (!_embedded && _scope == 'team' && _teamId == null) {
+      setState(() { _tasks = []; _loading = false; _error = null; });
+      return;
+    }
+    final team = _activeTeam;
+    try {
+      final d = Api.unwrap(await Api.instance.get('/tasks', query: {'scope': team != null ? 'team' : 'mine', 'teamId': ?team}));
+      var stats = _stats;
+      if (!_embedded) {
+        try {
+          stats = asMap(Api.unwrap(await Api.instance.get('/tasks/stats/summary')));
+        } catch (_) {}
+      }
+      // The scope or team may have changed while this request was in flight.
+      if (!mounted || team != _activeTeam) return;
+      setState(() {
+        _tasks = asList(d['tasks']).map(asMap).toList();
+        _stats = stats;
+        _loading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (mounted) setState(() { _error = errMsg(e); _loading = false; });
+    }
+  }
+
+  void _select({required String scope, String? teamId}) {
+    setState(() { _scope = scope; _teamId = teamId; _tasks = []; _loading = true; });
+    _load();
   }
 
   Future<void> _create() async {
@@ -47,50 +87,96 @@ class _TaskBoardState extends State<TaskBoard> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => TaskEditor(teamId: widget.teamId, teamMembers: widget.teamMembers),
+      builder: (_) => TaskEditor(teamId: _activeTeam, teamMembers: widget.teamMembers),
     );
-    if (r == true) _key.currentState?.reload();
+    if (r == true) _load();
+  }
+
+  Widget _stat(String label, dynamic value, IconData icon, Color tone) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            Icon(icon, color: tone, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${value ?? 0}', style: const TextStyle(fontFamily: AppTheme.display, fontSize: 22, fontWeight: FontWeight.w500)),
+                Text(label, style: const TextStyle(color: AppTheme.faint, fontSize: 12)),
+              ]),
+            ),
+          ]),
+        ),
+      );
+
+  Widget _column(String status, IconData icon, Color tone) {
+    final items = _tasks.where((t) => t['status'] == status).toList();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppTheme.surface, border: Border.all(color: AppTheme.line), borderRadius: BorderRadius.circular(14)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Icon(icon, size: 16, color: tone),
+          const SizedBox(width: 8),
+          Expanded(child: Text(_statusLabel[status]!, style: const TextStyle(fontWeight: FontWeight.w600))),
+          Text('${items.length}', style: const TextStyle(color: AppTheme.faint, fontSize: 12)),
+        ]),
+        const SizedBox(height: 12),
+        if (items.isEmpty)
+          const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: Text('Nothing here', style: TextStyle(color: AppTheme.faint, fontSize: 12)))),
+        for (final t in items) _TaskTile(key: ValueKey(t['id']), task: t, onChanged: _load, teamMembers: widget.teamMembers),
+      ]),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton.extended(onPressed: _create, icon: const Icon(Icons.add), label: const Text('New task')),
-      body: AsyncList<Map<String, dynamic>>(
-        key: _key,
-        load: _load,
-        emptyText: 'No tasks in "${_statusLabel[_status]}"',
-        emptyIcon: Icons.task_alt,
-        header: Column(children: [
-          if (widget.teamId == null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: SegmentedButton<String>(
-                segments: const [ButtonSegment(value: 'mine', label: Text('Created by me')), ButtonSegment(value: 'assigned', label: Text('Assigned to me'))],
-                selected: {_scope},
-                onSelectionChanged: (s) { setState(() => _scope = s.first); WidgetsBinding.instance.addPostFrameCallback((_) => _key.currentState?.reload()); },
-              ),
-            ),
+    final newTask = FilledButton.icon(onPressed: _create, icon: const Icon(Icons.add, size: 18), label: const Text('New task'));
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 32), children: [
+        PageHeader(_embedded ? 'Team tasks' : 'Tasks', subtitle: _embedded ? 'Shared work for everyone in this team' : 'Personal and team work in one board', padding: const EdgeInsets.fromLTRB(4, 12, 4, 12)),
+        Align(alignment: Alignment.centerLeft, child: Padding(padding: const EdgeInsets.fromLTRB(4, 0, 4, 16), child: newTask)),
+        if (!_embedded) ...[
+          Row(children: [
+            Expanded(child: _stat('To do', _stats['todo'], Icons.checklist, AppTheme.muted)),
+            Expanded(child: _stat('In progress', _stats['inProgress'], Icons.schedule, AppTheme.accent)),
+          ]),
+          Row(children: [
+            Expanded(child: _stat('Completed', _stats['done'], Icons.check_circle_outline, AppTheme.done)),
+            Expanded(child: _stat('Overdue', _stats['overdue'], Icons.warning_amber_outlined, AppTheme.overdue)),
+          ]),
+          const SizedBox(height: 12),
           SegmentedButton<String>(
             showSelectedIcon: false,
-            segments: _statuses.map((s) => ButtonSegment(value: s, label: Text('${_statusLabel[s]}${_countFor(s)}', style: const TextStyle(fontSize: 12)))).toList(),
-            selected: {_status},
-            onSelectionChanged: (s) { setState(() => _status = s.first); WidgetsBinding.instance.addPostFrameCallback((_) => _key.currentState?.reload()); },
+            segments: const [ButtonSegment(value: 'mine', label: Text('My tasks')), ButtonSegment(value: 'team', label: Text('Team tasks'))],
+            selected: {_scope},
+            onSelectionChanged: (v) => _select(scope: v.first),
           ),
-          if ((_stats['overdue'] ?? 0) is num && (_stats['overdue'] ?? 0) > 0)
-            Padding(padding: const EdgeInsets.only(top: 6), child: Text('${_stats['overdue']} overdue', style: const TextStyle(color: Colors.red))),
-          const SizedBox(height: 8),
-        ]),
-        itemBuilder: (context, t, reload) => _TaskTile(task: t, onChanged: reload, teamMembers: widget.teamMembers),
-      ),
+          if (_scope == 'team') ...[
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _teamId,
+              hint: const Text('Select a team'),
+              items: [for (final t in _teams) DropdownMenuItem(value: t['id'].toString(), child: Text((t['name'] ?? '').toString()))],
+              onChanged: (v) => _select(scope: 'team', teamId: v),
+            ),
+          ],
+          const SizedBox(height: 16),
+        ],
+        if (!_embedded && _scope == 'team' && _teamId == null)
+          const Padding(padding: EdgeInsets.symmetric(vertical: 48), child: Center(child: Text('Pick a team to see its shared tasks.', style: TextStyle(color: AppTheme.faint))))
+        else if (_loading)
+          const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()))
+        else if (_error != null && _tasks.isEmpty)
+          Column(children: [Text(_error!, textAlign: TextAlign.center), TextButton(onPressed: _load, child: const Text('Retry'))])
+        else ...[
+          _column('todo', Icons.checklist, AppTheme.muted),
+          _column('in_progress', Icons.schedule, AppTheme.accent),
+          _column('done', Icons.check_circle_outline, AppTheme.done),
+        ],
+      ]),
     );
-  }
-
-  String _countFor(String s) {
-    final key = s == 'in_progress' ? 'inProgress' : s;
-    final v = _stats[key];
-    return v is num ? ' ($v)' : '';
   }
 }
 
@@ -98,7 +184,7 @@ class _TaskTile extends StatelessWidget {
   final Map<String, dynamic> task;
   final VoidCallback onChanged;
   final List<Map<String, dynamic>> teamMembers;
-  const _TaskTile({required this.task, required this.onChanged, required this.teamMembers});
+  const _TaskTile({super.key, required this.task, required this.onChanged, required this.teamMembers});
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +210,7 @@ class _TaskTile extends StatelessWidget {
         title: Text((task['title'] ?? '').toString(), style: TextStyle(decoration: task['status'] == 'done' ? TextDecoration.lineThrough : null)),
         subtitle: Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
           Chip(label: Text(prio, style: const TextStyle(fontSize: 11)), visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, side: BorderSide(color: _priorityColor[prio] ?? cs.outline)),
-          if (due != null) Text(fmtDateTime(task['dueDate']).split(' · ').first, style: TextStyle(fontSize: 12, color: overdue ? Colors.red : cs.outline)),
+          if (due != null) Text(fmtDateTime(task['dueDate']).split(' · ').first, style: TextStyle(fontSize: 12, color: overdue ? AppTheme.overdue : cs.outline)),
           if (assignee['name'] != null) Text('→ ${assignee['name']}', style: TextStyle(fontSize: 12, color: cs.outline)),
         ]),
         trailing: PopupMenuButton<String>(
@@ -213,9 +299,9 @@ class _TaskEditorState extends State<TaskEditor> {
           Text(editing ? 'Edit task' : 'New task', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),
           TextField(controller: _title, autofocus: !editing, decoration: const InputDecoration(labelText: 'Title')),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           TextField(controller: _desc, maxLines: 3, decoration: const InputDecoration(labelText: 'Description')),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(children: [
             Expanded(
               child: DropdownButtonFormField<String>(
@@ -225,7 +311,7 @@ class _TaskEditorState extends State<TaskEditor> {
                 onChanged: (v) => setState(() => _priority = v ?? 'medium'),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(minimumSize: const Size(0, 56)),
@@ -240,7 +326,7 @@ class _TaskEditorState extends State<TaskEditor> {
           ]),
           if (_due != null) Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => setState(() => _due = null), child: const Text('Clear date'))),
           if (widget.teamMembers.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
               value: widget.teamMembers.any((m) => m['userId'] == _assignee) ? _assignee : null,
               decoration: const InputDecoration(labelText: 'Assignee'),
@@ -267,7 +353,7 @@ class _TaskEditorState extends State<TaskEditor> {
           ],
           const SizedBox(height: 12),
           Row(children: [
-            if (editing) IconButton(onPressed: _delete, icon: const Icon(Icons.delete_outline, color: Colors.red)),
+            if (editing) IconButton(onPressed: _delete, icon: const Icon(Icons.delete_outline, color: AppTheme.overdue)),
             Expanded(child: FilledButton(onPressed: _busy ? null : _save, child: Text(editing ? 'Save' : 'Create task'))),
           ]),
         ]),

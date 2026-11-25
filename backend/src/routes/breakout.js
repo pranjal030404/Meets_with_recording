@@ -111,7 +111,7 @@ router.put('/:breakoutRoomId/assign', protect, async (req, res) => {
       return res.status(403).json({ message: 'Only host can assign participants' });
     }
 
-    const assignedParticipants = breakoutRoom.assignedParticipants || [];
+    const assignedParticipants = [...(breakoutRoom.assignedParticipants || [])];
 
     participantIds.forEach(userId => {
       if (!assignedParticipants.some(p => p.userId === userId)) {

@@ -29,6 +29,7 @@ import TimerBadge from '../components/TimerBadge'
 import ShortcutsModal from '../components/ShortcutsModal'
 import Whiteboard from '../components/Whiteboard'
 import { downloadAttendanceReport } from '../lib/attendance'
+import { openPopOut, closePopOut, enableAutoPopOut } from '../lib/popOut'
 
 export default function Meeting() {
   const navigate = useNavigate()
@@ -46,7 +47,7 @@ export default function Meeting() {
     handRaisedUsers, isHandRaised, layout, pinnedUserId,
     mirrorSelf, toggleMirrorSelf, hideSelf, toggleHideSelf,
     spotlightUserId, activeSpeakerId, captionsEnabled, captions,
-    isBeingRecorded, waitingRoomUsers, isMeetingLocked, recordingUser, isPiP,
+    isBeingRecorded, waitingRoomUsers, isWaitingRoom, isMeetingLocked, recordingUser, isPiP,
     screenStream,
     joinMeeting, leaveMeeting, setLocalStream,
     setParticipants, setIsHost, addParticipant, removeParticipant,
@@ -59,7 +60,7 @@ export default function Meeting() {
     spotlightUser, clearSpotlight, setActiveSpeaker,
     forceMute, forceVideoOff, setBeingRecorded,
     addToWaitingRoom, admitFromWaitingRoom, denyFromWaitingRoom,
-    toggleCaptions, addCaption, enumerateDevices, enablePiP, disablePiP
+    toggleCaptions, addCaption, enumerateDevices
   } = useMeetingStore()
   const { addMessage, loadMessages, clearMessages, setTypingUser } = useChatStore()
 
@@ -83,7 +84,7 @@ export default function Meeting() {
     enabled: !isJoining,
     isMuted,
     onBreakoutClosed: (returnRoomId) => {
-      toast('The host closed the breakout rooms. Returning to the main room…', { icon: '🚪' })
+      toast('The host closed the breakout rooms. Returning to the main room…')
       goToRoom(returnRoomId)
     }
   })
@@ -298,8 +299,11 @@ export default function Meeting() {
           if (audioTrack) { audioTrack.stop(); stream.removeTrack(audioTrack) }
           useMeetingStore.setState({ isMuted: true })
           socket.emit('media:toggle-mute', { isMuted: true })
-          toast('You have been muted on entry by the host', { icon: '🔇' })
+          toast('You have been muted on entry by the host', {})
         }
+
+        await useMeetingStore.getState().applySavedBackground()
+        if (initCancelledRef.current) return
 
         // Initialize mediasoup SFU (graceful failure)
         if (socket.connected) {
@@ -338,7 +342,7 @@ export default function Meeting() {
         }
         setIsJoining(false)
         if (!viewOnly && useMeetingStore.getState().isMuted) {
-          toast('You joined with your mic off. Click the mic button so others can hear you.', { icon: '🎙️', id: 'joined-muted', duration: 6000 })
+          toast('You joined with your mic off. Click the mic button so others can hear you.', { id: 'joined-muted', duration: 6000 })
         }
       } catch (error) {
         if (initCancelledRef.current) return
@@ -554,6 +558,12 @@ export default function Meeting() {
       navigate('/app')
     })
 
+    socket.on('host:lower-hand', () => {
+      if (!useMeetingStore.getState().isHandRaised) return
+      useMeetingStore.getState().toggleHandRaise()
+      toast('The host lowered your hand')
+    })
+
     // Chat
     socket.on('chat:message', (message) => {
       addMessage(message)
@@ -656,7 +666,7 @@ export default function Meeting() {
         'room:media-policy', 'media:active-speakers', 'media:reconnect-required', 'room:redirect',
         'media:user-muted', 'media:user-video', 'media:screen-share',
         'host:force-mute', 'host:force-video-off', 'host:request-unmute',
-        'host:removed', 'meeting:ended', 'host:spotlight', 'host:meeting-locked',
+        'host:removed', 'host:lower-hand', 'meeting:ended', 'host:spotlight', 'host:meeting-locked',
         'host:promoted', 'host:demoted', 'room:role-changed',
         'room:waiting', 'room:waiting-left', 'room:waiting-for-host', 'room:admitted', 'room:denied',
         'chat:message', 'chat:user-typing',
@@ -724,12 +734,12 @@ export default function Meeting() {
   }
 
   // Recording toggle
-  const handleRecording = useCallback(() => {
+  const handleRecording = useCallback((options) => {
     if (isRecording) {
       stopRecording()
       toast.success('Recording stopped. Upload and transcription are processing.')
     } else {
-      const result = startRecording()
+      const result = startRecording(options)
       if (result.success) toast.success('Recording started')
       else toast.error(result.message || 'Failed to start recording')
     }
@@ -739,7 +749,7 @@ export default function Meeting() {
   const handleCopyLink = useCallback(() => {
     const link = `${window.location.origin}/meeting/${roomId}`
     navigator.clipboard.writeText(link)
-    toast.success('Meeting link copied!')
+    toast.success('Meeting link copied')
   }, [roomId])
 
   // Attendance CSV (fetch fresh join/leave times first)
@@ -749,21 +759,24 @@ export default function Meeting() {
     downloadAttendanceReport(result.meeting)
   }, [roomId])
 
-  // Toggle PiP
-  const handleTogglePiP = useCallback(() => {
-    if (isPiP) {
-      disablePiP()
-    } else {
-      enablePiP()
-    }
-  }, [isPiP, disablePiP, enablePiP])
+  // Pop-out window: by menu, and by itself when you switch to another tab
+  const handleTogglePiP = useCallback(async () => {
+    if (isPiP) return closePopOut()
+    if (!(await openPopOut({ onLeave: handleLeave }))) toast.error('This browser could not open a pop-out window')
+  }, [isPiP, handleLeave])
+  useEffect(() => {
+    if (isJoining) return
+    return enableAutoPopOut({ onLeave: handleLeave })
+  }, [isJoining, handleLeave])
+
+  // The host's "let them in" popup; closing it hides it until someone new knocks
+  const [dismissedWaiting, setDismissedWaiting] = useState(0)
+  useEffect(() => { if (waitingRoomUsers.length === 0) setDismissedWaiting(0) }, [waitingRoomUsers.length])
 
   // Loading state
   if (isJoining) {
     return (
-      <div className="relative min-h-screen bg-dark-100 flex items-center justify-center aurora-bg">
-        <div className="blob -top-32 left-1/3 h-96 w-96 bg-primary-600/20 animate-aurora" />
-        <div className="blob bottom-0 right-1/4 h-80 w-80 bg-accent-600/15 animate-aurora-slow" />
+      <div className="relative min-h-screen bg-dark-100 flex items-center justify-center">
         <div className="relative text-center">
           <div className="relative w-16 h-16 mx-auto mb-5">
             <div className="absolute inset-0 rounded-full border-[3px] border-primary-500/20" />
@@ -779,9 +792,26 @@ export default function Meeting() {
 
   return (
     <div className="h-screen h-[100dvh] bg-dark-100 flex flex-col overflow-hidden">
+      {/* Guest side of the waiting room: cover the meeting until the host admits you */}
+      {isWaitingRoom && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-dark-100 px-4">
+          <div className="card w-full max-w-md p-8 text-center" role="status">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-primary-400" />
+            <h1 className="mt-5 font-display text-2xl font-semibold">Waiting for the host</h1>
+            <p className="mt-2 text-sm text-gray-400">You will join {currentMeeting?.title || 'the meeting'} as soon as the host lets you in</p>
+            <button onClick={handleLeave} className="btn btn-secondary btn-lg mt-6 w-full">Leave</button>
+          </div>
+        </div>
+      )}
+      {(isHost || isCoHost) && !showParticipants && waitingRoomUsers.length > dismissedWaiting && (
+        <div className="relative z-30">
+          <WaitingRoom waitingUsers={waitingRoomUsers} onAdmit={admitFromWaitingRoom} onDeny={denyFromWaitingRoom}
+            onClose={() => setDismissedWaiting(waitingRoomUsers.length)} />
+        </div>
+      )}
       {/* Recording banner */}
       {isBeingRecorded && (
-        <div className="bg-gradient-to-r from-red-600 via-red-500 to-red-600 text-white text-center py-1.5 text-sm font-medium flex items-center justify-center gap-2 animate-slide-down shadow-lg shadow-red-500/20">
+        <div className="bg-red-600 text-white text-center py-1.5 text-sm font-medium flex items-center justify-center gap-2 animate-slide-down">
           <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
           This meeting is being recorded{recordingUser ? ` by ${recordingUser}` : ''}
         </div>
@@ -789,7 +819,7 @@ export default function Meeting() {
 
       {/* Live stream banner */}
       {tools.stream && (
-        <div className="bg-gradient-to-r from-primary-700 via-primary-600 to-primary-700 text-white text-center py-1.5 text-sm font-medium flex items-center justify-center gap-2 animate-slide-down">
+        <div className="bg-primary-700 text-white text-center py-1.5 text-sm font-medium flex items-center justify-center gap-2 animate-slide-down">
           <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse" />
           Live streaming to a view-only audience
         </div>
@@ -897,7 +927,7 @@ export default function Meeting() {
             tools={tools}
             isRecording={isRecording}
             captionsEnabled={captionsEnabled}
-            onToggleRecording={handleRecording}
+            onToggleRecording={() => handleRecording()}
             onToggleCaptions={toggleCaptions}
             onOpenActivities={setActivitiesTab}
             onOpenWhiteboard={() => setShowWhiteboard(true)}
@@ -934,7 +964,7 @@ export default function Meeting() {
 
       {/* Device Settings Modal */}
       {showDeviceSettings && (
-        <DeviceSettings onClose={() => setShowDeviceSettings(false)} />
+        <DeviceSettings initialTab={showDeviceSettings} onClose={() => setShowDeviceSettings(false)} />
       )}
 
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
@@ -948,23 +978,23 @@ export default function Meeting() {
       {showLeaveDialog && (
         <div className="modal-backdrop" onClick={() => setShowLeaveDialog(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 className="text-xl font-bold font-display mb-2">Leave Meeting</h3>
+            <h3 className="text-xl font-semibold font-display mb-2">Leave meeting</h3>
             <p className="text-gray-400 text-sm mb-6">Are you sure you want to leave? You can rejoin anytime with the same link.</p>
             <div className="space-y-3">
               {inBreakout && (
                 <button onClick={() => goToRoom(parentRoomId)} className="btn btn-primary w-full py-3">
-                  Return to Main Room
+                  Return to main room
                 </button>
               )}
               {(isHost || isCoHost) && !inBreakout && (
                 <button onClick={() => { setShowLeaveDialog(false); handleEndForAll() }}
                   className="btn btn-danger w-full py-3">
-                  End Meeting for All
+                  End meeting for all
                 </button>
               )}
               <button onClick={() => { setShowLeaveDialog(false); handleLeave() }}
                 className="btn btn-secondary w-full py-3">
-                Leave Meeting
+                Leave meeting
               </button>
               <button onClick={() => setShowLeaveDialog(false)}
                 className="btn btn-ghost w-full">Cancel</button>
@@ -1003,14 +1033,16 @@ export default function Meeting() {
         onToggleScreenShare={guardViewOnly(isScreenSharing ? handleScreenShare : guardHostControl('allowScreenShare', 'screen sharing', handleScreenShare))}
         showTools={showTools}
         onToggleTools={() => setShowTools(v => !v)}
-        onToggleRecording={handleRecording}
+        onToggleRecording={() => handleRecording()}
+        onRecordAudio={() => handleRecording({ audioOnly: true })}
         onToggleChat={() => setShowChat(!showChat)}
         onToggleParticipants={() => setShowParticipants(!showParticipants)}
         onToggleHandRaise={toggleHandRaise}
         onToggleCaptions={toggleCaptions}
         onSendReaction={guardHostControl('allowReactions', 'reactions', sendReaction)}
         onLeave={() => setShowLeaveDialog(true)}
-        onOpenSettings={() => setShowDeviceSettings(true)}
+        onOpenSettings={() => setShowDeviceSettings('audio')}
+        onOpenBackground={() => setShowDeviceSettings('video')}
         onOpenMeetingSettings={() => setShowMeetingSettings(true)}
         onOpenMeetingDetails={() => setShowMeetingDetails(true)}
         chatUnread={useChatStore.getState().unreadCount}

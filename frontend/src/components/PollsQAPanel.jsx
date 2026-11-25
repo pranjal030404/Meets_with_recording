@@ -180,7 +180,7 @@ function PollCard({ poll, canManage, onChange }) {
     <div className="bg-dark-300 rounded-xl p-3 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <p className="font-medium text-sm">{poll.question}</p>
-        <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
           active ? 'bg-green-500/15 text-green-400' : 'bg-gray-500/15 text-gray-400'
         }`}>{active ? 'Live' : 'Ended'}</span>
       </div>
@@ -202,7 +202,7 @@ function PollCard({ poll, canManage, onChange }) {
                 <span className="text-gray-400 tabular-nums">{opt.votes} · {opt.percentage}%</span>
               </div>
               <div className="h-1.5 bg-dark-500 rounded-full overflow-hidden">
-                <div className="h-full bg-primary-500 transition-all duration-500" style={{ width: `${opt.percentage}%` }} />
+                <div className="h-full bg-primary-500 transition-colors" style={{ width: `${opt.percentage}%` }} />
               </div>
             </div>
           )}

@@ -20,7 +20,7 @@ void main() {
     HttpOverrides.global = null;
     SharedPreferences.setMockInitialValues({});
     await Config.init();
-    if (server != null) await Config.setServerUrl(server);
+    if (server != null) Config.testServerUrl = server;
     Session.instance;
     Api.instance.onUnauthorized = () => print('UNAUTHORIZED callback fired');
   });

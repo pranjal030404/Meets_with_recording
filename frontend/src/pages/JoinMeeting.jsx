@@ -265,28 +265,25 @@ export default function JoinMeeting() {
   }
 
   return (
-    <div className="relative min-h-screen bg-dark-100 flex items-center justify-center p-4 aurora-bg noise">
-      {/* Animated aurora blobs */}
-      <div className="blob -top-32 left-1/4 h-96 w-96 bg-primary-600/20 animate-aurora" />
-      <div className="blob bottom-0 -right-24 h-80 w-80 bg-accent-600/15 animate-aurora-slow" />
+    <div className="relative min-h-screen bg-dark-100 flex items-center justify-center p-4">
 
       <div className="relative w-full max-w-5xl">
         {/* Back button */}
         <button
           onClick={() => navigate('/app')}
-          className="group flex items-center gap-2 text-gray-400 hover:text-white mb-8 transition-colors animate-fade-in-down"
+          className="group flex items-center gap-2 text-gray-400 hover:text-white mb-8 transition-colors"
         >
-          <ArrowLeft className="w-5 h-5 transition-transform duration-300 group-hover:-translate-x-1" />
+          <ArrowLeft className="w-5 h-5 transition-transform" />
           Back to home
         </button>
 
         <div className="grid lg:grid-cols-2 gap-8 items-stretch">
           {/* Video Preview */}
-          <div className="glass rounded-3xl overflow-hidden shadow-float animate-fade-in-up stagger-1 flex flex-col">
+          <div className="glass rounded-2xl overflow-hidden flex flex-col">
             <div className="aspect-video relative">
               {isVideoOff ? (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-dark-300 to-dark-400/50">
-                  <div className="w-24 h-24 bg-gradient-to-br from-primary-500 to-primary-700 rounded-full flex items-center justify-center shadow-glow animate-pop">
+                <div className="w-full h-full flex items-center justify-center bg-dark-300">
+                  <div className="w-24 h-24 bg-primary-500 rounded-full flex items-center justify-center">
                     <span className="text-3xl font-semibold">
                       {user?.name?.charAt(0).toUpperCase()}
                     </span>
@@ -304,7 +301,7 @@ export default function JoinMeeting() {
               )}
 
               {/* Name badge */}
-              <div className="absolute bottom-4 left-4 glass-strong px-3.5 py-1.5 rounded-xl text-sm font-medium shadow-lg">
+              <div className="absolute bottom-4 left-4 glass-strong px-3.5 py-1.5 rounded-xl text-sm font-medium">
                 {user?.name} <span className="text-primary-300">(You)</span>
               </div>
 
@@ -324,33 +321,19 @@ export default function JoinMeeting() {
                   <Mic className="w-4 h-4 text-primary-400" />
                   <div className="flex-1 h-2 bg-dark-400/80 rounded-full overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-primary-500 via-primary-400 to-emerald-400 transition-all duration-100"
+                      className="h-full rounded-full bg-primary-500 transition-colors duration-100"
                       style={{ width: `${Math.max(audioLevel * 100, 4)}%` }}
                     />
-                  </div>
-                  {/* Equalizer bars */}
-                  <div className="flex items-end gap-[3px] h-4 text-primary-400">
-                    {[0, 1, 2, 3].map(i => (
-                      <span
-                        key={i}
-                        className="eq-bar"
-                        style={{
-                          height: `${6 + audioLevel * 10}px`,
-                          animationDelay: `${i * 0.12}s`,
-                          opacity: 0.4 + audioLevel * 0.6,
-                        }}
-                      />
-                    ))}
                   </div>
                 </div>
               )}
 
               <div className="flex justify-center gap-3">
                 {/* Mic button + device selector */}
-                <div className="flex items-center animate-scale-in stagger-1">
+                <div className="flex items-center animate-scale-in">
                   <button
                     onClick={toggleMute}
-                    className={`control-btn ${isMuted ? 'inactive' : 'active'} rounded-l-full rounded-r-none`}
+                    className={`control-btn ${isMuted ? 'inactive' : 'active'} ${devices.audioinput.length > 1 ? '!rounded-r-none' : ''}`}
                     title={isMuted ? 'Unmute' : 'Mute'}
                   >
                     {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
@@ -362,8 +345,8 @@ export default function JoinMeeting() {
                         <ChevronDown className="w-3.5 h-3.5" />
                       </button>
                       {showDeviceDropdown === 'audio' && (
-                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl shadow-2xl py-1.5 min-w-[250px] z-20 animate-slide-up border-white/10">
-                          <p className="px-3.5 py-1.5 text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Microphone</p>
+                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl py-1.5 min-w-[250px] z-20 animate-slide-up border-white/10">
+                          <p className="px-3.5 py-1.5 text-[11px] text-gray-500 font-semibold">Microphone</p>
                           {devices.audioinput.map(d => (
                             <button key={d.deviceId} onClick={() => switchDevice('audioinput', d.deviceId)}
                               className={`w-full px-3.5 py-2 text-left text-sm hover:bg-primary-500/10 transition-colors truncate ${
@@ -379,10 +362,10 @@ export default function JoinMeeting() {
                 </div>
 
                 {/* Video button + device selector */}
-                <div className="flex items-center animate-scale-in stagger-2">
+                <div className="flex items-center animate-scale-in">
                   <button
                     onClick={toggleVideo}
-                    className={`control-btn ${isVideoOff ? 'inactive' : 'active'} rounded-l-full rounded-r-none`}
+                    className={`control-btn ${isVideoOff ? 'inactive' : 'active'} ${devices.videoinput.length > 1 ? '!rounded-r-none' : ''}`}
                     title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
                   >
                     {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
@@ -394,8 +377,8 @@ export default function JoinMeeting() {
                         <ChevronDown className="w-3.5 h-3.5" />
                       </button>
                       {showDeviceDropdown === 'video' && (
-                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl shadow-2xl py-1.5 min-w-[250px] z-20 animate-slide-up">
-                          <p className="px-3.5 py-1.5 text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Camera</p>
+                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl py-1.5 min-w-[250px] z-20 animate-slide-up">
+                          <p className="px-3.5 py-1.5 text-[11px] text-gray-500 font-semibold">Camera</p>
                           {devices.videoinput.map(d => (
                             <button key={d.deviceId} onClick={() => switchDevice('videoinput', d.deviceId)}
                               className={`w-full px-3.5 py-2 text-left text-sm hover:bg-primary-500/10 transition-colors truncate ${
@@ -414,8 +397,8 @@ export default function JoinMeeting() {
           </div>
 
           {/* Join Form */}
-          <div className="flex flex-col justify-center animate-fade-in-up stagger-2">
-<h1 className="text-3xl sm:text-4xl font-bold font-display tracking-tight mb-3">
+          <div className="flex flex-col justify-center">
+<h1 className="text-3xl sm:text-4xl font-semibold font-display mb-3">
               Ready to join?
             </h1>
             <p className="text-gray-400 mb-8">
@@ -448,7 +431,7 @@ export default function JoinMeeting() {
                       Checking...
                     </span>
                   ) : (
-                    'Find Meeting'
+                    'Find meeting'
                   )}
                 </button>
               </form>
@@ -457,7 +440,7 @@ export default function JoinMeeting() {
             {meeting && (
               <div className="space-y-4">
                 {/* Meeting Info */}
-                <div className="gradient-border rounded-2xl p-5 animate-scale-in">
+                <div className="card p-5 animate-scale-in">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-semibold font-display text-lg mb-1">{meeting.title}</h3>
@@ -479,7 +462,7 @@ export default function JoinMeeting() {
                 <button
                   onClick={handleJoinMeeting}
                   disabled={isLoading}
-                  className="btn btn-primary w-full py-4 text-base animate-fade-in-up stagger-2"
+                  className="btn btn-primary w-full py-4 text-base"
                 >
                   {isLoading ? (
                     <span className="flex items-center gap-2">
@@ -489,7 +472,7 @@ export default function JoinMeeting() {
                   ) : (
                     <span className="flex items-center gap-2">
                       <LogIn className="w-5 h-5" />
-                      Join Now
+                      Join now
                     </span>
                   )}
                 </button>

@@ -40,7 +40,7 @@ export default function TeamCalendar({ teamId }) {
     <div className="p-5 sm:p-6 overflow-y-auto h-full">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
-          <h2 className="text-xl font-bold font-display">Team calendar</h2>
+          <h2 className="text-xl font-semibold font-display">Team calendar</h2>
           <p className="text-gray-500 text-sm mt-1">Meetings scheduled for this team.</p>
         </div>
         <button onClick={() => navigate(`/meeting/create?teamId=${teamId}`)} className="btn btn-primary text-sm">
@@ -58,7 +58,7 @@ export default function TeamCalendar({ teamId }) {
               <h3 className="font-semibold">{month.toLocaleDateString([], { month: 'long', year: 'numeric' })}</h3>
               <button onClick={() => goto(1)} className="p-2 rounded-lg hover:bg-white/[0.06] text-gray-400" aria-label="Next month"><ChevronRight className="w-5 h-5" /></button>
             </div>
-            <div className="grid grid-cols-7 gap-1 text-center text-[11px] uppercase tracking-wider text-gray-500 mb-1">
+            <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500 mb-1">
               {DAYS.map(d => <div key={d} className="py-1">{d}</div>)}
             </div>
             <div className="grid grid-cols-7 gap-1">

@@ -20,9 +20,7 @@ class MinutesApp extends StatelessWidget {
     return MaterialApp(
       title: 'Minutes',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.build(Brightness.light),
-      darkTheme: AppTheme.build(Brightness.dark),
-      themeMode: ThemeMode.system,
+      theme: AppTheme.build(),
       home: ListenableBuilder(
         listenable: Session.instance,
         builder: (context, _) {

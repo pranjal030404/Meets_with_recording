@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sdp_transform/sdp_transform.dart';
@@ -31,6 +33,9 @@ class UnifiedPlan extends HandlerInterface {
   DtlsRole? _forcedLocalDtlsRole;
   // RTCPeerConnection instance.
   RTCPeerConnection? _pc;
+  // run() creates the peer connection asynchronously and nothing waits for run(): everything that
+  // needs the connection waits here instead, or the first stream of a meeting fails with a null error.
+  final Completer<void> _ready = Completer<void>();
   // Map of RTCTransceivers indexed by MID.
   Map<String, RTCRtpTransceiver> _mapMidTransceiver = {};
   // Whether a DataChannel m=application section has been created.
@@ -145,6 +150,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<List<StatsReport>> getReceiverStats(String localId) async {
+    await _ready.future;
     _assertRecvDirection();
 
     RTCRtpTransceiver? transceiver = _mapMidTransceiver[localId];
@@ -158,6 +164,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<List<StatsReport>> getSenderStats(String localId) async {
+    await _ready.future;
     _assertSendRirection();
 
     RTCRtpTransceiver? transceiver = _mapMidTransceiver[localId];
@@ -171,6 +178,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<List<StatsReport>> getTransportStats() async {
+    await _ready.future;
     return await _pc!.getStats();
   }
 
@@ -179,6 +187,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<HandlerReceiveResult> receive(HandlerReceiveOptions options) async {
+    await _ready.future;
     _assertRecvDirection();
 
     _logger.debug(
@@ -268,6 +277,7 @@ class UnifiedPlan extends HandlerInterface {
   @override
   Future<HandlerReceiveDataChannelResult> receiveDataChannel(
       HandlerReceiveDataChannelOptions options) async {
+    await _ready.future;
     _assertRecvDirection();
 
     RTCDataChannelInit initOptions = RTCDataChannelInit();
@@ -324,6 +334,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<void> replaceTrack(ReplaceTrackOptions options) async {
+    await _ready.future;
     _assertSendRirection();
 
     if (options.track != null) {
@@ -345,6 +356,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<void> restartIce(IceParameters iceParameters) async {
+    await _ready.future;
     _logger.debug('restartIce()');
 
     // Provide the remote SDP handler with new remote Ice parameters.
@@ -490,10 +502,13 @@ class UnifiedPlan extends HandlerInterface {
           break;
       }
     };
+  
+    _ready.complete();
   }
 
   @override
   Future<HandlerSendResult> send(HandlerSendOptions options) async {
+    await _ready.future;
     _assertSendRirection();
 
     _logger.debug(
@@ -668,6 +683,7 @@ class UnifiedPlan extends HandlerInterface {
   @override
   Future<HandlerSendDataChannelResult> sendDataChannel(
       SendDataChannelArguments options) async {
+    await _ready.future;
     _assertSendRirection();
 
     RTCDataChannelInit initOptions = RTCDataChannelInit();
@@ -738,6 +754,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<void> setMaxSpatialLayer(SetMaxSpatialLayerOptions options) async {
+    await _ready.future;
     _assertSendRirection();
 
     _logger.debug(
@@ -767,6 +784,7 @@ class UnifiedPlan extends HandlerInterface {
   @override
   Future<void> setRtpEncodingParameters(
       SetRtpEncodingParametersOptions options) async {
+    await _ready.future;
     _assertSendRirection();
 
     _logger.debug(
@@ -804,6 +822,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<void> stopReceiving(String localId) async {
+    await _ready.future;
     _assertRecvDirection();
 
     _logger.debug('stopReceiving() [localId:$localId');
@@ -835,6 +854,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<void> stopSending(String localId) async {
+    await _ready.future;
     _assertSendRirection();
 
     _logger.debug('stopSending() [localId:$localId]');
@@ -868,6 +888,7 @@ class UnifiedPlan extends HandlerInterface {
 
   @override
   Future<void> updateIceServers(List<RTCIceServer> iceServers) async {
+    await _ready.future;
     _logger.debug('updateIceServers()');
 
     Map<String, dynamic> configuration = _pc!.getConfiguration;

@@ -2,14 +2,21 @@ import { useState, useEffect } from 'react'
 import { X, Mic, Video, Speaker, Sparkles } from 'lucide-react'
 import { useMeetingStore } from '../store/meetingStore'
 
-export default function DeviceSettings({ onClose }) {
+export default function DeviceSettings({ onClose, initialTab = 'audio' }) {
   const {
     availableDevices, selectedAudioDevice, selectedVideoDevice, selectedAudioOutputDevice,
     videoQuality, audioLevel, isSpeaking, audioProcessing, setAudioProcessing,
-    enumerateDevices, switchAudioDevice, switchVideoDevice, switchAudioOutput, setVideoQuality
+    enumerateDevices, switchAudioDevice, switchVideoDevice, switchAudioOutput, setVideoQuality,
+    background, setBackground
   } = useMeetingStore()
 
-  const [tab, setTab] = useState('audio')
+  const [tab, setTab] = useState(initialTab)
+
+  const chooseImage = (e) => {
+    const file = e.target.files?.[0]
+    if (file) setBackground('image', file)
+    e.target.value = ''
+  }
 
   useEffect(() => {
     enumerateDevices()
@@ -87,11 +94,11 @@ export default function DeviceSettings({ onClose }) {
             </div>
             {audioLevel > 0 && (
               <div>
-                <label className="block text-sm text-gray-400 mb-2">Microphone Level</label>
+                <label className="block text-sm text-gray-400 mb-2">Microphone level</label>
                 <div className="flex items-center gap-2">
                   <div className="flex-1 h-2 bg-dark-400 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all duration-100 ${isSpeaking ? 'bg-green-500' : 'bg-primary-500'}`}
+                      className={`h-full rounded-full transition-colors duration-100 ${isSpeaking ? 'bg-green-500' : 'bg-primary-500'}`}
                       style={{ width: `${Math.min(audioLevel * 100, 100)}%` }}
                     />
                   </div>
@@ -123,11 +130,28 @@ export default function DeviceSettings({ onClose }) {
               </select>
             </div>
             
+            <div>
+              <span className="block text-sm text-gray-400 mb-2">Background</span>
+              <div className="flex flex-wrap gap-2">
+                {[['off', 'None'], ['blur', 'Blur']].map(([id, label]) => (
+                  <button key={id} type="button" onClick={() => setBackground(id)} aria-pressed={background === id}
+                    className={`rounded-lg px-4 py-2 text-sm ${background === id ? 'bg-primary-600 text-white' : 'bg-dark-400 text-gray-300'}`}>
+                    {label}
+                  </button>
+                ))}
+                <label className={`cursor-pointer rounded-lg px-4 py-2 text-sm ${background === 'image' ? 'bg-primary-600 text-white' : 'bg-dark-400 text-gray-300'}`}>
+                  Choose a picture
+                  <input type="file" accept="image/*" className="sr-only" onChange={chooseImage} />
+                </label>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Applies while your camera is on. Others only see the result.</p>
+            </div>
+
             {/* Video Quality Selector */}
             <div>
               <label className="block text-sm text-gray-400 mb-2 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-primary-400" />
-                Video Quality
+                Video quality
               </label>
               <select
                 value={videoQuality}
@@ -145,7 +169,7 @@ export default function DeviceSettings({ onClose }) {
 
         {/* Keyboard Shortcuts */}
         <div className="mt-6 pt-4 border-t border-dark-400">
-          <h3 className="text-sm font-semibold mb-3">Keyboard Shortcuts</h3>
+          <h3 className="text-sm font-semibold mb-3">Keyboard shortcuts</h3>
           <div className="grid grid-cols-2 gap-2 text-sm text-gray-400">
             <div className="flex justify-between"><span>Toggle mic</span><kbd className="bg-dark-400 px-2 py-0.5 rounded text-xs">Ctrl+D</kbd></div>
             <div className="flex justify-between"><span>Toggle camera</span><kbd className="bg-dark-400 px-2 py-0.5 rounded text-xs">Ctrl+E</kbd></div>

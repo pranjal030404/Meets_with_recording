@@ -9,8 +9,8 @@ Socket.IO / mediasoup SFU as the web app, so accounts, meetings, chats and files
 |---|---|
 | Account | Sign up, sign in, email-verification resend, profile, custom status with expiry, sign out |
 | Meetings | Instant / scheduled meetings, join by code or invite link, pre-join screen (mic/camera preview), calendar, details, invite by email, accept/decline, cancel, end, history |
-| In meeting | Live audio/video through mediasoup, grid / pinned / spotlight / screen-share-viewing layouts, active speaker highlight, mic / camera / camera flip / speaker, hand raise, emoji reactions, meeting chat, participants, polls, Q&A, shared notes, timer, live captions, recording indicator, link-quality dot |
-| Host controls | Waiting room admit/deny, mute / camera-off / ask-to-unmute, remove, co-host promote/demote, spotlight, mute all, disable all video, lock meeting, end for everyone |
+| In meeting | Live audio/video through mediasoup, grid / pinned / spotlight / screen-share-viewing layouts, active speaker highlight, mic / camera / camera flip / speaker, hand raise, emoji reactions, meeting chat, participants, polls, Q&A, shared notes, timer, live captions, recording indicator, link-quality dot, **sharing the device screen (Android)**, whiteboard (pen, shapes, text, save as image), background blur and virtual background, pop-out window with mic and leave buttons when you leave the app (Android), call kept alive in the background, hide/mirror self view, breakout rooms (join, return, open and close), caption translation, live-stream view-only links, recording audio (Android) |
+| Host controls | Meeting permission settings, lower hands, attendance report, start/stop transcription, waiting room admit/deny, mute / camera-off / ask-to-unmute, remove, co-host promote/demote, spotlight, mute all, disable all video, lock meeting, end for everyone |
 | After a meeting | Recordings, transcripts (open as files), AI summary, action items -> tasks |
 | Chat | Direct + group chats, realtime, typing, unread counts, mute, reactions, edit / delete, threads, pin, save, create task from message, file & image attachments, huddle |
 | Teams | Create / join by code, invite by email, roles, channels (built-in + custom), team chat, tasks, meetings, calendar, files, delete / leave |
@@ -18,8 +18,10 @@ Socket.IO / mediasoup SFU as the web app, so accounts, meetings, chats and files
 | Files | Upload (personal / team), download & open, search, trash + restore, storage usage |
 | Other | Global search, notifications (live + mark read / clear), plans & billing, server-address setting |
 
-Not available on mobile: whiteboard, breakout-room management, speech translation, live-stream
-audience links, local recording and screen sharing from the device (the web app covers those).
+Not available on mobile: speaking into live transcription (the phone shows captions but does not
+produce them), and app audio in screen sharing. Recording is
+either sound only, or video of the phone screen with sound (your mic plus everyone you hear). Screen sharing and recording are Android only;
+iOS screen sharing still needs a Broadcast Upload Extension.
 
 ## Run it
 
@@ -31,16 +33,14 @@ flutter pub get
 flutter run            # pick a connected device / emulator
 ```
 
-### Point the app at your backend
+### Backend address
 
-Use **Server address** on the sign-in screen (or More -> Server address). Examples:
+The app is built for `https://meet.arthvex.co.in`; there is no server setting in the UI.
+To build against another backend, pass it at build time:
 
-| Where the app runs | Server address |
-|---|---|
-| Android emulator, backend on the same computer | `http://10.0.2.2:5000` (default) |
-| iOS simulator | `http://localhost:5000` |
-| Real phone on the same Wi-Fi | `http://<your-computer-LAN-IP>:5000` |
-| Production | `https://meet.your-domain.com` |
+```bash
+flutter run --dart-define=SERVER_URL=http://10.0.2.2:5000   # emulator, backend on this computer
+```
 
 ### Media (audio / video) needs the SFU to be reachable
 

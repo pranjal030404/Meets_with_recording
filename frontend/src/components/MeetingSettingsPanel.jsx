@@ -1,4 +1,4 @@
-import { X, Lock, Unlock, Users, MicOff, VideoOff, Circle, Shield, Check } from 'lucide-react'
+import { X, Lock, Unlock, Users, MicOff, VideoOff, Circle, Shield, Check, Hand } from 'lucide-react'
 import { getSocket } from '../lib/socket'
 import { useMeetingStore } from '../store/meetingStore'
 import toast from 'react-hot-toast'
@@ -79,7 +79,7 @@ export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canMan
             <Section title="Quick actions">
               <ActionButton onClick={handleMuteAll} icon={<MicOff className="w-4 h-4 text-red-400" />}>Mute all participants</ActionButton>
               <ActionButton onClick={handleDisableAllVideo} icon={<VideoOff className="w-4 h-4 text-red-400" />}>Turn off all cameras</ActionButton>
-              <ActionButton onClick={lowerAllHands} icon={<span className="text-sm">✋</span>}>Lower all hands</ActionButton>
+              <ActionButton onClick={lowerAllHands} icon={<Hand className="w-4 h-4" />}>Lower all hands</ActionButton>
               <ActionButton onClick={toggleMeetingLock}
                 icon={isMeetingLocked ? <Unlock className="w-4 h-4 text-green-400" /> : <Lock className="w-4 h-4 text-yellow-400" />}>
                 {isMeetingLocked ? 'Unlock meeting' : 'Lock meeting'}
@@ -97,7 +97,7 @@ export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canMan
                 description="Lets you restrict what contributors can enable."
                 enabled={settings.hostManagement}
                 onToggle={() => updateSetting('hostManagement', !settings.hostManagement)} />
-              <p className="px-4 pt-2 text-xs font-semibold text-gray-400 uppercase">Let contributors</p>
+              <p className="px-4 pt-2 text-xs font-semibold text-gray-400">Let contributors</p>
               {contributorToggle('allowScreenShare', 'Share their screen')}
               {contributorToggle('allowReactions', 'Send reactions')}
               {contributorToggle('allowMic', 'Turn on their microphone',
@@ -161,7 +161,7 @@ export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canMan
 function Section({ title, children }) {
   return (
     <div className="mx-3 my-3 rounded-2xl bg-dark-300/50 border border-white/[0.05] pb-2">
-      <h3 className="px-4 pt-3.5 pb-1 text-[11px] font-semibold text-primary-300/80 uppercase tracking-wider">{title}</h3>
+      <h3 className="px-4 pt-3.5 pb-1 text-[11px] font-semibold text-primary-300/80">{title}</h3>
       {children}
     </div>
   )

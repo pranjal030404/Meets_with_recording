@@ -26,7 +26,9 @@ Legend: ✅ available · 🟡 partial / has a known limit
 - 🟡 **On phones** browsers cannot capture the screen, so the share button shares the **rear camera** instead (documents, whiteboards)
 - ✅ Layouts: grid, speaker, pinned and spotlighted participant; self-view mirror / hide self; Picture-in-Picture
 - ✅ Speaking indicator, live mic-level ring, active-speaker highlight
-- ✅ Hand raise and emoji reactions
+- ✅ Hand raise and emoji reactions; the host can lower one hand or all of them
+- ✅ **Background blur and virtual background** (web and Android), processed on your own device
+- ✅ **Pop-out window**: opens by itself when you switch tabs in Chrome (menu item elsewhere); the Android app pops out when you leave it
 - ✅ Device settings: choose mic, camera, speaker; noise suppression, echo cancellation, auto-gain; video quality
 - ✅ Keyboard shortcuts (e.g. Ctrl+D mute, Ctrl+E camera) with a shortcuts help dialog
 - ✅ Meeting details, invite link copy, invite people by email, accept/decline/cancel
@@ -41,7 +43,7 @@ Legend: ✅ available · 🟡 partial / has a known limit
 ### In-meeting tools
 - ✅ **Meeting chat** (replies, emoji, file attachments, typing indicator)
 - ✅ **Polls** (live results, anonymous) and **Q&A** (upvotes, answers)
-- ✅ **Whiteboard** (freehand, shapes, text, real-time sync, export)
+- ✅ **Whiteboard** (freehand, line, rectangle, ellipse, text, eraser, real-time sync, save as PNG)
 - ✅ **Shared notes**
 - ✅ **Breakout rooms** (create, auto/manual assign, join, close all)
 - ✅ **Timer**
@@ -50,7 +52,7 @@ Legend: ✅ available · 🟡 partial / has a known limit
 - ✅ **Attendance report** download
 
 ### Recording, transcript & AI
-- ✅ Record the meeting (one mixed track with everyone's audio) and download
+- ✅ Record the meeting as video or audio only (one mixed track with everyone's audio) and download
 - ✅ **Automatic transcription** (local Whisper or API) with retry; export TXT / JSON / SRT / VTT
 - ✅ **AI meeting summary**: summary, key points, decisions, action items; cached and regenerable
 - ✅ Turn AI action items into **tasks** in one click

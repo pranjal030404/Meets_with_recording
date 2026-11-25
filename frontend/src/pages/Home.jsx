@@ -1,31 +1,40 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import {
-  Video,
-  Plus,
-  Calendar,
-  Link2,
-  User,
-  Clock,
-  Users,
-  Keyboard,
-  ShieldCheck,
-  MonitorPlay,
-  ArrowRight,
-  Mic,
-  Monitor,
-  MessageSquare,
-} from 'lucide-react'
-import { useAuthStore } from '../store/authStore'
+import { Video, Plus, Calendar, Link2, Users, MonitorPlay, ArrowRight } from 'lucide-react'
+import api from '../lib/api'
 import { useMeetingStore } from '../store/meetingStore'
 import AppShell from '../components/AppShell'
 import toast from 'react-hot-toast'
 
+const FEATURES = [
+  { icon: Video, title: 'HD video calls', text: 'Video and audio routed through an SFU media server.' },
+  { icon: Users, title: 'Team workspaces', text: 'Teams with members, roles and channels.' },
+  { icon: Calendar, title: 'Scheduling', text: 'Plan meetings with reminders and notifications.' },
+  { icon: MonitorPlay, title: 'Recording and transcripts', text: 'Record a session and download its transcript.' },
+]
+
+const when = (m) => new Date(m.scheduledAt || m.startedAt || m.createdAt)
+const STATUS = {
+  active: { label: 'Live', dot: 'bg-red-500' },
+  scheduled: { label: 'Scheduled', dot: 'bg-primary-400' },
+  ended: { label: 'Ended', dot: 'bg-gray-600' },
+  cancelled: { label: 'Cancelled', dot: 'bg-gray-600' },
+}
+const ORDER = { active: 0, scheduled: 1 }
+
 export default function Home() {
   const navigate = useNavigate()
-  const { user } = useAuthStore()
   const { createMeeting, isLoading } = useMeetingStore()
   const [joinCode, setJoinCode] = useState('')
+  const [meetings, setMeetings] = useState(null) // null = still loading
+  const [loadFailed, setLoadFailed] = useState(false)
+
+  // plain request so this list never toggles the store's isLoading used by "New meeting"
+  useEffect(() => {
+    api.get('/meetings')
+      .then((res) => setMeetings(res.data.data.meetings || []))
+      .catch(() => { setMeetings([]); setLoadFailed(true) })
+  }, [])
 
   const handleNewMeeting = async () => {
     const result = await createMeeting({ title: 'Instant Meeting' })
@@ -54,218 +63,101 @@ export default function Home() {
     navigate(`/join/${roomId}`)
   }
 
+  // live first, then upcoming (soonest first), then the most recent past ones
+  const list = [...(meetings || [])]
+    .sort((a, b) => {
+      const d = (ORDER[a.status] ?? 2) - (ORDER[b.status] ?? 2)
+      if (d) return d
+      return a.status === 'scheduled' ? when(a) - when(b) : when(b) - when(a)
+    })
+    .slice(0, 6)
+
   return (
     <AppShell wide>
-      {/* Main Content */}
-      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-14 lg:py-20">
-        <div className="grid lg:grid-cols-2 gap-14 items-center">
-          {/* Left: Actions */}
-          <div>
-<h1 className="text-4xl sm:text-5xl xl:text-[3.4rem] font-bold leading-[1.08] tracking-tight mb-5 font-display animate-fade-in-up stagger-2">
-              Meetings you can record,
-              transcribe and revisit
-            </h1>
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-8 lg:py-10">
+        <h1 className="page-title">Home</h1>
+        <p className="page-sub">{new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}</p>
 
-            <p className="text-gray-400 text-lg leading-relaxed mb-9 max-w-lg animate-fade-in-up stagger-3">
-              HD video with live chat, a whiteboard and screen sharing. Every meeting can be recorded, transcribed and summarized for your team.
-            </p>
-
-            <div className="flex flex-wrap gap-4 mb-9 animate-fade-in-up stagger-4">
-              <button
-                onClick={handleNewMeeting}
-                disabled={isLoading}
-                className="btn btn-primary px-7 py-3.5 text-base"
-              >
-                {isLoading ? (
-                  <span className="flex items-center gap-2">
-                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Creating...
-                  </span>
-                ) : (
-                  <>
-                    <Video className="w-5 h-5" />
-                    New Meeting
-                  </>
-                )}
+        <div className="mt-8 grid gap-6 lg:grid-cols-[2fr_3fr]">
+          <section className="card self-start p-6">
+            <h2 className="font-display text-lg font-semibold">Start or join</h2>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <button onClick={handleNewMeeting} disabled={isLoading} className="btn btn-primary btn-lg">
+                {isLoading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Video className="h-4 w-4" strokeWidth={1.5} />}
+                {isLoading ? 'Creating…' : 'New meeting'}
               </button>
-
-              <Link to="/join" className="btn btn-secondary px-7 py-3.5 text-base">
-                <Plus className="w-5 h-5" />
-                Join Meeting
+              <Link to="/join" className="btn btn-secondary btn-lg">
+                <Plus className="h-4 w-4" strokeWidth={1.5} />
+                Join meeting
               </Link>
             </div>
-
-            {/* Quick Join */}
-            <form onSubmit={handleJoinMeeting} className="flex gap-3 max-w-lg animate-fade-in-up stagger-5 group">
-              <div className="relative flex-1">
-                <Link2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 transition-colors group-focus-within:text-primary-400" />
-                <input
-                  type="text"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                  className="input pl-11 py-3.5"
-                  placeholder="Enter a meeting code or link"
-                />
+            <form onSubmit={handleJoinMeeting} className="mt-6 border-t border-white/[0.06] pt-6">
+              <label htmlFor="join-code" className="field-label">Meeting code or link</label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Link2 className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" strokeWidth={1.5} />
+                  <input id="join-code" type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} className="input min-h-11 pl-10" placeholder="abc123" />
+                </div>
+                <button type="submit" className="btn btn-secondary min-h-11">Join</button>
               </div>
-              <button type="submit" className="btn btn-secondary whitespace-nowrap px-6">
-                Join
-                <ArrowRight className="w-4 h-4" />
-              </button>
             </form>
-          </div>
+          </section>
 
-          {/* Right: Illustration */}
-          <div className="hidden lg:block animate-fade-in-up stagger-3">
-            <div className="relative">
-              {/* Glow behind card */}
-              <div className="absolute inset-6 bg-gradient-to-br from-primary-500/25 to-accent-500/20 blur-3xl rounded-full" />
-
-              <div className="relative glass rounded-3xl p-6 shadow-float">
-                <div className="flex items-center justify-between mb-5">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-red-400/70" />
-                    <span className="w-3 h-3 rounded-full bg-yellow-400/70" />
-                    <span className="w-3 h-3 rounded-full bg-green-400/70" />
-                  </div>
-                  <span className="flex items-center gap-2 text-xs font-semibold text-red-300 bg-red-500/10 border border-red-400/20 px-3 py-1 rounded-full">
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                    REC
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Simulated video tiles */}
-                  <DemoTile name="You" color="from-primary-500 to-primary-700" animation="animate-float" icon={<Mic className="w-4 h-4" />} active />
-                  <DemoTile name="Aisha" color="from-slate-600 to-slate-700" animation="animate-float-delayed" icon={<MessageSquare className="w-4 h-4" />} />
-                  <DemoTile name="Marcus" color="from-slate-500 to-slate-700" animation="animate-float-slow" icon={<Monitor className="w-4 h-4" />} />
-                  <DemoTile name="Sam" color="from-zinc-600 to-zinc-700" animation="animate-float" icon={<User className="w-4 h-4" />} />
-                </div>
-
-                {/* Mini control bar */}
-                <div className="mt-5 flex items-center justify-center gap-3 rounded-2xl bg-dark-300/80 border border-white/5 py-3">
-                  {[Mic, Video, Monitor, MessageSquare, Users].map((Icon, i) => (
-                    <span
-                      key={i}
-                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 ${
-                        i === 3
-                          ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-lg shadow-primary-500/30'
-                          : 'bg-dark-400/80 text-gray-300'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4" />
-                    </span>
-                  ))}
-                  <span className="w-9 h-9 rounded-full flex items-center justify-center bg-gradient-to-br from-red-500 to-red-600 text-white shadow-lg shadow-red-500/30 transition-transform duration-300 hover:scale-110">
-                    <Keyboard className="w-4 h-4 rotate-[135deg]" />
-                  </span>
-                </div>
-              </div>
+          <section className="card p-6">
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-lg font-semibold">Your meetings</h2>
+              <Link to="/history" className="inline-flex items-center gap-1.5 text-sm text-primary-300 hover:text-primary-200">
+                All meetings <ArrowRight className="h-4 w-4" strokeWidth={1.5} />
+              </Link>
             </div>
-          </div>
+            {meetings === null && <div className="skeleton mt-4 h-40 rounded-lg" aria-label="Loading meetings" />}
+            {meetings !== null && list.length === 0 && (
+              <p className="py-12 text-center text-sm text-gray-500">
+                {loadFailed ? 'Meetings could not be loaded' : 'No meetings yet. Start one and it shows up here'}
+              </p>
+            )}
+            {list.length > 0 && (
+              <ul className="mt-4 divide-y divide-white/[0.06]">
+                {list.map((m) => {
+                  const st = STATUS[m.status] || STATUS.ended
+                  const date = when(m)
+                  const row = (
+                    <>
+                      <time dateTime={date.toISOString()} className="timecode w-24 shrink-0">
+                        <span className="block text-gray-300">{date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                        {date.toLocaleDateString([], { day: 'numeric', month: 'short' })}
+                      </time>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-100">{m.title}</span>
+                      <span className="flex shrink-0 items-center gap-2 text-xs text-gray-400">
+                        <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
+                        {st.label}
+                      </span>
+                    </>
+                  )
+                  const cls = 'flex items-center gap-4 rounded-md px-2 py-3'
+                  return (
+                    <li key={m.id}>
+                      {m.status === 'active' || m.status === 'scheduled'
+                        ? <Link to={`/join/${m.roomId}`} className={`${cls} focus-ring transition-colors hover:bg-white/[0.04]`}>{row}</Link>
+                        : <div className={cls}>{row}</div>}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
         </div>
 
-        {/* Features */}
-        <div className="mt-24 lg:mt-32">
-          <div className="text-center mb-14 animate-fade-in-up">
-            <h2 className="text-3xl sm:text-4xl font-bold font-display tracking-tight">
-              Everything you need for{' '}
-              productive meetings
-            </h2>
-            <p className="text-gray-400 mt-4 max-w-xl mx-auto">
-              A complete collaboration suite designed for modern teams, classrooms, and everything in between.
-            </p>
-          </div>
-
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <FeatureCard
-              icon={<Video className="w-6 h-6" />}
-              title="HD Video Calls"
-              description="Crystal clear video and audio powered by an optimized SFU media stack."
-              gradient="from-primary-500/20 to-primary-700/10"
-              iconColor="text-primary-300"
-              className="animate-fade-in-up stagger-1"
-            />
-            <FeatureCard
-              icon={<Users className="w-6 h-6" />}
-              title="Team Workspaces"
-              description="Create teams, manage members and roles, and collaborate in channels."
-              gradient="from-emerald-500/20 to-teal-700/10"
-              iconColor="text-emerald-300"
-              className="animate-fade-in-up stagger-2"
-            />
-            <FeatureCard
-              icon={<Calendar className="w-6 h-6" />}
-              title="Meeting Scheduler"
-              description="Schedule meetings with reminders and in-app notifications."
-              gradient="from-fuchsia-500/20 to-purple-700/10"
-              iconColor="text-fuchsia-300"
-              className="animate-fade-in-up stagger-3"
-            />
-            <FeatureCard
-              icon={<MonitorPlay className="w-6 h-6" />}
-              title="Recording & Transcripts"
-              description="Record sessions and get automatic transcripts in multiple formats."
-              gradient="from-amber-500/20 to-orange-600/10"
-              iconColor="text-amber-300"
-              className="animate-fade-in-up stagger-4"
-            />
-          </div>
-
-          {/* Trust strip */}
-          <div className="mt-16 flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-sm text-gray-500 animate-fade-in stagger-5">
-            <span className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-primary-400" />
-              Authenticated rooms
-            </span>
-            <span className="flex items-center gap-2">
-              <Keyboard className="w-4 h-4 text-primary-400" />
-              Keyboard shortcuts built in
-            </span>
-            <span className="flex items-center gap-2">
-              <MonitorPlay className="w-4 h-4 text-primary-400" />
-              Screen sharing & whiteboard
-            </span>
-          </div>
-        </div>
-      </main>
+        <ul className="mt-12 grid gap-x-6 gap-y-8 border-t border-white/[0.08] pt-8 sm:grid-cols-2 lg:grid-cols-4">
+          {FEATURES.map(({ icon: Icon, title, text }) => (
+            <li key={title}>
+              <Icon className="h-[18px] w-[18px] text-gray-400" strokeWidth={1.5} />
+              <h3 className="mt-3 text-sm font-medium text-gray-100">{title}</h3>
+              <p className="mt-1 text-sm text-gray-400">{text}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
     </AppShell>
-  )
-}
-
-function DemoTile({ name, color, animation = '', icon, active = false }) {
-  return (
-    <div className={`aspect-video rounded-2xl bg-gradient-to-br from-dark-300 to-dark-400/60 border border-white/5 flex flex-col items-center justify-center gap-2 relative overflow-hidden ${animation}`}>
-      <div className={`w-14 h-14 rounded-full bg-gradient-to-br ${color} flex items-center justify-center shadow-lg`}>
-        <User className="w-7 h-7 text-white/90" />
-      </div>
-      <div className="absolute bottom-2.5 left-2.5 flex items-center gap-1.5">
-        <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-black/50 backdrop-blur-sm">{name}</span>
-        {active && (
-          <span className="w-5 h-5 rounded-md bg-black/50 backdrop-blur-sm flex items-center justify-center text-emerald-300">
-            {icon}
-          </span>
-        )}
-      </div>
-      {active && (
-        <span className="absolute inset-0 rounded-2xl ring-2 ring-emerald-400/70 speaking-border pointer-events-none" />
-      )}
-    </div>
-  )
-}
-
-function FeatureCard({ icon, title, description, gradient, iconColor, className = '' }) {
-  return (
-    <div className={`group relative bg-dark-200/70 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-6 transition-all duration-300 ease-out hover:-translate-y-1.5 hover:border-primary-500/30 hover:shadow-glow overflow-hidden ${className}`}>
-      {/* Hover gradient wash */}
-      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-2xl`} />
-
-      <div className="relative">
-        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br from-white/10 to-white/[0.03] border border-white/10 flex items-center justify-center ${iconColor} mb-4 transition-all duration-300 group-hover:scale-110 group-hover:-rotate-6 group-hover:border-white/20`}>
-          {icon}
-        </div>
-        <h3 className="text-lg font-semibold font-display mb-2 group-hover:text-white transition-colors">{title}</h3>
-        <p className="text-gray-400 text-sm leading-relaxed">{description}</p>
-      </div>
-    </div>
   )
 }

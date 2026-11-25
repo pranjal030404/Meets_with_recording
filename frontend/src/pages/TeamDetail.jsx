@@ -1,3 +1,4 @@
+import Avatar from '../components/Avatar';
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -133,7 +134,7 @@ const TeamDetail = () => {
     if (currentTeam?.inviteCode) {
       await navigator.clipboard.writeText(currentTeam.inviteCode);
       setCopiedCode(true);
-      toast.success('Invite code copied!');
+      toast.success('Invite code copied');
       setTimeout(() => setCopiedCode(false), 2000);
     }
   };
@@ -142,7 +143,7 @@ const TeamDetail = () => {
     if (window.confirm('Are you sure? The old invite code will no longer work.')) {
       try {
         await regenerateInviteCode(teamId);
-        toast.success('Invite code regenerated!');
+        toast.success('Invite code regenerated');
       } catch (error) {
         toast.error('Failed to regenerate code');
       }
@@ -201,13 +202,12 @@ const TeamDetail = () => {
 
   if (accessDenied) {
     return (
-      <div className="relative flex flex-col items-center justify-center h-screen bg-dark-100 aurora-bg">
-        <div className="blob -top-20 right-1/4 h-80 w-80 bg-red-500/10 animate-aurora" />
-        <div className="relative text-center animate-fade-in-up">
-          <div className="inline-flex w-20 h-20 rounded-3xl bg-red-500/10 border border-red-400/25 items-center justify-center mb-6 animate-float">
+      <div className="relative flex flex-col items-center justify-center h-screen bg-dark-100">
+        <div className="relative text-center">
+          <div className="inline-flex w-20 h-20 rounded-2xl bg-red-500/10 border border-red-400/25 items-center justify-center mb-6">
             <Shield className="w-9 h-9 text-red-400" />
           </div>
-          <h2 className="text-2xl font-bold font-display mb-2">Access Denied</h2>
+          <h2 className="text-2xl font-semibold font-display mb-2">Access denied</h2>
           <p className="text-gray-400 mb-8">You are not a member of this team</p>
           <button onClick={() => navigate('/teams')} className="btn btn-primary px-6 py-3">
             <ArrowLeft className="w-4 h-4" />
@@ -220,8 +220,7 @@ const TeamDetail = () => {
 
   if (!currentTeam) {
     return (
-      <div className="flex items-center justify-center h-screen bg-dark-100 aurora-bg">
-        <div className="blob w-96 h-96 bg-primary-600/20 animate-aurora -top-20" />
+      <div className="flex items-center justify-center h-screen bg-dark-100">
         <div className="relative w-12 h-12">
           <div className="absolute inset-0 rounded-full border-2 border-primary-500/20" />
           <div className="absolute inset-0 rounded-full border-2 border-primary-500 border-t-transparent animate-spin" />
@@ -284,23 +283,23 @@ const TeamDetail = () => {
   return (
     <div className="h-screen flex flex-col bg-dark-100">
       {/* Header */}
-      <div className="glass-strong border-b border-white/[0.06] px-4 sm:px-6 py-3.5 animate-fade-in-down relative z-20">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4 min-w-0">
+      <div className="glass-strong border-b border-white/[0.06] px-4 sm:px-6 py-3.5 relative z-20">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1 basis-56">
             <button
               onClick={() => navigate('/teams')}
-              className="group p-2.5 rounded-xl bg-dark-300/80 border border-white/[0.06] text-gray-400 hover:text-white hover:border-primary-500/30 transition-all duration-300 shrink-0"
+              className="group p-2.5 rounded-xl bg-dark-300/80 border border-white/[0.06] text-gray-400 hover:text-white hover:border-primary-500/30 transition-colors shrink-0"
               title="Back to teams"
             >
-              <ArrowLeft className="w-5 h-5 transition-transform duration-300 group-hover:-translate-x-0.5" />
+              <ArrowLeft className="w-5 h-5 transition-transform" />
             </button>
-            <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center shadow-lg shadow-primary-500/25 shrink-0`}>
-              <span className="text-lg font-bold text-white font-display">
+            <div className={`w-11 h-11 rounded-xl bg-dark-400 border border-white/10 flex items-center justify-center shrink-0`}>
+              <span className="text-lg font-semibold text-white font-display">
                 {currentTeam.name?.charAt(0).toUpperCase()}
               </span>
             </div>
             <div className="min-w-0">
-              <h1 className="text-xl font-bold font-display truncate">{currentTeam.name}</h1>
+              <h1 className="text-xl font-semibold font-display truncate">{currentTeam.name}</h1>
               <p className="text-sm text-gray-400 truncate">{currentTeam.description}</p>
             </div>
           </div>
@@ -308,7 +307,7 @@ const TeamDetail = () => {
             <div className="flex rounded-xl bg-dark-300/60 border border-white/[0.06] p-1">
               {[['chat', 'Chat', MessageSquare], ['tasks', 'Tasks', ListTodo], ['calendar', 'Calendar', CalendarDays]].map(([key, label, Icon]) => (
                 <button key={key} onClick={() => setView(key)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${view === key ? 'bg-primary-500/20 text-primary-200' : 'text-gray-400 hover:text-gray-200'}`}>
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${view === key ? 'bg-primary-500/20 text-primary-200' : 'text-gray-400 hover:text-gray-200'}`}>
                   <Icon className="w-4 h-4" /><span className="hidden sm:inline">{label}</span>
                 </button>
               ))}
@@ -321,7 +320,7 @@ const TeamDetail = () => {
             )}
             <button
               onClick={() => setShowMembers(!showMembers)}
-              className={`p-2.5 rounded-xl border transition-all duration-300 ${
+              className={`p-2.5 rounded-xl border transition-colors ${
                 showMembers
                   ? 'bg-primary-500/15 border-primary-500/30 text-primary-300'
                   : 'bg-dark-300/80 border-white/[0.06] text-gray-400 hover:text-white hover:border-primary-500/30'
@@ -333,7 +332,7 @@ const TeamDetail = () => {
             {isOwner && (
               <button
                 onClick={() => { setDeleteConfirm(''); setShowDelete(true); }}
-                className="p-2.5 rounded-xl border bg-dark-300/80 border-white/[0.06] text-gray-400 hover:text-red-300 hover:border-red-500/40 hover:bg-red-500/10 transition-all duration-300"
+                className="p-2.5 rounded-xl border bg-dark-300/80 border-white/[0.06] text-gray-400 hover:text-red-300 hover:border-red-500/40 hover:bg-red-500/10 transition-colors"
                 title="Delete team"
                 aria-label="Delete team"
               >
@@ -349,7 +348,7 @@ const TeamDetail = () => {
         <div className={`${view === 'chat' ? 'hidden md:block' : 'hidden'} w-60 bg-dark-200/60 border-r border-white/[0.05] overflow-y-auto animate-slide-in-left`}>
           <div className="p-3.5">
             <div className="flex items-center justify-between mb-2.5 px-2">
-              <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Channels</h3>
+              <h3 className="text-[11px] font-semibold text-gray-500">Channels</h3>
               {isOwnerOrAdmin && (
                 <button onClick={() => setShowChannelModal(true)} className="p-1 rounded-md text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-colors" title="Add channel" aria-label="Add channel">
                   <Plus className="w-4 h-4" />
@@ -360,13 +359,13 @@ const TeamDetail = () => {
               <div key={channel.id || channel._id} className="relative group/ch">
               <button
                 onClick={() => setActiveChannel(channelKey(channel))}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left mb-1 transition-all duration-200 group ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left mb-1 transition-colors group ${
                   activeChannel === channelKey(channel)
-                    ? 'bg-gradient-to-r from-primary-600/25 to-primary-600/5 text-primary-200 border border-primary-500/25'
+                    ? 'bg-white/[0.08] text-white border border-white/10'
                     : 'hover:bg-dark-300/80 text-gray-400 hover:text-white border border-transparent'
                 }`}
               >
-                <Hash className={`w-4 h-4 transition-transform duration-200 group-hover:scale-110 ${activeChannel === channelKey(channel) ? 'text-primary-400' : ''}`} />
+                <Hash className={`w-4 h-4 transition-transform ${activeChannel === channelKey(channel) ? 'text-primary-400' : ''}`} />
                 <span className="text-sm font-medium truncate">{channel.name}</span>
               </button>
               {isOwnerOrAdmin && channel.type === 'custom' && (
@@ -379,20 +378,20 @@ const TeamDetail = () => {
 
             {/* Invite code card at bottom of sidebar */}
             {isOwnerOrAdmin && currentTeam.inviteCode && (
-              <div className="mt-6 p-3.5 rounded-2xl bg-gradient-to-br from-primary-600/15 to-accent-600/10 border border-primary-500/25">
+              <div className="mt-6 p-3.5 rounded-2xl bg-primary-600/15 border border-primary-500/25">
                 <div className="flex items-center gap-1.5 mb-2">
                   <Sparkles className="w-3.5 h-3.5 text-primary-300" />
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Invite Code</p>
+                  <p className="text-[11px] font-semibold text-gray-400">Invite code</p>
                 </div>
                 <code className="block px-2.5 py-1.5 bg-dark-300/80 border border-white/[0.06] rounded-lg text-sm text-primary-200 font-mono mb-2.5">
                   {currentTeam.inviteCode}
                 </code>
                 <button
                   onClick={handleCopyInviteCode}
-                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-primary-500/20 hover:bg-primary-500/30 text-primary-200 text-xs font-semibold transition-all duration-200"
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-primary-500/20 hover:bg-primary-500/30 text-primary-200 text-xs font-semibold transition-colors"
                 >
                   {copiedCode ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copiedCode ? 'Copied!' : 'Copy Code'}
+                  {copiedCode ? 'Copied!' : 'Copy code'}
                 </button>
               </div>
             )}
@@ -421,7 +420,7 @@ const TeamDetail = () => {
             {activeChannel === 'meetings' && (
               <button onClick={handleShareMeetingLink} className="btn btn-primary text-sm">
                 <Video className="w-4 h-4" />
-                Schedule Meeting
+                Schedule meeting
               </button>
             )}
           </div>
@@ -429,25 +428,21 @@ const TeamDetail = () => {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
             {messages.length === 0 ? (
-              <div className="text-center text-gray-500 mt-16 animate-fade-in-up">
-                <div className="inline-flex w-16 h-16 rounded-2xl bg-dark-300/70 border border-white/[0.05] items-center justify-center mb-4 animate-float">
+              <div className="text-center text-gray-500 mt-16">
+                <div className="inline-flex w-16 h-16 rounded-2xl bg-dark-300/70 border border-white/[0.05] items-center justify-center mb-4">
                   <MessageSquare className="w-7 h-7 text-gray-600" />
                 </div>
                 <p className="font-medium">No messages yet</p>
-                <p className="text-sm mt-1 text-gray-600">Start the conversation!</p>
+                <p className="text-sm mt-1 text-gray-600">Start the conversation</p>
               </div>
             ) : (
               messages.map(msg => (
-                <div key={msg._id} className="flex gap-3 group animate-fade-in-up">
-                  <img
-                    src={msg.sender?.avatar}
-                    alt={msg.sender?.name}
-                    className="w-10 h-10 rounded-full ring-2 ring-white/[0.06] transition-transform duration-300 group-hover:scale-105"
-                  />
+                <div key={msg._id} className="flex gap-3 group">
+                  <Avatar user={msg.sender} size="md" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2">
                       <span className="font-semibold text-white text-sm">{msg.sender?.name}</span>
-                      <span className="text-xs text-gray-500">
+                      <span className="timecode">
                         {new Date(msg.createdAt).toLocaleTimeString()}
                       </span>
                     </div>
@@ -462,7 +457,7 @@ const TeamDetail = () => {
                       <p className="text-gray-300 mt-1 leading-relaxed">{msg.content}</p>
                     )}
                     {msg.type === 'meeting_link' && msg.meetingData && (
-                      <div className="mt-2.5 p-4 gradient-border rounded-xl max-w-md">
+                      <div className="mt-2.5 p-4 card max-w-md">
                         <div className="flex items-center gap-2 mb-1.5">
                           <Video className="w-4 h-4 text-primary-400" />
                           <span className="font-semibold text-white text-sm">{msg.meetingData.title}</span>
@@ -514,7 +509,7 @@ const TeamDetail = () => {
                   type="button"
                   onClick={pick}
                   disabled={isUploading}
-                  className="p-2.5 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-all disabled:opacity-50"
+                  className="p-2.5 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-colors disabled:opacity-50"
                   title="Attach a file"
                 >
                   <Paperclip className="w-5 h-5" />
@@ -555,9 +550,9 @@ const TeamDetail = () => {
 
               {/* Invite Code Section */}
               {isOwnerOrAdmin && currentTeam.inviteCode && (
-                <div className="mb-4 p-3.5 rounded-xl bg-gradient-to-br from-primary-600/15 to-accent-600/5 border border-primary-500/25">
+                <div className="mb-4 p-3.5 rounded-xl bg-primary-600/15 border border-primary-500/25">
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Invite Code</p>
+                    <p className="text-[11px] font-semibold text-gray-400">Invite code</p>
                     <button
                       onClick={handleRegenerateCode}
                       className="text-[11px] text-primary-400 hover:text-primary-300 transition"
@@ -572,11 +567,11 @@ const TeamDetail = () => {
                     </code>
                     <button
                       onClick={handleCopyInviteCode}
-                      className="p-2 hover:bg-primary-500/20 rounded-lg transition-all duration-200 hover:scale-110"
+                      className="p-2 hover:bg-primary-500/20 rounded-lg transition-colors"
                       title="Copy code"
                     >
                       {copiedCode ? (
-                        <Check className="w-4 h-4 text-green-400 animate-pop" />
+                        <Check className="w-4 h-4 text-green-400" />
                       ) : (
                         <Copy className="w-4 h-4 text-primary-400" />
                       )}
@@ -588,14 +583,10 @@ const TeamDetail = () => {
               {/* Members List */}
               <div className="space-y-1.5">
                 {teamMembers.map(member => (
-                  <div key={member.user._id} className="flex items-center justify-between p-2.5 hover:bg-dark-300/80 rounded-xl transition-all duration-200 group">
+                  <div key={member.user._id} className="flex items-center justify-between p-2.5 hover:bg-dark-300/80 rounded-xl transition-colors group">
                     <div className="flex items-center gap-2.5 flex-1 min-w-0">
                       <div className="relative shrink-0">
-                        <img
-                          src={member.user.avatar}
-                          alt={member.user.name}
-                          className="w-9 h-9 rounded-full ring-2 ring-white/[0.06] transition-transform duration-300 group-hover:scale-105"
-                        />
+                        <Avatar user={member.user} size="sm" />
                         {member.user.isOnline && (
                           <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-dark-200 rounded-full"></span>
                         )}
@@ -608,7 +599,7 @@ const TeamDetail = () => {
                     {isOwnerOrAdmin && member.role !== 'owner' && member.user._id !== user._id && (
                       <button
                         onClick={() => handleRemoveMember(member.user._id, member.user.name)}
-                        className="p-1.5 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
+                        className="p-1.5 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                         title="Remove member"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -626,10 +617,10 @@ const TeamDetail = () => {
       {showInviteModal && (
         <div className="modal-backdrop">
           <div className="modal-content">
-            <h2 className="text-2xl font-bold font-display mb-5">Invite Member</h2>
+            <h2 className="text-2xl font-semibold font-display mb-5">Invite member</h2>
             <form onSubmit={handleInviteMember}>
               <div className="mb-4 group">
-                <label className="block text-sm font-medium text-gray-300 mb-2 transition-colors group-focus-within:text-primary-300">Email Address</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2 transition-colors group-focus-within:text-primary-300">Email address</label>
                 <input
                   type="email"
                   value={inviteEmail}
@@ -657,7 +648,7 @@ const TeamDetail = () => {
                 </button>
                 <button type="submit" className="btn btn-primary flex-1">
                   <UserPlus className="w-4 h-4" />
-                  Send Invite
+                  Send invite
                 </button>
               </div>
             </form>
@@ -667,9 +658,9 @@ const TeamDetail = () => {
 
       {showChannelModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowChannelModal(false)} />
-          <form onSubmit={handleCreateChannel} className="relative glass-strong rounded-3xl border border-white/10 w-full max-w-md p-6 shadow-float">
-            <h3 className="text-lg font-bold font-display mb-4">Create channel</h3>
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowChannelModal(false)} />
+          <form onSubmit={handleCreateChannel} className="relative glass-strong rounded-2xl border border-white/10 w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold font-display mb-4">Create channel</h3>
             <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
             <div className="relative mb-4">
               <Hash className="w-4 h-4 text-gray-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -689,9 +680,9 @@ const TeamDetail = () => {
 
       {channelToDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setChannelToDelete(null)} />
-          <div className="relative glass-strong rounded-3xl border border-red-500/20 w-full max-w-sm p-6 shadow-float">
-            <h3 className="text-lg font-bold font-display mb-2">Delete #{channelToDelete.name}?</h3>
+          <div className="absolute inset-0 bg-black/60" onClick={() => setChannelToDelete(null)} />
+          <div className="relative glass-strong rounded-2xl border border-red-500/20 w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold font-display mb-2">Delete #{channelToDelete.name}?</h3>
             <p className="text-sm text-gray-400 mb-5">The channel is removed for everyone in the team.</p>
             <div className="flex gap-3">
               <button onClick={() => setChannelToDelete(null)} className="btn btn-secondary flex-1">Cancel</button>
@@ -703,11 +694,11 @@ const TeamDetail = () => {
 
       {showDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !deleting && setShowDelete(false)} />
-          <div className="relative glass-strong rounded-3xl border border-red-500/20 w-full max-w-md p-6 shadow-float">
+          <div className="absolute inset-0 bg-black/60" onClick={() => !deleting && setShowDelete(false)} />
+          <div className="relative glass-strong rounded-2xl border border-red-500/20 w-full max-w-md p-6">
             <div className="flex items-center gap-3 mb-3">
               <span className="w-10 h-10 rounded-xl bg-red-500/15 text-red-300 flex items-center justify-center"><AlertTriangle className="w-5 h-5" /></span>
-              <h3 className="text-lg font-bold font-display">Delete team</h3>
+              <h3 className="text-lg font-semibold font-display">Delete team</h3>
             </div>
             <p className="text-sm text-gray-400 mb-4">
               <span className="text-white font-medium">{currentTeam.name}</span> will be removed for all {teamMembers.length} members.

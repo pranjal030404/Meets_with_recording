@@ -61,6 +61,12 @@ const useNotificationStore = create((set, get) => ({
   },
 
   // Delete notification
+  // removes the ones already read (what the phone app calls "Clear all")
+  clearRead: async () => {
+    await api.delete('/notifications');
+    set(state => ({ notifications: state.notifications.filter(n => !n.isRead) }));
+  },
+
   deleteNotification: async (notificationId) => {
     try {
       await api.delete(`/notifications/${notificationId}`);

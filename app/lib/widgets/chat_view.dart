@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import '../core/api.dart';
@@ -137,8 +138,8 @@ class _ChatViewState extends State<ChatView> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text('Delete', style: TextStyle(color: Colors.red)),
+              leading: const Icon(Icons.delete_outline, color: AppTheme.overdue),
+              title: const Text('Delete', style: TextStyle(color: AppTheme.overdue)),
               onTap: () async {
                 Navigator.pop(ctx);
                 if (await confirm(context, 'Delete this message?', ok: 'Delete', danger: true)) guard(context, () => Api.instance.message('delete', id));
@@ -170,10 +171,10 @@ class _ChatViewState extends State<ChatView> {
             : error != null
                 ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Text(error!), TextButton(onPressed: _load, child: const Text('Retry'))]))
                 : msgs.isEmpty
-                    ? Center(child: Text('No messages yet. Say hello 👋', style: TextStyle(color: cs.outline)))
+                    ? Center(child: Text('No messages yet', style: TextStyle(color: cs.outline)))
                     : ListView.builder(
                         controller: _scroll,
-                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                         itemCount: msgs.length,
                         itemBuilder: (_, i) => _bubble(msgs[i], i > 0 ? msgs[i - 1] : null),
                       ),
@@ -205,7 +206,7 @@ class _ChatViewState extends State<ChatView> {
                 },
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             IconButton.filled(onPressed: _sending ? null : _send, icon: _sending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send)),
           ]),
         ),
@@ -237,14 +238,14 @@ class _ChatViewState extends State<ChatView> {
           margin: EdgeInsets.only(top: showName ? 8 : 2, bottom: 2),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * .78),
-          decoration: BoxDecoration(color: mine ? cs.primaryContainer : cs.surfaceContainerHighest, borderRadius: BorderRadius.circular(16)),
+          decoration: BoxDecoration(color: mine ? cs.primaryContainer : cs.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            if (showName) Text((sender['name'] ?? '').toString(), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: cs.primary)),
+            if (showName) Text((sender['name'] ?? '').toString(), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: cs.primary)),
             if (isImg)
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                   child: Image.network(Config.resolveUrl(m['fileUrl'])!, headers: FileService.authHeaders, height: 180, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image)),
                 ),
               )
@@ -253,7 +254,7 @@ class _ChatViewState extends State<ChatView> {
                 onTap: () => guard(context, () => FileService.openUrl(m['fileUrl'], (m['fileName'] ?? 'file').toString())),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.insert_drive_file_outlined),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   Flexible(child: Text((m['fileName'] ?? 'Attachment').toString(), style: const TextStyle(decoration: TextDecoration.underline))),
                 ]),
               ),

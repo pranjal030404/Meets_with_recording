@@ -18,7 +18,7 @@ const TABS = [
 
 export default function Search() {
   return (
-    <AppShell>
+    <AppShell wide>
       <SearchPage />
     </AppShell>
   )
@@ -69,31 +69,27 @@ function SearchPage() {
     : 0
 
   return (
-    <div className="relative max-w-4xl mx-auto px-4 sm:px-6 py-10 lg:py-14">
-      <h1 className="text-3xl font-bold font-display tracking-tight mb-2">Search</h1>
-      <p className="text-gray-500 mb-8">Messages, people, teams, meetings, files and tasks — all in one place.</p>
+    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8 lg:py-10">
+      <h1 className="page-title">Search</h1>
+      <p className="page-sub mb-6">Messages, people, teams, meetings, files and tasks</p>
 
       <form onSubmit={submit} className="relative mb-5">
         <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Search everything..."
+          placeholder="Search"
           className="input !py-4 !pl-12 !rounded-2xl text-base"
           autoFocus
         />
       </form>
 
-      <div className="flex flex-wrap gap-2 mb-8">
+      <div className="tabs mb-6">
         {TABS.map(t => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all border ${
-              type === t.key
-                ? 'bg-primary-500/20 text-primary-200 border-primary-500/40'
-                : 'bg-white/[0.03] text-gray-400 border-white/[0.06] hover:text-gray-200'
-            }`}
+            className={`tab ${type === t.key ? 'tab-active' : ''}`}
           >
             {t.label}
           </button>
@@ -134,7 +130,7 @@ function SearchPage() {
 function Section({ title, icon: Icon, items, render, onOpen }) {
   return (
     <div>
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-400 mb-3">
         <Icon className="w-4 h-4" /> {title} <span className="text-gray-600">({items.length})</span>
       </h2>
       <div className="space-y-2">
@@ -144,7 +140,7 @@ function Section({ title, icon: Icon, items, render, onOpen }) {
             <button
               key={item.id}
               onClick={() => link && onOpen(link)}
-              className="w-full text-left rounded-2xl bg-dark-200/50 border border-white/[0.06] px-4 py-3 hover:border-primary-500/30 transition-all"
+              className="w-full text-left rounded-2xl bg-dark-200/50 border border-white/[0.06] px-4 py-3 hover:border-primary-500/30 transition-colors"
             >
               <p className="text-sm font-medium text-gray-200">{t}</p>
               {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
@@ -159,7 +155,7 @@ function Section({ title, icon: Icon, items, render, onOpen }) {
 function MessageResults({ items, onOpen }) {
   return (
     <div>
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-400 mb-3">
         <MessageSquare className="w-4 h-4" /> Messages <span className="text-gray-600">({items.length})</span>
       </h2>
       <div className="space-y-2">
@@ -167,13 +163,13 @@ function MessageResults({ items, onOpen }) {
           <button
             key={m.id}
             onClick={() => m.link && onOpen(m.link)}
-            className="w-full text-left rounded-2xl bg-dark-200/50 border border-white/[0.06] px-4 py-3 hover:border-primary-500/30 transition-all"
+            className="w-full text-left rounded-2xl bg-dark-200/50 border border-white/[0.06] px-4 py-3 hover:border-primary-500/30 transition-colors"
           >
             <div className="flex items-center gap-2 mb-1">
               {m.sender?.avatar ? (
                 <img src={m.sender.avatar} className="w-5 h-5 rounded-full" alt="" />
               ) : (
-                <span className="w-5 h-5 rounded-full bg-gradient-to-br from-primary-500 to-accent-600" />
+                <span className="w-5 h-5 rounded-full bg-primary-500" />
               )}
               <span className="text-sm font-medium text-gray-200">{m.sender?.name || 'Unknown'}</span>
               <span className="text-[11px] text-gray-600">{new Date(m.createdAt).toLocaleString()}</span>
@@ -189,7 +185,7 @@ function MessageResults({ items, onOpen }) {
 function PeopleResults({ items }) {
   return (
     <div>
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-400 mb-3">
         <Users className="w-4 h-4" /> People <span className="text-gray-600">({items.length})</span>
       </h2>
       <div className="grid sm:grid-cols-2 gap-2">
@@ -199,7 +195,7 @@ function PeopleResults({ items }) {
               {u.avatar ? (
                 <img src={u.avatar} className="w-10 h-10 rounded-full" alt={u.name} />
               ) : (
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold text-white ${u.isOnline ? 'bg-gradient-to-br from-primary-500 to-accent-600' : 'bg-dark-300'}`}>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-semibold text-white ${u.isOnline ? 'bg-primary-500' : 'bg-dark-300'}`}>
                   {u.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                 </div>
               )}

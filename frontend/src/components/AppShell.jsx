@@ -136,13 +136,17 @@ export default function AppShell({ children, wide = false }) {
     navigate('/')
   }
 
-  const sidebar = (
+  const sidebar = (withBell) => (
     <div className="flex flex-col h-full">
       {/* Brand */}
-      <Link to="/app" className="flex items-center gap-3 px-5 py-5 group" onClick={() => setSidebarOpen(false)}>
-        <BrandMark />
-        <span className="text-lg font-bold font-display tracking-tight">{branding.appName}</span>
-      </Link>
+      <div className="flex items-center justify-between px-4 py-4">
+        <Link to="/app" className="flex items-center gap-3" onClick={() => setSidebarOpen(false)}>
+          <BrandMark size="sm" />
+          <span className="font-display text-lg font-semibold">{branding.appName}</span>
+        </Link>
+        {/* the bell lives here so it never sits on top of page buttons */}
+        {withBell && <NotificationBell placement="sidebar" />}
+      </div>
 
       {/* Search shortcut */}
       <div className="px-4 pb-3">
@@ -174,7 +178,7 @@ export default function AppShell({ children, wide = false }) {
               <item.icon className={`w-[18px] h-[18px] ${active ? 'text-gray-100' : 'text-gray-500 group-hover:text-gray-300'}`} />
               {item.label}
               {item.badge === 'unread' && totalUnread > 0 && (
-                <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center">
+                <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold flex items-center justify-center">
                   {totalUnread > 99 ? '99+' : totalUnread}
                 </span>
               )}
@@ -186,7 +190,7 @@ export default function AppShell({ children, wide = false }) {
       {/* User + status */}
       <div className="p-3 border-t border-white/[0.06] relative" ref={statusRef}>
         {statusOpen && (
-          <div className="absolute bottom-full left-3 right-3 mb-2 lg:bottom-3 lg:left-full lg:right-auto lg:mb-0 lg:ml-3 lg:w-80 glass-strong rounded-2xl border border-white/10 shadow-float z-50 animate-fade-in">
+          <div className="absolute bottom-full left-3 right-3 mb-2 lg:bottom-3 lg:left-full lg:right-auto lg:mb-0 lg:ml-3 lg:w-80 glass-strong rounded-2xl border border-white/10 z-50">
             {/* who am I + edit profile */}
             <div className="flex items-center gap-3 p-3 border-b border-white/[0.06]">
               <Avatar user={user} size="md" />
@@ -204,7 +208,7 @@ export default function AppShell({ children, wide = false }) {
             </div>
 
             <div className="p-3">
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Set status</p>
+              <p className="text-xs font-medium text-gray-500 mb-2">Set status</p>
               <div className="grid grid-cols-2 gap-1.5">
                 {STATUS_PRESETS.map(preset => {
                   const on = myStatus?.customStatus === preset.text
@@ -216,7 +220,7 @@ export default function AppShell({ children, wide = false }) {
                         on ? 'bg-primary-500/15 border-primary-500/40 text-primary-100' : 'border-white/[0.06] bg-white/[0.02] text-gray-300 hover:bg-white/[0.07]'
                       }`}
                     >
-                      <span className="text-base leading-none">{preset.emoji}</span>
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${TONE_DOT[preset.tone]}`} />
                       <span className="truncate">{preset.text}</span>
                     </button>
                   )
@@ -297,7 +301,7 @@ export default function AppShell({ children, wide = false }) {
           </button>
           <button
             onClick={handleLogout}
-            className="p-2 rounded-xl text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-all"
+            className="p-2 rounded-xl text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-colors"
             title="Logout"
           >
             <LogOut className="w-[18px] h-[18px]" />
@@ -308,25 +312,22 @@ export default function AppShell({ children, wide = false }) {
   )
 
   return (
-    <div className="min-h-screen bg-dark-100 aurora-bg noise">
-      <div className="blob -top-40 left-1/4 h-[30rem] w-[30rem] bg-primary-600/20 animate-aurora" />
-      <div className="blob top-1/3 -right-32 h-96 w-96 bg-accent-600/15 animate-aurora-slow" />
-      <div className="blob bottom-0 -left-24 h-80 w-80 bg-cyan-500/10 animate-aurora" />
+    <div className="min-h-screen bg-dark-100">
 
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex fixed inset-y-0 left-0 w-64 flex-col z-40 glass-strong border-r border-white/[0.06]">
-        {sidebar}
+        {sidebar(true)}
       </aside>
 
       {/* Mobile sidebar */}
       {sidebarOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
+          <div className="absolute inset-0 bg-black/60" onClick={() => setSidebarOpen(false)} />
           <aside className="relative w-72 flex-col glass-strong border-r border-white/[0.06] flex">
             <button onClick={() => setSidebarOpen(false)} className="absolute top-4 right-4 p-1.5 text-gray-400 hover:text-white">
               <X className="w-5 h-5" />
             </button>
-            {sidebar}
+            {sidebar(false)}
           </aside>
         </div>
       )}
@@ -338,16 +339,13 @@ export default function AppShell({ children, wide = false }) {
         </button>
         <Link to="/app" className="flex items-center gap-2">
           <BrandMark size="sm" />
-          <span className="font-bold font-display">{branding.appName}</span>
+          <span className="font-semibold font-display">{branding.appName}</span>
         </Link>
         <NotificationBell />
       </div>
 
       {/* Content */}
       <main className={`lg:ml-64 relative ${wide ? '' : 'max-w-6xl'}`}>
-        <div className="hidden lg:block absolute top-4 right-6 z-30">
-          <NotificationBell />
-        </div>
         {children}
       </main>
 

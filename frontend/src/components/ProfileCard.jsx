@@ -32,9 +32,9 @@ export default function ProfileCard({ userId, initial, onClose, onMessage }) {
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative glass-strong rounded-3xl border border-white/10 w-full max-w-sm shadow-float overflow-hidden">
-        <div className="h-20 bg-gradient-to-r from-primary-600/60 via-accent-600/40 to-primary-500/30" />
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative glass-strong rounded-2xl border border-white/10 w-full max-w-sm overflow-hidden">
+        <div className="h-20 bg-primary-600/60" />
         <button onClick={onClose} className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/30 text-gray-200 hover:bg-black/50" aria-label="Close"><X className="w-4 h-4" /></button>
 
         {!u && !error && <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-gray-500" /></div>}
@@ -43,7 +43,7 @@ export default function ProfileCard({ userId, initial, onClose, onMessage }) {
         {u && (
           <div className="px-6 pb-6 -mt-10">
             <Avatar user={u} size="2xl" online={online} ring className="mb-3" />
-            <h3 className="text-xl font-bold font-display">{u.name}</h3>
+            <h3 className="text-xl font-semibold font-display">{u.name}</h3>
             {(u.title || u.department) && <p className="text-sm text-gray-400">{[u.title, u.department].filter(Boolean).join(' · ')}</p>}
             <p className="text-xs text-gray-500 mt-1">{online ? 'Active now' : u.lastSeen ? `Last seen ${new Date(u.lastSeen).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'Offline'}</p>
 

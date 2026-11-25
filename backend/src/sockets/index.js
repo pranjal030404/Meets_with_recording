@@ -92,6 +92,10 @@ const scheduleRoomClear = (roomId) => {
   roomClearTimers.set(roomId, t);
 };
 
+// Whiteboard strokes per socket room, replayed to anyone who opens the board later
+const roomBoards = new Map();
+const MAX_BOARD_STROKES = 20000;
+
 const clearRoomTools = (roomId) => {
   cancelRoomClear(roomId);
   restoredRooms.delete(roomId);
@@ -100,6 +104,7 @@ const clearRoomTools = (roomId) => {
   cancelTranscriptCheckpoint(roomId);
   if (!parseBreakoutRoomId(roomId)) persistLiveTranscript(roomId, roomTranscripts.get(roomId));
   meetingNotes.delete(roomId);
+  roomBoards.delete(roomId);
   roomTimers.delete(roomId);
   roomTranscription.delete(roomId);
   roomTranscripts.delete(roomId);
@@ -353,6 +358,10 @@ export const initializeSocketHandlers = (io) => {
         if (existingProducers.length > 0) {
           socket.emit('mediasoup:existingProducers', { producers: existingProducers });
         }
+        // A share that started before this person joined: the layout switches on this event, not on the track
+        for (const p of existingProducers.filter((x) => x.mediaType === 'screen' && x.userId !== socket.user.id)) {
+          socket.emit('media:screen-share', { socketId: p.socketId, userId: p.userId, userName: p.userName, isScreenSharing: true });
+        }
 
         // The client publishes its tracks BEFORE room:join (so the SFU is ready), at which point
         // socket.roomId wasn't set and 'mediasoup:newProducer' went nowhere. Announce them now, otherwise
@@ -422,7 +431,8 @@ export const initializeSocketHandlers = (io) => {
       return ownershipGuard(roomId);
     };
 
-    socket.on('mediasoup:getRouterRtpCapabilities', async ({ roomId }, callback) => {
+    // Replies are optional: a client that emits without an ack (or without data) must not crash the process
+    socket.on('mediasoup:getRouterRtpCapabilities', async ({ roomId } = {}, callback = () => {}) => {
       try {
         const gate = await mediaGate(roomId);
         if (gate?.redirect) return callback({ success: false, redirect: gate.redirect });
@@ -435,7 +445,7 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('mediasoup:createWebRtcTransport', async ({ roomId, direction }, callback) => {
+    socket.on('mediasoup:createWebRtcTransport', async ({ roomId, direction } = {}, callback = () => {}) => {
       try {
         const gate = await mediaGate(roomId);
         if (gate?.redirect) return callback({ success: false, redirect: gate.redirect });
@@ -460,7 +470,7 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('mediasoup:restartIce', async ({ transportId }, callback) => {
+    socket.on('mediasoup:restartIce', async ({ transportId } = {}, callback = () => {}) => {
       try {
         // Only the owner of a transport may restart it
         const mine = userTransports.get(socket.id) || {};
@@ -475,7 +485,7 @@ export const initializeSocketHandlers = (io) => {
 
     const ownsTransport = (transportId) => { const m = userTransports.get(socket.id) || {}; return transportId === m.send || transportId === m.recv; };
 
-    socket.on('mediasoup:connectTransport', async ({ transportId, dtlsParameters }, callback) => {
+    socket.on('mediasoup:connectTransport', async ({ transportId, dtlsParameters } = {}, callback = () => {}) => {
       try {
         if (!ownsTransport(transportId)) throw new Error('Not your transport');
         await mediasoupService.connectTransport(transportId, dtlsParameters);
@@ -486,7 +496,7 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('mediasoup:produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
+    socket.on('mediasoup:produce', async ({ transportId, kind, rtpParameters, appData } = {}, callback = () => {}) => {
       try {
         if (!ownsTransport(transportId)) throw new Error('Not your transport');
         if (roomWebinar.get(socket.roomId) && !isManagerRole(roomParticipants.get(socket.roomId)?.get(socket.user.id)?.role)) {
@@ -529,7 +539,7 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('mediasoup:consume', async ({ roomId, producerId, rtpCapabilities, priority }, callback) => {
+    socket.on('mediasoup:consume', async ({ roomId, producerId, rtpCapabilities, priority } = {}, callback = () => {}) => {
       try {
         // Only people actually in the room (not waiting, not denied) may receive its media
         if (!socket.rooms.has(roomId)) return callback({ success: false, error: 'Not in this room' });
@@ -577,7 +587,7 @@ export const initializeSocketHandlers = (io) => {
 
     const ownsProducer = (producerId) => Object.values(userProducers.get(socket.id) || {}).includes(producerId);
 
-    socket.on('mediasoup:resumeConsumer', async ({ consumerId }, callback) => {
+    socket.on('mediasoup:resumeConsumer', async ({ consumerId } = {}, callback = () => {}) => {
       try {
         if (!userConsumers.get(socket.id)?.has(consumerId)) throw new Error('Not your consumer');
         await mediasoupService.resumeConsumer(consumerId);
@@ -589,7 +599,7 @@ export const initializeSocketHandlers = (io) => {
     });
 
     // Drop a subscription (tile scrolled away / over the video budget) - frees SFU CPU + egress
-    socket.on('mediasoup:closeConsumer', ({ consumerId }, callback) => {
+    socket.on('mediasoup:closeConsumer', ({ consumerId } = {}, callback = () => {}) => {
       try {
         if (!userConsumers.get(socket.id)?.has(consumerId)) throw new Error('Not your consumer');
         mediasoupService.closeConsumer(consumerId);
@@ -599,7 +609,7 @@ export const initializeSocketHandlers = (io) => {
     });
 
     // Thumbnails ask for the low simulcast layer; pinned/speaker ask for high
-    socket.on('mediasoup:setConsumerLayers', async ({ consumerId, spatialLayer, temporalLayer }, callback) => {
+    socket.on('mediasoup:setConsumerLayers', async ({ consumerId, spatialLayer, temporalLayer } = {}, callback = () => {}) => {
       try {
         if (!userConsumers.get(socket.id)?.has(consumerId)) throw new Error('Not your consumer');
         await mediasoupService.setConsumerLayers(consumerId, spatialLayer, temporalLayer);
@@ -607,7 +617,7 @@ export const initializeSocketHandlers = (io) => {
       } catch (error) { callback?.({ success: false, error: error.message }); }
     });
 
-    socket.on('mediasoup:pauseProducer', async ({ producerId }, callback) => {
+    socket.on('mediasoup:pauseProducer', async ({ producerId } = {}, callback = () => {}) => {
       try {
         if (!ownsProducer(producerId)) throw new Error('Not your producer');
         await mediasoupService.pauseProducer(producerId);
@@ -626,7 +636,7 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('mediasoup:resumeProducer', async ({ producerId }, callback) => {
+    socket.on('mediasoup:resumeProducer', async ({ producerId } = {}, callback = () => {}) => {
       try {
         if (!ownsProducer(producerId)) throw new Error('Not your producer');
         await mediasoupService.resumeProducer(producerId);
@@ -645,7 +655,7 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('mediasoup:closeProducer', ({ producerId }, callback) => {
+    socket.on('mediasoup:closeProducer', ({ producerId } = {}, callback = () => {}) => {
       try {
         if (!ownsProducer(producerId)) throw new Error('Not your producer');
         mediasoupService.closeProducer(producerId);
@@ -809,6 +819,19 @@ export const initializeSocketHandlers = (io) => {
           socket.emit('error', { message: 'Your role does not allow sending messages' });
           return;
         }
+        // Breakout rooms have no meeting row of their own: their chat is relayed to the room and not saved
+        if (parseBreakoutRoomId(roomId)) {
+          const text = (content || '').trim();
+          if (!socket.rooms.has(roomId) || !text) return;
+          const id = `br-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          io.to(roomId).emit('chat:message', {
+            id, _id: id, content: text, type: 'text', senderId: socket.user.id,
+            sender: { id: socket.user.id, name: socket.user.name, avatar: socket.user.avatar },
+            createdAt: new Date().toISOString()
+          });
+          return;
+        }
+
         const meeting = await Meeting.findOne({ where: { roomId } });
 
         if (!meeting) {
@@ -922,6 +945,20 @@ export const initializeSocketHandlers = (io) => {
         userName: socket.user.name,
         isRaised
       });
+    });
+
+    // Host lowers one person's hand, or everyone's. Each client lowers its own and announces it as usual.
+    socket.on('host:lower-hand', async ({ roomId, targetSocketId } = {}) => {
+      try {
+        if (!socket.rooms.has(roomId)) return;
+        const meeting = await loadRoomMeeting(roomId);
+        if (!meeting || !canManageMeeting(meeting, socket.user.id)) return;
+        // only someone who is actually in this room can be targeted
+        if (targetSocketId && !io.sockets.adapter.rooms.get(roomId)?.has(targetSocketId)) return;
+        socket.to(targetSocketId || roomId).emit('host:lower-hand');
+      } catch (error) {
+        console.error('Host lower hand error:', error);
+      }
     });
 
     socket.on('reaction:emoji', async ({ roomId, emoji }) => {
@@ -1260,13 +1297,30 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    socket.on('whiteboard:draw', async ({ roomId, x0, y0, x1, y1, color, width, tool }) => {
+    socket.on('whiteboard:draw', async ({ roomId, x0, y0, x1, y1, color, width, tool, text }) => {
+      if (!socket.rooms.has(roomId)) return;
       if (await isBlocked(roomId, socket.user.id, 'allowAddOns')) return;
-      socket.to(roomId).emit('whiteboard:draw', { x0, y0, x1, y1, color, width, tool });
+      const stroke = { x0, y0, x1, y1, color, width, tool };
+      if (tool === 'text') {
+        if (typeof text !== 'string' || !text.trim()) return;
+        stroke.text = text.slice(0, 200);
+      }
+      const board = roomBoards.get(roomId) || [];
+      board.push(stroke);
+      if (board.length > MAX_BOARD_STROKES) board.shift();
+      roomBoards.set(roomId, board);
+      socket.to(roomId).emit('whiteboard:draw', stroke);
+    });
+
+    socket.on('whiteboard:request', ({ roomId } = {}) => {
+      if (!socket.rooms.has(roomId)) return;
+      socket.emit('whiteboard:history', { strokes: roomBoards.get(roomId) || [] });
     });
 
     socket.on('whiteboard:clear', async ({ roomId }) => {
+      if (!socket.rooms.has(roomId)) return;
       if (await isBlocked(roomId, socket.user.id, 'allowAddOns')) return;
+      roomBoards.delete(roomId);
       socket.to(roomId).emit('whiteboard:clear');
     });
 
@@ -1326,7 +1380,7 @@ export const initializeSocketHandlers = (io) => {
     // WORKSPACE CHAT (DMs & group conversations)
     // =============================================
 
-    socket.on('conversation:join', async ({ conversationId }, callback) => {
+    socket.on('conversation:join', async ({ conversationId } = {}, callback = () => {}) => {
       try {
         const membership = await ConversationMember.findOne({
           where: { conversationId, userId: socket.user.id }

@@ -92,7 +92,7 @@ export default function EmojiPicker({ onPick, onClose, className = '', closeOnPi
     <div
       ref={ref}
       onClick={(e) => e.stopPropagation()}
-      className={`absolute z-50 w-[19rem] glass-strong rounded-2xl border border-white/10 shadow-float overflow-hidden ${className}`}
+      className={`absolute z-50 w-[19rem] glass-strong rounded-2xl border border-white/10 overflow-hidden ${className}`}
     >
       <div className="p-2.5 pb-1.5">
         <div className="relative">
@@ -124,7 +124,7 @@ export default function EmojiPicker({ onPick, onClose, className = '', closeOnPi
       <div className="h-56 overflow-y-auto p-2">
         {!results && recent.length > 0 && (
           <>
-            <p className="px-1 pb-1 text-[10px] uppercase tracking-wide text-gray-500 flex items-center gap-1"><Clock className="w-3 h-3" /> Recent</p>
+            <p className="px-1 pb-1 text-[10px] text-gray-500 flex items-center gap-1"><Clock className="w-3 h-3" /> Recent</p>
             <div className="grid grid-cols-8 gap-0.5 mb-2">
               {recent.map(e => <EmojiBtn key={`r${e}`} e={e} onClick={pick} />)}
             </div>
@@ -143,7 +143,7 @@ export default function EmojiPicker({ onPick, onClose, className = '', closeOnPi
 }
 
 const EmojiBtn = ({ e, onClick }) => (
-  <button type="button" onClick={() => onClick(e)} className="w-8 h-8 rounded-lg text-xl leading-none hover:bg-white/10 hover:scale-110 transition-transform">
+  <button type="button" onClick={() => onClick(e)} className="w-8 h-8 rounded-lg text-xl leading-none hover:bg-white/10 transition-transform">
     {e}
   </button>
 )

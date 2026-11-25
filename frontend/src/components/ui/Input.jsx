@@ -32,7 +32,7 @@ const Input = forwardRef(({
         />
       </div>
       {error && (
-        <p className="mt-1.5 text-sm text-red-400 animate-fade-in">{error}</p>
+        <p className="mt-1.5 text-sm text-red-400">{error}</p>
       )}
     </div>
   )
@@ -57,7 +57,7 @@ export function Textarea({ label, error, className = '', ...props }) {
         {...props}
       />
       {error && (
-        <p className="mt-1.5 text-sm text-red-400 animate-fade-in">{error}</p>
+        <p className="mt-1.5 text-sm text-red-400">{error}</p>
       )}
     </div>
   )
@@ -82,7 +82,7 @@ export function Select({ label, error, children, className = '', ...props }) {
         {children}
       </select>
       {error && (
-        <p className="mt-1.5 text-sm text-red-400 animate-fade-in">{error}</p>
+        <p className="mt-1.5 text-sm text-red-400">{error}</p>
       )}
     </div>
   )

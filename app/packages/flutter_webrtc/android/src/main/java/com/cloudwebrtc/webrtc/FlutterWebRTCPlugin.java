@@ -30,6 +30,7 @@ import io.flutter.view.TextureRegistry;
 public class FlutterWebRTCPlugin implements FlutterPlugin, ActivityAware, EventChannel.StreamHandler {
 
     static public final String TAG = "FlutterWebRTCPlugin";
+    static FlutterWebRTCPlugin sharedSingleton;
     private static Application application;
 
     private MethodChannel methodChannel;
@@ -85,6 +86,7 @@ public class FlutterWebRTCPlugin implements FlutterPlugin, ActivityAware, EventC
 
     private void startListening(final Context context, BinaryMessenger messenger,
                                 TextureRegistry textureRegistry) {
+        sharedSingleton = this;
         AudioSwitchManager.instance = new AudioSwitchManager(context);
         methodCallHandler = new MethodCallHandlerImpl(context, messenger, textureRegistry);
         methodChannel = new MethodChannel(messenger, "FlutterWebRTC.Method");

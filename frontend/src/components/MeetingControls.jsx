@@ -24,11 +24,13 @@ import {
   Download,
   StickyNote,
   EyeOff,
-  Shapes
+  Shapes,
+  Image
 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useMeetingStore } from '../store/meetingStore'
 import { REACTION_EMOJIS } from './EmojiReactions'
+import { popOutSupported } from '../lib/popOut'
 
 export default function MeetingControls({
   isMuted,
@@ -48,6 +50,8 @@ export default function MeetingControls({
   onToggleVideo,
   onToggleScreenShare,
   onToggleRecording,
+  onRecordAudio,
+  onOpenBackground,
   onToggleChat,
   onToggleParticipants,
   onToggleTools,
@@ -90,7 +94,6 @@ export default function MeetingControls({
 
   return (
     <div className="glass-strong border-t border-white/[0.06] px-2 sm:px-4 py-2 sm:py-3 relative z-30">
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-400/20 to-transparent" />
       <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-3">
         {/* Mute */}
         <div className="tooltip-host" data-tooltip={isMuted ? 'Unmute (Ctrl+D)' : 'Mute (Ctrl+D)'}>
@@ -131,7 +134,7 @@ export default function MeetingControls({
             active={isHandRaised}
             activeColor="yellow"
             onClick={onToggleHandRaise}
-            icon={<Hand className={`w-5 h-5 ${isHandRaised ? 'animate-bounce-hand' : ''}`} />}
+            icon={<Hand className={`w-5 h-5 ${isHandRaised ? '' : ''}`} />}
             label={isHandRaised ? 'Lower hand' : 'Raise hand'}
             badge={handRaisedCount > 0 ? handRaisedCount : null}
           />
@@ -147,10 +150,10 @@ export default function MeetingControls({
             label="Reactions"
           />
           {showReactionPicker && (
-            <div className="absolute bottom-full mb-2 sm:mb-3 left-1/2 -translate-x-1/2 max-w-[calc(100vw-1rem)] flex-wrap justify-center glass-strong rounded-2xl shadow-float p-2.5 flex gap-1 z-50 animate-slide-up border border-white/10">
+            <div className="absolute bottom-full mb-2 sm:mb-3 left-1/2 -translate-x-1/2 max-w-[calc(100vw-1rem)] flex-wrap justify-center glass-strong rounded-2xl p-2.5 flex gap-1 z-50 animate-slide-up border border-white/10">
               {REACTION_EMOJIS.map((emoji, i) => (
                 <button key={emoji} onClick={() => { onSendReaction(emoji); setShowReactionPicker(false) }}
-                  className="w-11 h-11 flex items-center justify-center text-2xl hover:bg-primary-500/15 rounded-xl transition-all duration-200 hover:scale-125 transform"
+                  className="w-11 h-11 flex items-center justify-center text-2xl hover:bg-primary-500/15 rounded-xl transition-colors transform"
                   style={{ transitionDelay: `${i * 15}ms` }}>
                   {emoji}
                 </button>
@@ -212,18 +215,31 @@ export default function MeetingControls({
           <ControlButton
             active={showMore}
             onClick={() => setShowMore(!showMore)}
+            activeColor="blue"
             icon={<MoreVertical className="w-5 h-5" />}
             label="More"
           />
 
           {showMore && (
-            <div className="absolute bottom-full mb-2 sm:mb-3 right-2 sm:right-0 glass-strong rounded-2xl shadow-float py-2 w-[min(18rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto z-50 animate-slide-up border border-white/10 ">
+            <div className="absolute bottom-full mb-2 sm:mb-3 right-2 sm:right-0 glass-strong rounded-2xl py-2 w-[min(18rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto z-50 animate-slide-up border border-white/10 ">
               {/* Recording */}
               <MoreMenuItem
                 icon={<Circle className={`w-4 h-4 ${isRecording ? 'fill-red-500 text-red-500 animate-pulse' : ''}`} />}
                 label={isRecording ? 'Stop recording' : 'Start recording'}
                 danger={isRecording}
                 onClick={() => { onToggleRecording(); setShowMore(false) }}
+              />
+              {!isRecording && (
+                <MoreMenuItem
+                  icon={<Mic className="w-4 h-4" />}
+                  label="Record audio only"
+                  onClick={() => { onRecordAudio(); setShowMore(false) }}
+                />
+              )}
+              <MoreMenuItem
+                icon={<Image className="w-4 h-4" />}
+                label="Background effects"
+                onClick={() => { onOpenBackground(); setShowMore(false) }}
               />
               {/* Device Settings */}
               <MoreMenuItem
@@ -232,10 +248,10 @@ export default function MeetingControls({
                 onClick={() => { onOpenSettings(); setShowMore(false) }}
               />
               {/* Picture-in-Picture */}
-              {document.pictureInPictureEnabled && (
+              {popOutSupported() && (
                 <MoreMenuItem
                   icon={<PictureInPicture className="w-4 h-4" />}
-                  label={isPiP ? 'Exit PiP' : 'Picture-in-Picture'}
+                  label={isPiP ? 'Close pop-out' : 'Pop out meeting'}
                   onClick={() => { onTogglePiP(); setShowMore(false) }}
                 />
               )}
@@ -309,10 +325,10 @@ export default function MeetingControls({
         {/* Leave */}
         <button
           onClick={onLeave}
-          className="group px-3.5 sm:px-5 py-2.5 bg-gradient-to-br from-red-500 to-red-600 hover:from-red-400 hover:to-red-500 rounded-full flex items-center gap-2 transition-all duration-300 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 hover:scale-105 active:scale-95"
+          className="group px-3.5 sm:px-5 py-2.5 bg-red-500 hover:from-red-400 hover:to-red-500 rounded-full flex items-center gap-2 transition-colors active:scale-95"
           title="Leave meeting"
         >
-          <PhoneOff className="w-5 h-5 transition-transform duration-300 group-hover:rotate-[15deg]" />
+          <PhoneOff className="w-5 h-5 transition-transform" />
           <span className="hidden sm:inline text-sm font-semibold">Leave</span>
         </button>
       </div>
@@ -327,10 +343,10 @@ function ControlButton({ active, activeColor = 'default', onClick, icon, label, 
     }
 
     switch (activeColor) {
-      case 'green': return 'bg-gradient-to-br from-green-500 to-green-600 text-white shadow-lg shadow-green-500/30'
-      case 'red': return 'bg-gradient-to-br from-red-500 to-red-600 text-white shadow-lg shadow-red-500/30'
-      case 'blue': return 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-lg shadow-primary-500/30'
-      case 'yellow': return 'bg-gradient-to-br from-yellow-500 to-amber-600 text-black shadow-lg shadow-yellow-500/30'
+      case 'green': return 'bg-green-500 text-white'
+      case 'red': return 'bg-red-500 text-white'
+      case 'blue': return 'bg-primary-500 text-white'
+      case 'yellow': return 'bg-yellow-500 text-black'
       default: return 'bg-dark-400/70 hover:bg-dark-500/80 border border-white/[0.06] text-gray-200'
     }
   }
@@ -340,7 +356,7 @@ function ControlButton({ active, activeColor = 'default', onClick, icon, label, 
     if (activeColor === 'default') {
       return active
         ? 'bg-dark-400/70 hover:bg-dark-500/80 border border-white/[0.06] text-gray-200'
-        : 'bg-gradient-to-br from-red-500 to-red-600 text-white shadow-lg shadow-red-500/30'
+        : 'bg-red-500 text-white'
     }
     return getButtonClasses()
   }
@@ -348,7 +364,7 @@ function ControlButton({ active, activeColor = 'default', onClick, icon, label, 
   return (
     <button
       onClick={onClick}
-      className={`relative w-10 h-10 min-[400px]:w-11 min-[400px]:h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all duration-300 ease-out transform hover:scale-110 active:scale-95 ${
+      className={`relative w-10 h-10 min-[400px]:w-11 min-[400px]:h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-colors ease-out transform active:scale-95 ${
         activeColor === 'default' ? getToggleClasses() : getButtonClasses()
       }`}
       title={label}
@@ -356,11 +372,11 @@ function ControlButton({ active, activeColor = 'default', onClick, icon, label, 
       style={ringLevel > 0 ? { boxShadow: `0 0 0 ${2 + ringLevel * 4}px rgba(52, 211, 153, ${0.25 + ringLevel * 0.45})` } : undefined}
     >
       {attention && (
-        <span className="absolute inset-0 rounded-full ring-2 ring-red-400/70 animate-ping pointer-events-none" aria-hidden="true" />
+        <span className="absolute inset-0 rounded-full ring-2 ring-red-400/70 pointer-events-none" aria-hidden="true" />
       )}
       {icon}
       {badge != null && (
-        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-gradient-to-br from-primary-500 to-accent-600 rounded-full text-[10px] flex items-center justify-center px-1 font-bold text-white shadow-lg animate-pop">
+        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-primary-500 rounded-full text-[10px] flex items-center justify-center px-1 font-semibold text-white">
           {badge}
         </span>
       )}
@@ -376,7 +392,7 @@ function MoreMenuItem({ icon, label, onClick, danger = false }) {
         danger ? 'text-red-300 hover:bg-red-500/10' : 'text-gray-200 hover:bg-primary-500/10'
       }`}
     >
-      <span className="transition-transform duration-200 group-hover:scale-110">{icon}</span>
+      <span className="transition-transform">{icon}</span>
       <span className="text-sm font-medium">{label}</span>
     </button>
   )

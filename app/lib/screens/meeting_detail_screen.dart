@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/theme.dart';
 import 'package:flutter/services.dart';
 import '../core/api.dart';
 import '../core/config.dart';
@@ -78,8 +79,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
         ],
       ),
       body: ListView(padding: const EdgeInsets.all(16), children: [
-        Text(m!['title']?.toString() ?? 'Meeting', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 6),
+        Text(m!['title']?.toString() ?? 'Meeting', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w500)),
+        const SizedBox(height: 8),
         Wrap(spacing: 8, children: [
           Chip(label: Text(status), avatar: Icon(status == 'active' ? Icons.sensors : Icons.info_outline, size: 16)),
           if (asMap(m!['team'])['name'] != null) Chip(label: Text(asMap(m!['team'])['name']), avatar: const Icon(Icons.groups, size: 16)),
@@ -203,8 +204,8 @@ class _HistoryState extends State<_History> {
             padding: const EdgeInsets.all(12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                const Icon(Icons.fiber_manual_record, color: Colors.red, size: 16),
-                const SizedBox(width: 6),
+                const Icon(Icons.fiber_manual_record, color: AppTheme.overdue, size: 16),
+                const SizedBox(width: 8),
                 Expanded(child: Text(fmtDateTime(r['createdAt'] ?? r['uploadedAt']), style: const TextStyle(fontWeight: FontWeight.w600))),
                 Chip(label: Text('Transcript: ${tr['status'] ?? 'none'}'), visualDensity: VisualDensity.compact),
               ]),
@@ -232,7 +233,7 @@ class _HistoryState extends State<_History> {
       else
         Card(
           child: Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if ((s['summary'] ?? s['overview'] ?? '').toString().isNotEmpty) Text((s['summary'] ?? s['overview']).toString()),
               if (asList(s['keyPoints']).isNotEmpty) ...[const SectionTitle('Key points'), ...asList(s['keyPoints']).map((e) => Text('• $e'))],

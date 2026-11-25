@@ -73,6 +73,7 @@ class _PreJoinScreenState extends State<PreJoinScreen> {
     await Navigator.pushReplacement(
       context,
       MaterialPageRoute(
+        settings: const RouteSettings(name: 'meeting'),
         builder: (_) => MeetingScreen(roomId: widget.roomId, startMic: _mic && !widget.viewOnly, startCam: _cam && !widget.viewOnly, viewOnly: widget.viewOnly),
       ),
     );
@@ -96,7 +97,7 @@ class _PreJoinScreenState extends State<PreJoinScreen> {
           child: Column(children: [
             Expanded(
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(14),
                 child: Container(
                   color: Colors.black87,
                   width: double.infinity,
@@ -150,7 +151,7 @@ class _RoundToggle extends StatelessWidget {
         onPressed: onTap,
         icon: Icon(on ? onIcon : offIcon, size: 28),
       ),
-      const SizedBox(height: 6),
+      const SizedBox(height: 8),
       Text(label, style: const TextStyle(fontSize: 12)),
     ]);
   }

@@ -120,8 +120,12 @@ const Calendar = () => {
         isInstant: false
       };
 
-      await createMeeting(meetingData);
-      toast.success('Meeting scheduled successfully!');
+      const result = await createMeeting({ ...meetingData, teamId: meetingData.teamId || undefined });
+      if (!result.success) {
+        toast.error(result.message || 'Could not schedule the meeting');
+        return;
+      }
+      toast.success('Meeting scheduled');
       setShowScheduleModal(false);
       setNewMeeting({
         title: '',
@@ -161,42 +165,42 @@ const Calendar = () => {
 
   return (
     <AppShell wide>
-      <div className="px-4 sm:px-6 py-8">
-      <div className="relative max-w-7xl mx-auto">
+      <div>
+      <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8 lg:py-10">
         {/* Header */}
-        <div className="flex flex-wrap justify-between items-end gap-6 mb-10 animate-fade-in-up">
+        <div className="flex flex-wrap justify-between items-end gap-6 mb-10">
           <div>
-<h1 className="text-3xl sm:text-4xl font-bold font-display tracking-tight">
+<h1 className="page-title">
               Calendar
             </h1>
-            <p className="text-gray-400 mt-2">Meetings and task deadlines</p>
+            <p className="page-sub">Meetings and task deadlines</p>
           </div>
           <button onClick={() => setShowScheduleModal(true)} className="btn btn-primary">
             <Plus className="w-5 h-5" />
-            Schedule Meeting
+            Schedule meeting
           </button>
         </div>
 
         {/* Calendar Navigation */}
-        <div className="bg-dark-200/70 backdrop-blur-sm rounded-3xl shadow-card p-5 sm:p-6 border border-white/[0.06] animate-fade-in-up stagger-2">
+        <div className="bg-dark-200/70 rounded-2xl p-5 sm:p-6 border border-white/[0.06]">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold font-display">{monthName}</h2>
+            <h2 className="whitespace-nowrap font-display text-lg font-semibold sm:text-2xl">{monthName}</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={prevMonth}
-                className="p-2.5 hover:bg-dark-400/80 rounded-xl transition-all duration-200 text-gray-300 hover:text-white hover:scale-105 border border-transparent hover:border-white/[0.06]"
+                className="p-2.5 hover:bg-dark-400/80 rounded-xl transition-colors text-gray-300 hover:text-white border border-transparent hover:border-white/[0.06]"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
               <button
                 onClick={() => setCurrentDate(new Date())}
-                className="px-4 py-2 text-sm font-semibold text-gray-300 hover:bg-primary-500/15 hover:text-white rounded-xl transition-all duration-200 border border-transparent hover:border-primary-500/25"
+                className="px-4 py-2 text-sm font-semibold text-gray-300 hover:bg-primary-500/15 hover:text-white rounded-xl transition-colors border border-transparent hover:border-primary-500/25"
               >
                 Today
               </button>
               <button
                 onClick={nextMonth}
-                className="p-2.5 hover:bg-dark-400/80 rounded-xl transition-all duration-200 text-gray-300 hover:text-white hover:scale-105 border border-transparent hover:border-white/[0.06]"
+                className="p-2.5 hover:bg-dark-400/80 rounded-xl transition-colors text-gray-300 hover:text-white border border-transparent hover:border-white/[0.06]"
               >
                 <ChevronRight className="w-5 h-5" />
               </button>
@@ -207,7 +211,7 @@ const Calendar = () => {
           <div className="grid grid-cols-7 gap-1 sm:gap-2">
             {/* Day headers */}
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-              <div key={day} className="text-center text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-gray-500 py-1 sm:py-2">
+              <div key={day} className="text-center text-[10px] sm:text-xs font-semibold text-gray-500 py-1 sm:py-2">
                 {day}
               </div>
             ))}
@@ -223,19 +227,19 @@ const Calendar = () => {
                 <div
                   key={index}
                   onClick={() => day && !isPast && handleDateClick(day)}
-                  className={`group min-h-14 sm:min-h-24 min-w-0 p-1 sm:p-2 border rounded-xl transition-all duration-300 animate-scale-in ${
+                  className={`group min-h-14 sm:min-h-24 min-w-0 p-1 sm:p-2 border rounded-xl transition-colors animate-scale-in ${
                     day
                       ? isPast
                         ? 'bg-dark-300/30 cursor-not-allowed border-white/[0.03]'
-                        : 'bg-dark-300/60 hover:bg-dark-400/70 cursor-pointer border-white/[0.05] hover:border-primary-500/40 hover:-translate-y-0.5 hover:shadow-glow'
+                        : 'bg-dark-300/60 hover:bg-dark-400/70 cursor-pointer border-white/[0.05] hover:border-primary-500/40'
                       : 'bg-transparent border-transparent'
-                  } ${isToday ? 'border-primary-500/70 ring-2 ring-primary-500/20 shadow-glow' : ''}`}
+                  } ${isToday ? 'border-primary-500/70 ring-2 ring-primary-500/20' : ''}`}
                   style={{ animationDelay: `${Math.min(index * 0.012, 0.3)}s` }}
                 >
                   {day && (
                     <>
                       <div className={`text-sm font-semibold mb-1.5 flex items-center justify-center rounded-full transition-colors ${
-                        isToday ? 'w-7 h-7 text-white bg-gradient-to-br from-primary-500 to-primary-700 shadow-md shadow-primary-500/30' : isPast ? 'text-gray-600' : 'text-gray-200'
+                        isToday ? 'w-7 h-7 text-white bg-primary-500' : isPast ? 'text-gray-600' : 'text-gray-200'
                       } ${!isToday ? 'group-hover:text-white' : ''}`}>
                         {day.getDate()}
                       </div>
@@ -253,7 +257,7 @@ const Calendar = () => {
                               e.stopPropagation();
                               navigate(`/meeting/${meeting.roomId}`);
                             }}
-                            className="text-xs bg-gradient-to-r from-primary-600/25 to-accent-600/15 border border-primary-500/25 text-primary-200 px-2 py-1 rounded-lg truncate hover:from-primary-600/50 hover:border-primary-400/50 hover:scale-[1.03] transition-all duration-200"
+                            className="text-xs bg-primary-600/25 border border-primary-500/25 text-primary-200 px-2 py-1 rounded-lg truncate hover:from-primary-600/50 hover:border-primary-400/50 transition-colors"
                             title={meeting.title}
                           >
                             <div className="flex items-center gap-1">
@@ -272,7 +276,7 @@ const Calendar = () => {
                           <div
                             key={task.id}
                             onClick={(e) => { e.stopPropagation(); navigate('/tasks'); }}
-                            className={`text-xs border px-2 py-1 rounded-lg truncate flex items-center gap-1 transition-all duration-200 hover:scale-[1.03] ${taskChip(task)}`}
+                            className={`text-xs border px-2 py-1 rounded-lg truncate flex items-center gap-1 transition-colors ${taskChip(task)}`}
                             title={`Task: ${task.title}`}
                           >
                             <CheckSquare className="w-3 h-3 shrink-0" />
@@ -298,7 +302,7 @@ const Calendar = () => {
       {showScheduleModal && (
         <div className="modal-backdrop">
           <div className="modal-content max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold font-display mb-5">Schedule Meeting</h2>
+            <h2 className="text-2xl font-semibold font-display mb-5">Schedule meeting</h2>
             <form onSubmit={handleScheduleMeeting}>
               <div className="space-y-4">
                 <div className="group">
@@ -388,7 +392,7 @@ const Calendar = () => {
                 </button>
                 <button type="submit" className="btn btn-primary flex-1">
                   <Plus className="w-4 h-4" />
-                  Schedule Meeting
+                  Schedule meeting
                 </button>
               </div>
             </form>

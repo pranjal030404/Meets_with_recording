@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/theme.dart';
 import '../core/api.dart';
 import '../widgets/common.dart';
 
@@ -58,13 +59,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           final unread = n['isRead'] != true;
           return Dismissible(
             key: ValueKey(n['id']),
-            background: Container(color: Colors.red, alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20), child: const Icon(Icons.delete, color: Colors.white)),
+            background: Container(color: AppTheme.overdue, alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20), child: const Icon(Icons.delete, color: Colors.white)),
             direction: DismissDirection.endToStart,
             onDismissed: (_) => Api.instance.delete('/notifications/${n['id']}').catchError((_) {}),
             child: ListTile(
               tileColor: unread ? Theme.of(context).colorScheme.primaryContainer.withOpacity(.35) : null,
               leading: CircleAvatar(child: Icon(_iconFor(n['type']?.toString()))),
-              title: Text((n['title'] ?? '').toString(), style: TextStyle(fontWeight: unread ? FontWeight.w700 : null)),
+              title: Text((n['title'] ?? '').toString(), style: TextStyle(fontWeight: unread ? FontWeight.w600 : null)),
               subtitle: Text((n['message'] ?? '').toString()),
               trailing: Text(fmtRelative(n['createdAt']), style: const TextStyle(fontSize: 12)),
               onTap: () async {

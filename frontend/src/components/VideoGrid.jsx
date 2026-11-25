@@ -70,7 +70,7 @@ export default function VideoGrid({
 
     return (
       <div className="h-full p-4 flex flex-col lg:flex-row gap-4">
-        <div className="flex-1 bg-dark-300 rounded-2xl relative shadow-xl overflow-hidden">
+        <div className="flex-1 bg-dark-300 rounded-2xl relative overflow-hidden">
           {isLocalFocused ? (
             <VideoTile
               stream={localStream} user={user} isMuted={isMuted}
@@ -121,12 +121,12 @@ export default function VideoGrid({
     const findParticipant = (id) => participants.find(p => getUserId(p.user) === id)
     return (
       <div className="h-full p-4 flex flex-col lg:flex-row gap-4">
-        <div className="flex-1 bg-dark-300 rounded-2xl flex items-center justify-center relative shadow-xl overflow-hidden">
+        <div className="flex-1 bg-dark-300 rounded-2xl flex items-center justify-center relative overflow-hidden">
           {screenSrcStream ? (
             <ScreenVideo stream={screenSrcStream} muted={isLocalScreenShare} />
           ) : (
             <div className="text-center">
-              <div className="w-24 h-24 bg-gradient-to-br from-primary-500 to-primary-700 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary-500/30">
+              <div className="w-24 h-24 bg-primary-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-4xl font-semibold text-white">
                   {screenShareUser.name?.charAt(0).toUpperCase()}
                 </span>
@@ -217,8 +217,8 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
   }, [stream, isLocal])
 
   const tileClasses = small
-    ? 'min-w-40 lg:min-w-0 aspect-video bg-dark-300 rounded-xl relative overflow-hidden flex-shrink-0 transition-all duration-300'
-    : 'video-container relative overflow-hidden transition-all duration-300'
+    ? 'min-w-40 lg:min-w-0 aspect-video bg-dark-300 rounded-xl relative overflow-hidden flex-shrink-0 transition-colors'
+    : 'video-container relative overflow-hidden transition-colors'
 
   const voice = useVoiceActivity(stream, !isMuted)
 
@@ -231,8 +231,8 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
       onMouseLeave={() => setIsHovered(false)}
     >
       {isVideoOff || !stream || (!isLocal && !hasRemoteVideo) ? (
-        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-dark-300 to-dark-400/60">
-          <div className={`${small ? 'w-14 h-14' : 'w-24 h-24'} bg-gradient-to-br from-primary-500 to-accent-600 rounded-full flex items-center justify-center shadow-glow`}>
+        <div className="w-full h-full flex items-center justify-center bg-dark-300">
+          <div className={`${small ? 'w-14 h-14' : 'w-24 h-24'} bg-primary-500 rounded-full flex items-center justify-center`}>
             <span className={`${small ? 'text-xl' : 'text-3xl'} font-semibold text-white`}>
               {user?.name?.charAt(0).toUpperCase() || <User className={small ? 'w-6 h-6' : 'w-10 h-10'} />}
             </span>
@@ -257,7 +257,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
 
       {/* Hand raised indicator */}
       {isHandRaised && (
-        <div className="absolute top-2 left-2 bg-yellow-500 text-black p-1.5 rounded-lg shadow-lg animate-bounce z-10">
+        <div className="absolute top-2 left-2 bg-yellow-500 text-black p-1.5 rounded-lg z-10">
           <Hand className="w-4 h-4" />
         </div>
       )}
@@ -267,14 +267,14 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
         <div className="absolute top-2 right-2 flex gap-1 z-10">
           {onPin && (
             <button onClick={(e) => { e.stopPropagation(); onPin() }}
-              className="p-1.5 bg-black/60 backdrop-blur-sm rounded-lg hover:bg-black/80 transition-colors"
+              className="p-1.5 bg-black/60 rounded-lg hover:bg-black/80 transition-colors"
               title={isPinned ? 'Unpin' : 'Pin'}>
               {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
             </button>
           )}
           {tileIsHost && onSpotlight && !isLocal && (
             <button onClick={(e) => { e.stopPropagation(); onSpotlight() }}
-              className="p-1.5 bg-black/60 backdrop-blur-sm rounded-lg hover:bg-black/80 transition-colors"
+              className="p-1.5 bg-black/60 rounded-lg hover:bg-black/80 transition-colors"
               title="Spotlight">
               <Star className="w-3.5 h-3.5" />
             </button>
@@ -285,11 +285,11 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
       {/* Name badge */}
       <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-lg text-sm font-medium text-white shadow-lg">
+          <span className="bg-black/60 px-3 py-1.5 rounded-lg text-sm font-medium text-white">
             {user?.name || 'Unknown'} {isLocal && '(You)'}
           </span>
           {isMuted ? (
-            <span className="bg-red-600 p-1.5 rounded-lg shadow-lg">
+            <span className="bg-red-600 p-1.5 rounded-lg">
               <MicOff className="w-3.5 h-3.5 text-white" />
             </span>
           ) : (
@@ -297,7 +297,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
           )}
         </div>
         {isVideoOff && (
-          <span className="bg-red-600/90 backdrop-blur-sm p-1.5 rounded-lg shadow-lg">
+          <span className="bg-red-600/90 p-1.5 rounded-lg">
             <VideoOff className="w-3.5 h-3.5 text-white" />
           </span>
         )}
@@ -358,7 +358,7 @@ function useVoiceActivity(stream, active) {
 function MicActivity({ talking, level = 0.6 }) {
   const bars = [0.5, 1, 0.7]
   return (
-    <span className={`flex items-center gap-1 px-2 py-1.5 rounded-lg shadow-lg backdrop-blur-sm transition-colors ${talking ? 'bg-emerald-500 ring-2 ring-emerald-300/60 shadow-emerald-500/40' : 'bg-black/60'}`}
+    <span className={`flex items-center gap-1 px-2 py-1.5 rounded-lg transition-colors ${talking ? 'bg-emerald-500 ring-2 ring-emerald-300/60' : 'bg-black/60'}`}
       title={talking ? 'Speaking' : 'Mic on'}>
       <Mic className={`w-3.5 h-3.5 ${talking ? 'text-white' : 'text-emerald-300'}`} />
       {talking && (

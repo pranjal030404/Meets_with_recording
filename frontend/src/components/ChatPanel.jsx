@@ -1,3 +1,4 @@
+import Avatar from './Avatar'
 import { useState, useRef, useEffect } from 'react'
 import { X, Send, MessageSquare, Smile, Paperclip, Reply, Loader2 } from 'lucide-react'
 import { useChatStore } from '../store/chatStore'
@@ -133,7 +134,7 @@ export default function ChatPanel({ roomId, onClose }) {
         {messages.length === 0 ? (
           <div className="flex flex-col items-center text-center text-gray-400 text-sm py-12 gap-3">
             <span className="w-12 h-12 rounded-full bg-dark-300 flex items-center justify-center"><MessageSquare className="w-5 h-5 text-gray-500" /></span>
-            No messages yet.<br />Start the conversation!
+            No messages yet.<br />Start the conversation
           </div>
         ) : (
           messages.map((message) => {
@@ -146,7 +147,7 @@ export default function ChatPanel({ roomId, onClose }) {
                 <div className={`flex flex-col min-w-0 max-w-[88%] ${isOwn ? 'items-end' : 'items-start'}`}>
                   {!isOwn && (
                     <div className="flex items-center gap-2 mb-1">
-                      <img src={message.sender.avatar} alt={message.sender.name} className="w-5 h-5 rounded-full" />
+                      <Avatar user={message.sender} size="xs" />
                       <span className="text-xs text-gray-400">{message.sender.name}</span>
                     </div>
                   )}
@@ -183,7 +184,7 @@ export default function ChatPanel({ roomId, onClose }) {
 
                     {/* Reply button on hover */}
                     <button onClick={() => setReplyingTo(message)}
-                      className="absolute -top-2 right-0 hidden group-hover:flex p-1 bg-dark-300 rounded shadow-lg hover:bg-dark-400 transition-colors">
+                      className="absolute -top-2 right-0 hidden group-hover:flex p-1 bg-dark-300 rounded hover:bg-dark-400 transition-colors">
                       <Reply className="w-3 h-3 text-gray-400" />
                     </button>
                   </div>
@@ -243,7 +244,7 @@ export default function ChatPanel({ roomId, onClose }) {
               <Smile className="w-5 h-5 text-gray-400" />
             </button>
             {showEmojiPicker && (
-              <div className="absolute bottom-full mb-3 left-0 bg-dark-300 border border-white/[0.06] rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 min-w-[180px] z-20">
+              <div className="absolute bottom-full mb-3 left-0 bg-dark-300 border border-white/[0.06] rounded-xl p-2 grid grid-cols-5 gap-1 min-w-[180px] z-20">
                 {CHAT_EMOJIS.map((emoji) => (
                   <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}
                     className="w-8 h-8 flex items-center justify-center text-lg hover:bg-dark-400 rounded transition-colors">
@@ -262,12 +263,12 @@ export default function ChatPanel({ roomId, onClose }) {
             type="text"
             value={newMessage}
             onChange={(e) => { setNewMessage(e.target.value); handleTyping() }}
-            placeholder="Type a message..."
+            placeholder="Message"
             className="flex-1 min-w-0 bg-transparent px-1 py-1 text-sm focus:outline-none placeholder:text-gray-500"
           />
           <button type="submit" disabled={(!newMessage.trim() && !pendingFile) || isUploading}
             aria-label="Send message"
-            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-primary-700 hover:from-primary-400 hover:to-primary-600 text-white shadow-lg shadow-primary-600/30 transition-all disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed">
+            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full bg-primary-500 hover:from-primary-400 hover:to-primary-600 text-white transition-colors disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed">
             <Send className="w-4 h-4 -ml-0.5" />
           </button>
         </div>

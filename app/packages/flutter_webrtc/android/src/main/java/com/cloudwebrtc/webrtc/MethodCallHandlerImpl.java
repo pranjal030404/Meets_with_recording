@@ -180,7 +180,9 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
     JavaAudioDeviceModule.Builder audioDeviceModuleBuilder = JavaAudioDeviceModule.builder(context)
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(true)
-            .setSamplesReadyCallback(getUserMediaImpl.inputSamplesInterceptor);
+            .setSamplesReadyCallback(getUserMediaImpl.inputSamplesInterceptor)
+            // everything the phone plays (the other participants), for meeting recordings
+            .setPlaybackSamplesReadyCallback(getUserMediaImpl::onPlaybackSamples);
 
     if (audioAttributes != null) {
       audioDeviceModuleBuilder.setAudioAttributes(audioAttributes);
@@ -659,6 +661,33 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
         } catch (Exception e) {
           resultError("startRecordToFile", e.getMessage(), result);
         }
+        break;
+      case "setBackgroundEffect": {
+        try {
+          getUserMediaImpl.setBackgroundEffect(call.argument("trackId"), call.argument("mode"), call.argument("imagePath"));
+          result.success(null);
+        } catch (Exception e) {
+          resultError("setBackgroundEffect", e.getMessage(), result);
+        }
+        break;
+      }
+      case "startAudioRecording": {
+        try {
+          getUserMediaImpl.startAudioRecording(call.argument("path"), Boolean.TRUE.equals(call.argument("micEnabled")),
+              call.argument("videoTrackId"));
+          result.success(null);
+        } catch (Exception e) {
+          resultError("startAudioRecording", e.getMessage(), result);
+        }
+        break;
+      }
+      case "setAudioRecordingMic":
+        getUserMediaImpl.setAudioRecordingMic(Boolean.TRUE.equals(call.argument("enabled")));
+        result.success(null);
+        break;
+      case "stopAudioRecording":
+        getUserMediaImpl.stopAudioRecording();
+        result.success(null);
         break;
       case "stopRecordToFile":
         Integer recorderId = call.argument("recorderId");

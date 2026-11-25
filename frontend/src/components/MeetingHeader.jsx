@@ -48,10 +48,10 @@ export default function MeetingHeader({
   }
 
   return (
-    <header className="glass border-b border-white/[0.06] px-2 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between gap-2 animate-fade-in-down">
+    <header className="glass border-b border-white/[0.06] px-2 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between gap-2">
       <div className="flex items-center gap-2 sm:gap-4 min-w-0">
         <div className="hidden sm:flex items-center gap-2.5 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-400 via-primary-600 to-accent-600 flex items-center justify-center shadow-md shadow-primary-500/25">
+          <div className="w-8 h-8 rounded-lg bg-primary-400 flex items-center justify-center">
             <Video className="w-4 h-4 text-white" />
           </div>
         </div>
@@ -60,7 +60,7 @@ export default function MeetingHeader({
           {isBeingRecorded && (
             <span className="flex items-center gap-1.5 text-red-400 mr-1 bg-red-500/10 border border-red-400/25 rounded-full px-2.5 py-0.5">
               <Circle className="w-2.5 h-2.5 fill-red-500 text-red-500 animate-pulse" />
-              <span className="text-[11px] font-semibold tracking-wide">REC</span>
+              <span className="text-[11px] font-semibold">REC</span>
             </span>
           )}
           <Clock className="w-4 h-4 text-primary-400/80" />
@@ -77,9 +77,9 @@ export default function MeetingHeader({
               <button
                 key={id}
                 onClick={() => onLayoutChange(id)}
-                className={`p-2 rounded-lg transition-all duration-300 ${
+                className={`p-2 rounded-lg transition-colors ${
                   layout === id
-                    ? 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-md shadow-primary-500/30'
+                    ? 'bg-primary-600 text-white'
                     : 'text-gray-400 hover:text-white hover:bg-dark-400'
                 }`}
                 title={label}
@@ -92,8 +92,8 @@ export default function MeetingHeader({
 
         {/* Hand Raise Count */}
         {handRaisedCount > 0 && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-yellow-500/15 border border-yellow-400/25 rounded-xl text-yellow-300 text-sm font-semibold animate-pop">
-            <Hand className="w-4 h-4 animate-bounce-hand" />
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-yellow-500/15 border border-yellow-400/25 rounded-xl text-yellow-300 text-sm font-semibold">
+            <Hand className="w-4 h-4" />
             <span>{handRaisedCount}</span>
           </div>
         )}
@@ -107,16 +107,16 @@ export default function MeetingHeader({
         {/* Copy meeting link */}
         <button
           onClick={handleCopy}
-          className="group flex items-center gap-2 px-3 py-1.5 bg-dark-300/80 border border-white/[0.06] hover:border-primary-500/40 hover:bg-dark-400 rounded-xl text-sm transition-all duration-300 hover:shadow-glow"
+          className="group flex items-center gap-2 px-3 py-1.5 bg-dark-300/80 border border-white/[0.06] hover:border-primary-500/40 hover:bg-dark-400 rounded-xl text-sm transition-colors"
           title="Copy meeting link"
         >
-          <Copy className={`w-4 h-4 transition-all duration-300 ${copied ? 'text-green-400 scale-110' : 'text-gray-400 group-hover:text-primary-300'}`} />
+          <Copy className={`w-4 h-4 transition-colors ${copied ? 'text-green-400 scale-110' : 'text-gray-400 group-hover:text-primary-300'}`} />
           <span className="hidden md:inline font-mono text-xs text-gray-300">{roomId}</span>
         </button>
         {onOpenDetails && (
           <button
             onClick={onOpenDetails}
-            className="p-2 bg-dark-300/80 border border-white/[0.06] hover:border-primary-500/40 hover:bg-dark-400 rounded-xl text-sm transition-all duration-300 hover:shadow-glow"
+            className="p-2 bg-dark-300/80 border border-white/[0.06] hover:border-primary-500/40 hover:bg-dark-400 rounded-xl text-sm transition-colors"
             title="Meeting details"
           >
             <Info className="w-4 h-4 text-gray-400 group-hover:text-primary-300" />

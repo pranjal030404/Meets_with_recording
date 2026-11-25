@@ -90,10 +90,10 @@ export default function ProfileModal({ onClose, target, endpoints, onSaved, clie
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <form onSubmit={save} className="relative glass-strong rounded-3xl border border-white/10 w-full max-w-lg shadow-float max-h-[90vh] overflow-y-auto">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <form onSubmit={save} className="relative glass-strong rounded-2xl border border-white/10 w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 pt-5">
-          <h3 className="text-lg font-bold font-display">{isSelf ? 'Edit profile' : `Edit ${user.name}`}</h3>
+          <h3 className="text-lg font-semibold font-display">{isSelf ? 'Edit profile' : `Edit ${user.name}`}</h3>
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06]" aria-label="Close"><X className="w-5 h-5" /></button>
         </div>
 
