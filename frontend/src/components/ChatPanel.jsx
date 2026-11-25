@@ -5,6 +5,7 @@ import { useChatStore } from '../store/chatStore'
 import { useAuthStore } from '../store/authStore'
 import { getSocket } from '../lib/socket'
 import FileAttachment from './FileAttachment'
+import AttachMenu from './AttachMenu'
 import useChatUpload from '../hooks/useChatUpload'
 import toast from 'react-hot-toast'
 
@@ -22,10 +23,7 @@ export default function ChatPanel({ roomId, onClose }) {
   const emojiPickerRef = useRef(null)
 
   // File attachment support (uploads scoped to this meeting via roomId)
-  const {
-    fileInputRef, pendingFile, setPendingFile, isUploading,
-    pick, clearPending, onFileChange, sendAttachment,
-  } = useChatUpload(() => ({ roomId }))
+  const { pendingFile, isUploading, selectFile, clearPending, sendAttachment } = useChatUpload(() => ({ roomId }))
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -254,11 +252,7 @@ export default function ChatPanel({ roomId, onClose }) {
               </div>
             )}
           </div>
-          <input ref={fileInputRef} type="file" className="hidden" onChange={onFileChange} />
-          <button type="button" onClick={pick} disabled={isUploading}
-            className="p-1.5 hover:bg-dark-400 rounded-full transition-colors disabled:opacity-50" title="Attach a file">
-            <Paperclip className="w-5 h-5 text-gray-400" />
-          </button>
+          <AttachMenu onFile={selectFile} disabled={isUploading} />
           <input
             type="text"
             value={newMessage}

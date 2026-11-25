@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isPresent, presentParticipants } from '../src/services/meetingLifecycle.js';
+import { isPresent, presentParticipants, leaveOutcome } from '../src/services/meetingLifecycle.js';
 import { meetingMachine, transcriptionMachine } from '../src/lib/stateMachines.js';
 
 test('seeded host/invitee entries (no joinedAt) are not counted as present', () => {
@@ -23,4 +23,19 @@ test('meeting machine: ended/cancelled are terminal', () => {
 
 test('transcription machine: a retry goes failed -> queued', () => {
   assert.doesNotThrow(() => transcriptionMachine.assertTransition('failed', 'queued'));
+});
+
+test('leaving a scheduled meeting early does not end it', () => {
+  const now = Date.parse('2026-01-01T10:00:00Z');
+  const joined = '2026-01-01T09:00:00Z';
+  const early = { hostId: 'h', scheduledAt: '2026-01-01T12:00:00Z', participants: [{ userId: 'h', joinedAt: joined, leftAt: joined }] };
+  assert.equal(leaveOutcome(early, 'h', now), 'reschedule');
+  // past its time, but the host never turned up
+  const noHost = { hostId: 'h', scheduledAt: '2026-01-01T09:00:00Z', participants: [{ userId: 'h' }, { userId: 'g', joinedAt: joined, leftAt: joined }] };
+  assert.equal(leaveOutcome(noHost, 'g', now), 'reschedule');
+  // it really took place
+  const held = { hostId: 'h', scheduledAt: '2026-01-01T09:00:00Z', participants: [{ userId: 'h', joinedAt: joined, leftAt: joined }] };
+  assert.equal(leaveOutcome(held, 'h', now), 'end');
+  // instant meetings are unchanged
+  assert.equal(leaveOutcome({ hostId: 'h', participants: [{ userId: 'g', joinedAt: joined }] }, 'h', now), 'end');
 });

@@ -1,5 +1,5 @@
 import Avatar from '../components/Avatar';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Users, Hash, Copy, Check, UserPlus, ArrowLeft,
@@ -14,6 +14,9 @@ import { useAuthStore } from '../store/authStore';
 import { getSocket } from '../lib/socket';
 import FileAttachment from '../components/FileAttachment';
 import useChatUpload from '../hooks/useChatUpload';
+import ScheduleMeetingModal from '../components/ScheduleMeetingModal';
+import AttachMenu from '../components/AttachMenu';
+import useMentions, { MentionText, mentionedIds } from '../hooks/useMentions';
 
 // Messages are stored per channel key: built-in channels use their type, custom ones 'custom:<id>'
 const channelKey = (c) => (c.type === 'custom' ? `custom:${c.id || c._id}` : c.type);
@@ -56,13 +59,23 @@ const TeamDetail = () => {
   const [channelSaving, setChannelSaving] = useState(false);
   const [channelToDelete, setChannelToDelete] = useState(null);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   const [teamFetched, setTeamFetched] = useState(false);
 
   // File attachment support (uploads scoped to this team)
-  const {
-    fileInputRef, pendingFile, isUploading,
-    pick, clearPending, onFileChange, sendAttachment,
-  } = useChatUpload(() => ({ teamId }));
+  const { pendingFile, isUploading, selectFile, clearPending, sendAttachment } = useChatUpload(() => ({ teamId }));
+
+  // "@name" tagging
+  const messageRef = useRef(null);
+  const people = (teamMembers || [])
+    .map(m => ({ ...m.user, id: m.user.id || m.user._id }))
+    .filter(p => p.name);
+  const mentions = useMentions({
+    value: messageInput,
+    setValue: setMessageInput,
+    inputRef: messageRef,
+    people: people.filter(p => p.id !== (user.id || user._id)),
+  });
 
   // Fetch team data only when teamId changes
   useEffect(() => {
@@ -188,16 +201,11 @@ const TeamDetail = () => {
     if (!messageInput.trim()) return;
 
     try {
-      await sendTeamMessage(teamId, activeChannel, messageInput.trim());
+      await sendTeamMessage(teamId, activeChannel, messageInput.trim(), 'text', null, null, mentionedIds(messageInput, people));
       setMessageInput('');
     } catch (error) {
       toast.error('Failed to send message');
     }
-  };
-
-  const handleShareMeetingLink = async () => {
-    // This will be used to share meeting links in team chat
-    navigate(`/meeting/create?teamId=${teamId}`);
   };
 
   if (accessDenied) {
@@ -343,6 +351,8 @@ const TeamDetail = () => {
         </div>
       </div>
 
+      {scheduling && <ScheduleMeetingModal teamId={teamId} onClose={() => setScheduling(false)} />}
+
       <div className="flex-1 flex overflow-hidden">
         {/* Channels Sidebar */}
         <div className={`${view === 'chat' ? 'hidden md:block' : 'hidden'} w-60 bg-dark-200/60 border-r border-white/[0.05] overflow-y-auto animate-slide-in-left`}>
@@ -418,7 +428,7 @@ const TeamDetail = () => {
               </span>
             </div>
             {activeChannel === 'meetings' && (
-              <button onClick={handleShareMeetingLink} className="btn btn-primary text-sm">
+              <button onClick={() => setScheduling(true)} className="btn btn-primary text-sm">
                 <Video className="w-4 h-4" />
                 Schedule meeting
               </button>
@@ -454,7 +464,7 @@ const TeamDetail = () => {
                         fileSize={msg.fileSize}
                       />
                     ) : (
-                      <p className="text-gray-300 mt-1 leading-relaxed">{msg.content}</p>
+                      <p className="text-gray-300 mt-1 leading-relaxed"><MentionText text={msg.content} people={people} /></p>
                     )}
                     {msg.type === 'meeting_link' && msg.meetingData && (
                       <div className="mt-2.5 p-4 card max-w-md">
@@ -499,28 +509,20 @@ const TeamDetail = () => {
             )}
             <form onSubmit={handleSendMessage}>
               <div className="flex gap-2.5 group">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  onChange={onFileChange}
-                />
-                <button
-                  type="button"
-                  onClick={pick}
-                  disabled={isUploading}
-                  className="p-2.5 rounded-xl text-gray-400 hover:text-primary-300 hover:bg-primary-500/10 transition-colors disabled:opacity-50"
-                  title="Attach a file"
-                >
-                  <Paperclip className="w-5 h-5" />
-                </button>
-                <input
-                  type="text"
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  placeholder={`Message #${currentTeam.channels?.find(c => channelKey(c) === activeChannel)?.name || activeChannel}`}
-                  className="input flex-1"
-                />
+                <AttachMenu onFile={selectFile} disabled={isUploading} />
+                <div className="relative flex-1 min-w-0">
+                  {mentions.menu}
+                  <input
+                    ref={messageRef}
+                    type="text"
+                    value={messageInput}
+                    onChange={(e) => { setMessageInput(e.target.value); mentions.onChange(e); }}
+                    onSelect={mentions.onSelect}
+                    onKeyDown={mentions.onKeyDown}
+                    placeholder={`Message #${currentTeam.channels?.find(c => channelKey(c) === activeChannel)?.name || activeChannel} (@ to tag)`}
+                    className="input w-full"
+                  />
+                </div>
                 <button
                   type="submit"
                   className="btn btn-primary !px-4"

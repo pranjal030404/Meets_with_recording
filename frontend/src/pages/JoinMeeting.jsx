@@ -15,6 +15,7 @@ import {
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
+import MeetingGate, { meetingGate } from '../components/MeetingGate'
 
 export default function JoinMeeting() {
   const navigate = useNavigate()
@@ -122,6 +123,19 @@ export default function JoinMeeting() {
       setMeeting(null)
     }
   }
+
+  // While waiting for a meeting to open, look again every few seconds
+  const gate = meeting ? meetingGate(meeting, user) : null
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (gate !== 'upcoming' && gate !== 'host') return
+    const timer = setInterval(async () => {
+      const result = await getMeeting(meeting.roomId)
+      if (result.success) setMeeting(result.meeting)
+      setTick(t => t + 1) // the countdown and the start time move even if nothing else did
+    }, 10000)
+    return () => clearInterval(timer)
+  }, [gate, meeting?.roomId])
 
   const handleCheckMeeting = (e) => {
     e.preventDefault()
@@ -398,6 +412,9 @@ export default function JoinMeeting() {
 
           {/* Join Form */}
           <div className="flex flex-col justify-center">
+{gate ? (
+              <MeetingGate gate={gate} meeting={meeting} onHome={() => navigate('/app')} />
+            ) : (<>
 <h1 className="text-3xl sm:text-4xl font-semibold font-display mb-3">
               Ready to join?
             </h1>
@@ -485,6 +502,7 @@ export default function JoinMeeting() {
                 </button>
               </div>
             )}
+            </>)}
           </div>
         </div>
       </div>

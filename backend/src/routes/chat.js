@@ -387,7 +387,10 @@ router.post('/team/:teamId/messages', protect, async (req, res) => {
       });
     }
 
-    const mentions = [];
+    // Only real teammates can be tagged
+    const mentions = Array.isArray(req.body.mentions)
+      ? [...new Set(req.body.mentions)].filter((id) => id !== req.user.id && team.isMember(id))
+      : [];
 
     const channel = resolveChannel(team, channelType);
     if (!channel) {

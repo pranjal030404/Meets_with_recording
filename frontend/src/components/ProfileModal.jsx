@@ -3,6 +3,7 @@ import { X, Camera, Trash2, Loader2, Mail } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../lib/api'
 import Avatar from './Avatar'
+import ChangePassword from './ChangePassword'
 import { useAuthStore } from '../store/authStore'
 
 const MAX_MB = 5
@@ -155,6 +156,8 @@ export default function ProfileModal({ onClose, target, endpoints, onSaved, clie
           <div className="sm:col-span-2 flex items-center gap-2 text-xs text-gray-500">
             <Mail className="w-3.5 h-3.5" /> {user.email} <span className="text-gray-600">· email can't be changed here</span>
           </div>
+          {/* Admins editing someone else use the admin console's own password reset */}
+          {isSelf && <div className="sm:col-span-2 mt-2"><ChangePassword /></div>}
         </div>
 
         <div className="flex justify-end gap-2 px-6 py-5">
