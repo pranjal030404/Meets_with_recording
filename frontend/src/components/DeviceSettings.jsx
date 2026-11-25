@@ -40,7 +40,7 @@ export default function DeviceSettings({ onClose, initialTab = 'audio' }) {
           ].map(({ id, icon: Icon, label }) => (
             <button key={id} onClick={() => setTab(id)}
               className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm transition-colors
-                ${tab === id ? 'bg-primary-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                ${tab === id ? 'bg-primary-600 text-ink' : 'text-gray-400 hover:text-white'}`}>
               <Icon className="w-4 h-4" /> {label}
             </button>
           ))}
@@ -135,11 +135,11 @@ export default function DeviceSettings({ onClose, initialTab = 'audio' }) {
               <div className="flex flex-wrap gap-2">
                 {[['off', 'None'], ['blur', 'Blur']].map(([id, label]) => (
                   <button key={id} type="button" onClick={() => setBackground(id)} aria-pressed={background === id}
-                    className={`rounded-lg px-4 py-2 text-sm ${background === id ? 'bg-primary-600 text-white' : 'bg-dark-400 text-gray-300'}`}>
+                    className={`rounded-lg px-4 py-2 text-sm ${background === id ? 'bg-primary-600 text-ink' : 'bg-dark-400 text-gray-300'}`}>
                     {label}
                   </button>
                 ))}
-                <label className={`cursor-pointer rounded-lg px-4 py-2 text-sm ${background === 'image' ? 'bg-primary-600 text-white' : 'bg-dark-400 text-gray-300'}`}>
+                <label className={`cursor-pointer rounded-lg px-4 py-2 text-sm ${background === 'image' ? 'bg-primary-600 text-ink' : 'bg-dark-400 text-gray-300'}`}>
                   Choose a picture
                   <input type="file" accept="image/*" className="sr-only" onChange={chooseImage} />
                 </label>

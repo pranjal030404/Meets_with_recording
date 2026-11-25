@@ -176,7 +176,7 @@ export default function Whiteboard({ roomId, onClose }) {
               <button
                 key={id}
                 onClick={() => setTool(id)}
-                className={`p-2 rounded-lg transition-colors ${tool === id ? 'bg-primary-600' : 'bg-dark-400 hover:bg-dark-500'}`}
+                className={`p-2 rounded-lg transition-colors ${tool === id ? 'bg-primary-600 text-ink' : 'bg-dark-400 hover:bg-dark-500'}`}
                 title={label}
                 aria-label={label}
                 aria-pressed={tool === id}

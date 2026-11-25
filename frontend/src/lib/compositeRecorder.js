@@ -35,7 +35,7 @@ export function createCompositeVideo(getTiles) {
   }
 
   const drawTile = (tile, x, y, w, h) => {
-    ctx.fillStyle = '#1b1c1f'
+    ctx.fillStyle = '#211f1d'
     ctx.fillRect(x, y, w, h)
     const video = tile.track?.readyState === 'live' ? player(tile.track) : null
     if (video?.videoWidth) {
@@ -45,7 +45,7 @@ export function createCompositeVideo(getTiles) {
       ctx.drawImage(video, x + (w - vw) / 2, y + (h - vh) / 2, vw, vh)
     } else {
       const r = Math.min(w, h) * 0.18
-      ctx.fillStyle = '#2563eb'
+      ctx.fillStyle = '#8f5f1b'
       ctx.beginPath()
       ctx.arc(x + w / 2, y + h / 2, r, 0, Math.PI * 2)
       ctx.fill()
@@ -75,7 +75,7 @@ export function createCompositeVideo(getTiles) {
 
   const draw = () => {
     const tiles = getTiles()
-    ctx.fillStyle = '#0e0f11'
+    ctx.fillStyle = '#121110'
     ctx.fillRect(0, 0, WIDTH, HEIGHT)
     const screen = tiles.find((t) => t.isScreen)
     const people = tiles.filter((t) => !t.isScreen).slice(0, 25)

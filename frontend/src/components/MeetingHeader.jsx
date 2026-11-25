@@ -1,4 +1,5 @@
-import { Clock, Copy, Users, Grid3X3, Presentation, LayoutPanelLeft, Hand, Circle, Video, Info } from 'lucide-react'
+import { Clock, Copy, Users, Grid3X3, Presentation, LayoutPanelLeft, Hand, Circle, Info } from 'lucide-react'
+import BrandMark from './BrandMark'
 import { useState, useEffect } from 'react'
 import NetworkIndicator from './NetworkIndicator'
 
@@ -51,9 +52,7 @@ export default function MeetingHeader({
     <header className="glass border-b border-white/[0.06] px-2 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between gap-2">
       <div className="flex items-center gap-2 sm:gap-4 min-w-0">
         <div className="hidden sm:flex items-center gap-2.5 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-primary-400 flex items-center justify-center">
-            <Video className="w-4 h-4 text-white" />
-          </div>
+          <BrandMark size="sm" />
         </div>
         <h1 className="text-base sm:text-lg font-semibold font-display truncate max-w-[28vw] sm:max-w-[220px]">{title || 'Meeting'}</h1>
         <div className="flex items-center gap-2 text-gray-400 text-sm tabular-nums">
@@ -79,7 +78,7 @@ export default function MeetingHeader({
                 onClick={() => onLayoutChange(id)}
                 className={`p-2 rounded-lg transition-colors ${
                   layout === id
-                    ? 'bg-primary-600 text-white'
+                    ? 'bg-primary-600 text-ink'
                     : 'text-gray-400 hover:text-white hover:bg-dark-400'
                 }`}
                 title={label}

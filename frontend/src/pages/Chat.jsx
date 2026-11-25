@@ -189,7 +189,7 @@ function ChatWorkspace() {
                   <div className="flex items-center justify-between gap-2">
                     <p className={`text-xs truncate ${unread ? 'text-gray-300' : 'text-gray-500'}`}>{conv.lastMessagePreview || 'No messages yet'}</p>
                     {unread && (
-                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-primary-500 text-white text-[10px] font-semibold flex items-center justify-center shrink-0">
+                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-primary-500 text-ink text-[10px] font-semibold flex items-center justify-center shrink-0">
                         {conv.unreadCount > 99 ? '99+' : conv.unreadCount}
                       </span>
                     )}
@@ -624,7 +624,7 @@ function ConversationView({
           <button
             onClick={handleSend}
             disabled={!draft.trim()}
-            className="p-2.5 rounded-xl bg-primary-500 text-white hover:bg-primary-400 disabled:opacity-30 disabled:hover:bg-primary-500 transition-colors"
+            className="p-2.5 rounded-xl bg-primary-500 text-ink hover:bg-primary-400 disabled:opacity-30 disabled:hover:bg-primary-500 transition-colors"
             title="Send (Enter)"
             aria-label="Send message"
           >
@@ -799,7 +799,7 @@ function MeetingCard({ data }) {
     <div className="mt-2 rounded-2xl bg-primary-500/10 border border-primary-500/25 p-4 max-w-sm">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-primary-400 flex items-center justify-center">
-          <Phone className="w-5 h-5 text-white" />
+          <Phone className="w-5 h-5 text-ink" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-gray-100 truncate">{data.title || 'Meeting'}</p>

@@ -268,7 +268,7 @@ export default function ChatPanel({ roomId, onClose }) {
           />
           <button type="submit" disabled={(!newMessage.trim() && !pendingFile) || isUploading}
             aria-label="Send message"
-            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full bg-primary-500 hover:from-primary-400 hover:to-primary-600 text-white transition-colors disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed">
+            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full bg-primary-500 hover:from-primary-400 hover:to-primary-600 text-ink transition-colors disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed">
             <Send className="w-4 h-4 -ml-0.5" />
           </button>
         </div>

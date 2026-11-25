@@ -1,17 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Video, Plus, Calendar, Link2, Users, MonitorPlay, ArrowRight } from 'lucide-react'
+import { Video, Plus, Link2, ArrowRight } from 'lucide-react'
 import api from '../lib/api'
 import { useMeetingStore } from '../store/meetingStore'
 import AppShell from '../components/AppShell'
 import toast from 'react-hot-toast'
-
-const FEATURES = [
-  { icon: Video, title: 'HD video calls', text: 'Video and audio routed through an SFU media server.' },
-  { icon: Users, title: 'Team workspaces', text: 'Teams with members, roles and channels.' },
-  { icon: Calendar, title: 'Scheduling', text: 'Plan meetings with reminders and notifications.' },
-  { icon: MonitorPlay, title: 'Recording and transcripts', text: 'Record a session and download its transcript.' },
-]
 
 const when = (m) => new Date(m.scheduledAt || m.startedAt || m.createdAt)
 const STATUS = {
@@ -70,20 +63,19 @@ export default function Home() {
       if (d) return d
       return a.status === 'scheduled' ? when(a) - when(b) : when(b) - when(a)
     })
-    .slice(0, 6)
+    .slice(0, 12)
 
   return (
     <AppShell wide>
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-8 lg:py-10">
+      <div className="mx-auto max-w-[1600px] px-4 py-8 sm:px-8">
         <h1 className="page-title">Home</h1>
         <p className="page-sub">{new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}</p>
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-[2fr_3fr]">
-          <section className="card self-start p-6">
-            <h2 className="font-display text-lg font-semibold">Start or join</h2>
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <div className="mt-6 space-y-4">
+          <section aria-label="Start or join" className="card flex flex-col gap-4 p-4 lg:flex-row lg:items-end lg:justify-between lg:p-6">
+            <div className="grid gap-2 sm:flex">
               <button onClick={handleNewMeeting} disabled={isLoading} className="btn btn-primary btn-lg">
-                {isLoading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Video className="h-4 w-4" strokeWidth={1.5} />}
+                {isLoading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink/30 border-t-ink" /> : <Video className="h-4 w-4" strokeWidth={1.5} />}
                 {isLoading ? 'Creating…' : 'New meeting'}
               </button>
               <Link to="/join" className="btn btn-secondary btn-lg">
@@ -91,14 +83,14 @@ export default function Home() {
                 Join meeting
               </Link>
             </div>
-            <form onSubmit={handleJoinMeeting} className="mt-6 border-t border-white/[0.06] pt-6">
+            <form onSubmit={handleJoinMeeting} className="w-full lg:max-w-md">
               <label htmlFor="join-code" className="field-label">Meeting code or link</label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Link2 className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" strokeWidth={1.5} />
-                  <input id="join-code" type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} className="input min-h-11 pl-10" placeholder="abc123" />
+                  <input id="join-code" type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} className="input min-h-12 pl-10" placeholder="abc123" />
                 </div>
-                <button type="submit" className="btn btn-secondary min-h-11">Join</button>
+                <button type="submit" className="btn btn-secondary min-h-12">Join</button>
               </div>
             </form>
           </section>
@@ -147,16 +139,6 @@ export default function Home() {
             )}
           </section>
         </div>
-
-        <ul className="mt-12 grid gap-x-6 gap-y-8 border-t border-white/[0.08] pt-8 sm:grid-cols-2 lg:grid-cols-4">
-          {FEATURES.map(({ icon: Icon, title, text }) => (
-            <li key={title}>
-              <Icon className="h-[18px] w-[18px] text-gray-400" strokeWidth={1.5} />
-              <h3 className="mt-3 text-sm font-medium text-gray-100">{title}</h3>
-              <p className="mt-1 text-sm text-gray-400">{text}</p>
-            </li>
-          ))}
-        </ul>
       </div>
     </AppShell>
   )

@@ -35,7 +35,7 @@ export function PrimaryButton({ children, className = '', ...props }) {
   return (
     <button
       {...props}
-      className={`w-full py-2.5 rounded-full text-sm font-semibold bg-primary-500 hover:bg-primary-400 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`w-full py-2.5 rounded-full text-sm font-semibold bg-primary-500 hover:bg-primary-400 text-ink transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
     >
       {children}
     </button>
