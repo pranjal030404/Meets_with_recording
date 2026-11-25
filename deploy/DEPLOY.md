@@ -13,7 +13,7 @@ pm2 start ecosystem.config.cjs --env production
 ## 2. Frontend
 ```bash
 cd /var/www/Meets_with_recording/frontend
-npm install serve
+npm ci
 npm run build
 pm2 start ecosystem.config.cjs
 ```
