@@ -10,6 +10,7 @@ import mediasoupService from '../lib/mediasoup.js';
 import { canManageMeeting, isMeetingHost, getMeetingRole, contributorAllowed } from '../lib/meetingPermissions.js';
 import { saveRuntime, loadRuntime, deleteRuntime } from '../services/roomRuntimeStore.js';
 import { endMeeting } from '../services/meetingLifecycle.js';
+import { syncMeetingStatus } from '../services/meetingStatus.js';
 import { persistLiveTranscript, scheduleTranscriptCheckpoint, cancelTranscriptCheckpoint } from '../services/liveTranscriptStore.js';
 import { socketConnections, socketDisconnects, socketEvents, socketRateLimited } from '../observability/metrics.js';
 import { createSocketLimiter } from '../lib/socketLimiter.js';
@@ -300,6 +301,10 @@ export const initializeSocketHandlers = (io) => {
 
         socket.join(roomId);
         socket.roomId = roomId;
+        if (socket.connected) {
+          socket.data.inMeeting = true;
+          syncMeetingStatus(io, socket.user.id);
+        }
 
         if (!roomParticipants.has(roomId)) {
           roomParticipants.set(roomId, new Map());
@@ -1512,6 +1517,8 @@ function handleRoomLeave(socket, io) {
 
     socket.leave(roomId);
     socket.roomId = null;
+    socket.data.inMeeting = false;
+    syncMeetingStatus(io, socket.user.id);
 
     console.log(`${socket.user.name} left room: ${roomId}`);
   }
