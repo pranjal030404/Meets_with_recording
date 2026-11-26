@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import api from '../lib/api'
 
 const SIZES = {
   xs: 'w-6 h-6 text-[9px]',
@@ -21,6 +22,14 @@ const colorOf = (key = '') => {
   return PALETTE[h % PALETTE.length]
 }
 
+// Uploaded photos are private: <img> authenticates with a cookie that any signed-in API call (re)issues.
+// If a photo fails, refresh that cookie once (shared by every avatar failing at the same time).
+let cookieRefresh = null
+const refreshAssetCookie = () => {
+  cookieRefresh ||= api.get('/auth/me').finally(() => { cookieRefresh = null })
+  return cookieRefresh
+}
+
 /**
  * One avatar for the whole app. Shows the photo when it loads, otherwise coloured initials
  * (a missing/broken image never shows the browser's broken-image icon + alt text).
@@ -30,7 +39,16 @@ export default function Avatar({ user, name, src, size = 'md', online, ring = fa
   const label = name || user?.name || '?'
   const url = src !== undefined ? src : user?.avatar
   const [failed, setFailed] = useState(false)
-  useEffect(() => { setFailed(false) }, [url])
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => { setFailed(false); setAttempt(0) }, [url])
+
+  const handleError = () => {
+    setFailed(true)
+    if (attempt > 0 || !url.startsWith('/uploads/') || !localStorage.getItem('token')) return
+    refreshAssetCookie()
+      .then(() => { setAttempt(1); setFailed(false) })
+      .catch(() => {}) // keep the initials
+  }
   const showImg = !!url && !failed
   const presence = online !== undefined ? online : undefined
 
@@ -38,9 +56,10 @@ export default function Avatar({ user, name, src, size = 'md', online, ring = fa
     <div className={`relative shrink-0 ${className}`}>
       {showImg ? (
         <img
+          key={attempt}
           src={url}
           alt=""
-          onError={() => setFailed(true)}
+          onError={handleError}
           className={`${SIZES[size]} rounded-full object-cover bg-dark-300 ${ring ? 'ring-2 ring-primary-500/40' : ''}`}
         />
       ) : (
