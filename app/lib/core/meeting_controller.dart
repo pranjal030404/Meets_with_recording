@@ -440,6 +440,63 @@ class MeetingController extends ChangeNotifier {
     }
   }
 
+  // ---- reconnecting ----
+  bool _rebuilding = false;
+  bool _rebuildAgain = false;
+
+  /// The server drops our transports when the socket disconnects (or a media worker dies): build new ones,
+  /// publish the microphone / camera / screen again, then re-join to receive everyone else.
+  Future<void> _rebuildMedia() async {
+    if (_rebuilding) {
+      _rebuildAgain = true;
+      return;
+    }
+    _rebuilding = true;
+    try {
+      do {
+        _rebuildAgain = false;
+        try {
+          await _discardMedia();
+          if (_disposed || _socket == null) return;
+          await _initMediasoup();
+          final audio = _localStream?.getAudioTracks() ?? [];
+          if (micOn && audio.isNotEmpty) await _produce(audio.first, 'audio');
+          final video = _localStream?.getVideoTracks() ?? [];
+          if (camOn && video.isNotEmpty) await _produce(video.first, 'video');
+          if (screenSharing && _screenStream != null) await _produceScreen(_screenStream!);
+          _socket?.emit('room:join', {'roomId': roomId});
+        } catch (e) {
+          debugPrint('media rebuild failed: $e');
+          infoMessage = 'Lost the media connection. Try leaving and rejoining.';
+        }
+      } while (_rebuildAgain && !_disposed);
+    } finally {
+      _rebuilding = false;
+      _notify();
+    }
+  }
+
+  Future<void> _discardMedia() async {
+    final send = _sendT, recv = _recvT;
+    _sendT = _recvT = null;
+    _sendPending = _recvPending = null;
+    _audioProducer = _videoProducer = _screenProducer = null;
+    _produceWaiters.clear();
+    _consumers.clear();
+    _producerMap.clear();
+    final old = peers.values.toList();
+    peers.clear();
+    _notify();
+    try {
+      await send?.close();
+      await recv?.close();
+    } catch (_) {}
+    for (final p in old) {
+      await p.video?.dispose();
+      await p.screen?.dispose();
+    }
+  }
+
   // ---- producing ----
   final Map<String, Completer<ms.Producer>> _produceWaiters = {};
 
@@ -501,13 +558,8 @@ class MeetingController extends ChangeNotifier {
       final t = await _ensureSend();
       stream = await _acquireCapture();
       if (stream == null) return;
-      final track = stream.getVideoTracks().first;
 
-      final c = Completer<ms.Producer>();
-      _produceWaiters['screen'] = c;
-      // stopTracks: false because a recording may be using the same capture
-      t.produce(track: track, stream: stream, source: 'screen', appData: {'mediaType': 'screen'}, stopTracks: false);
-      await c.future.timeout(const Duration(seconds: 20));
+      await _produceScreen(stream, t);
 
       screenSharing = true;
       _socket!.emit('media:screen-share', {'isScreenSharing': true});
@@ -522,6 +574,15 @@ class MeetingController extends ChangeNotifier {
       screenShareBusy = false;
       _notify();
     }
+  }
+
+  Future<void> _produceScreen(MediaStream stream, [ms.Transport? transport]) async {
+    final t = transport ?? await _ensureSend();
+    final c = Completer<ms.Producer>();
+    _produceWaiters['screen'] = c;
+    // stopTracks: false because a recording may be using the same capture
+    t.produce(track: stream.getVideoTracks().first, stream: stream, source: 'screen', appData: {'mediaType': 'screen'}, stopTracks: false);
+    await c.future.timeout(const Duration(seconds: 20));
   }
 
   Future<void> stopScreenShare() async {
@@ -689,7 +750,7 @@ class MeetingController extends ChangeNotifier {
   void _registerListeners() {
     final s = _socket!;
     void rejoin(dynamic _) {
-      if (phase == RoomPhase.connected) s.emit('room:join', {'roomId': roomId});
+      if (phase == RoomPhase.connected) _rebuildMedia();
     }
 
     _on('connect', rejoin);
@@ -750,10 +811,7 @@ class MeetingController extends ChangeNotifier {
       await _consume(d['producerId'], d['userId'].toString(), (d['userName'] ?? '').toString(), (d['mediaType'] ?? d['kind']).toString());
     });
     _on('mediasoup:producerClosed', (d) => _removeProducer(d['producerId'].toString()));
-    _on('media:reconnect-required', (_) {
-      infoMessage = 'The media server restarted. Rejoin the meeting if audio/video stops.';
-      _notify();
-    });
+    _on('media:reconnect-required', (_) => _rebuildMedia());
     _on('media:active-speakers', (d) {
       final ids = ((d['userIds'] as List?) ?? []).map((e) => e.toString()).toSet();
       for (final p in peers.values) {

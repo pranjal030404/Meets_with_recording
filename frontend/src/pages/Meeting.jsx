@@ -381,11 +381,12 @@ export default function Meeting() {
     const socket = socketRef.current
     if (!socket) return
 
-    // Re-emit room:join on socket reconnect
+    // The server drops our transports when the socket disconnects, so a reconnect must rebuild media, not just re-join
     const onReconnect = () => {
-      if (roomId) {
-        socket.emit('room:join', { roomId })
-      }
+      if (!roomId) return
+      const { mediasoupReady, sessionPhase, recoverMedia } = useMeetingStore.getState()
+      if (mediasoupReady || sessionPhase === 'connected') recoverMedia('reconnect')
+      else socket.emit('room:join', { roomId })
     }
     socket.on('connect', onReconnect)
 
