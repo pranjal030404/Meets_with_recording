@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { Op } from 'sequelize';
 import User from '../models/User.js';
-import { protect, generateToken, clearAssetCookie, revokeToken } from '../middleware/auth.js';
+import { protect, generateToken, clearAssetCookie, revokeToken, syncAssetCookie } from '../middleware/auth.js';
 import { ensureSubscription, getSubscriptionDetails } from '../services/subscriptionService.js';
 import { getSetting } from '../services/settingsService.js';
 import { isSmtpConfigured, sendVerificationEmail, sendPasswordCodeEmail } from '../services/mailService.js';
@@ -80,6 +80,7 @@ router.post('/signup', async (req, res) => {
     }
 
     const token = generateToken(user.id);
+    syncAssetCookie(req, res, token);
 
     res.status(201).json({
       success: true,
@@ -149,6 +150,7 @@ router.post('/login', async (req, res) => {
 
     // isOnline is owned by the socket connect/disconnect handlers, not by login
     const token = generateToken(user.id);
+    syncAssetCookie(req, res, token);
 
     res.json({
       success: true,
@@ -303,7 +305,9 @@ router.post('/change-password', protect, async (req, res) => {
     await req.user.save();
     await revokeUserSessions(req.user.id);
 
-    res.json({ success: true, message: 'Password changed', data: { token: generateToken(req.user.id) } });
+    const token = generateToken(req.user.id);
+    syncAssetCookie(req, res, token); // replaces the cookie holding the just-revoked token
+    res.json({ success: true, message: 'Password changed', data: { token } });
   } catch (error) {
     console.error('Change password error:', error);
     res.status(500).json({ success: false, message: 'Error changing password' });

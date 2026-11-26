@@ -1,9 +1,10 @@
 import os from 'os';
-import crypto from 'crypto';
 
 /** Identity of THIS process as a media/meeting-owner node. Nothing here is hardcoded: all from env. */
 export const nodeConfig = {
-  nodeId: process.env.NODE_ID || `${os.hostname()}-${crypto.randomBytes(3).toString('hex')}`,
+  // Stable across restarts (one process per host+port), so a restarted server still owns its meetings instead of
+  // treating its previous run as another node. A getter because .env is loaded after this module is imported.
+  get nodeId() { return process.env.NODE_ID || `${os.hostname()}-${process.env.PORT || 5000}`; },
   host: os.hostname(),
   region: process.env.NODE_REGION || 'default',
   zone: process.env.NODE_ZONE || 'default',

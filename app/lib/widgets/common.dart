@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../core/api.dart';
 import '../core/config.dart';
+import '../core/files.dart';
 import '../core/theme.dart';
 
 void toast(BuildContext context, String msg, {bool error = false}) {
@@ -44,7 +45,10 @@ class UserAvatar extends StatelessWidget {
     return CircleAvatar(
       radius: radius,
       backgroundColor: cs.primaryContainer,
-      foregroundImage: resolved != null ? NetworkImage(resolved) : null,
+      // Uploads on our server need the token; never send it to an external image host.
+      foregroundImage: resolved != null
+          ? NetworkImage(resolved, headers: resolved.startsWith('${Config.serverUrl}/') ? FileService.authHeaders : null)
+          : null,
       onForegroundImageError: resolved != null ? (_, __) {} : null,
       child: Text(initial, style: TextStyle(color: cs.onPrimaryContainer, fontSize: radius * 0.8, fontWeight: FontWeight.w600)),
     );

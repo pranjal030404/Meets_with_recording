@@ -6,6 +6,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/config.dart';
 import '../core/meeting_controller.dart';
+import '../core/session.dart';
 import '../widgets/common.dart';
 import 'meeting_panels.dart';
 import 'meeting_tools.dart';
@@ -417,13 +418,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
     );
   }
 
-  Widget _avatarFill(String name) => Center(
-        child: CircleAvatar(
-          radius: _pip ? 20 : 34,
-          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-          child: Text(name.isEmpty ? '?' : name[0].toUpperCase(), style: TextStyle(fontSize: 28, color: Theme.of(context).colorScheme.onPrimaryContainer)),
-        ),
-      );
+  Widget _avatarFill(String name, String? url) => Center(child: UserAvatar(name: name, url: url, radius: _pip ? 20 : 34));
 
   Widget _selfTile() {
     final show = c.camOn && c.localRenderer != null;
@@ -431,7 +426,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
       label: 'You',
       muted: !c.micOn,
       hand: c.handRaised,
-      child: show ? RTCVideoView(c.localRenderer!, mirror: c.frontCamera && _mirrorSelf, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover) : _avatarFill(c.myName),
+      child: show ? RTCVideoView(c.localRenderer!, mirror: c.frontCamera && _mirrorSelf, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover) : _avatarFill(c.myName, Session.instance.user?['avatar']?.toString()),
     );
   }
 
@@ -447,7 +442,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
       onLongPress: () => _peerMenu(p),
       child: show
           ? RTCVideoView(r, objectFit: forceScreen ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)
-          : _avatarFill(p.name),
+          : _avatarFill(p.name, p.avatar),
     );
   }
 

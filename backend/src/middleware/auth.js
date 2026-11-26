@@ -5,7 +5,7 @@ import { isRevoked, revokeToken } from '../lib/sessionRevocation.js';
 
 const ASSET_COOKIE = 'mc_assets';
 /** Keep the HttpOnly file-access cookie in step with the session token (Path=/uploads only). Lets <img>/<video>/<a> load private files with no frontend change. */
-const syncAssetCookie = (req, res, token) => {
+export const syncAssetCookie = (req, res, token) => {
   if (req.headers.cookie?.includes(`${ASSET_COOKIE}=${token}`)) return;
   const secure = req.secure || process.env.NODE_ENV === 'production';
   res.append('Set-Cookie', `${ASSET_COOKIE}=${token}; Path=/uploads; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}${secure ? '; Secure' : ''}`);

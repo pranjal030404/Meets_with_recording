@@ -228,6 +228,8 @@ class MediasoupClientService {
           opusPtime: 20,
         },
         appData: { mediaType: 'audio' },
+        // the app stops its own tracks: closing transports for a reconnect must not kill the microphone
+        stopTracks: false,
       });
 
       this.producers.audio.on('transportclose', () => {
@@ -304,6 +306,7 @@ class MediasoupClientService {
           videoGoogleStartBitrate: 1000,
         },
         appData: { mediaType: 'screen' },
+        stopTracks: false,
       });
 
       this.producers.screen.on('transportclose', () => {

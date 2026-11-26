@@ -1,6 +1,7 @@
+import Avatar from './Avatar'
 import { useRef, useEffect, useState } from 'react'
 import { useMeetingStore } from '../store/meetingStore'
-import { Mic, MicOff, VideoOff, Pin, PinOff, Hand, Maximize2, User, Star } from 'lucide-react'
+import { Mic, MicOff, VideoOff, Pin, PinOff, Hand, Maximize2, Star } from 'lucide-react'
 
 const getUserId = (u) => u?.id || u?._id
 
@@ -232,11 +233,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
     >
       {isVideoOff || !stream || (!isLocal && !hasRemoteVideo) ? (
         <div className="w-full h-full flex items-center justify-center bg-dark-300">
-          <div className={`${small ? 'w-14 h-14' : 'w-24 h-24'} bg-primary-500 rounded-full flex items-center justify-center`}>
-            <span className={`${small ? 'text-xl' : 'text-3xl'} font-semibold text-ink`}>
-              {user?.name?.charAt(0).toUpperCase() || <User className={small ? 'w-6 h-6' : 'w-10 h-10'} />}
-            </span>
-          </div>
+          <Avatar user={user} size={small ? 'lg' : 'xl'} />
         </div>
       ) : (
         <video

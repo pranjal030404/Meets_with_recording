@@ -306,7 +306,8 @@ export const useMeetingStore = create((set, get) => ({
     set({ mediaLink: 'reconnecting' })
     toast.loading('Reconnecting media…', { id: 'media-recover' })
     try {
-      const roomId = currentMeeting.roomId
+      // inside a breakout room we must come back to that room, not the main one
+      const roomId = window.location.pathname.split('/meeting/')[1] || currentMeeting.roomId
       const token = getSocket()?.auth?.token
       for (let attempt = 0; attempt < 8; attempt++) {
         if (get().sessionPhase === 'leaving' || get().sessionPhase === 'idle') return
@@ -327,6 +328,7 @@ export const useMeetingStore = create((set, get) => ({
           if (mediasoupClient) { mediasoupClient.closeAll(); mediasoupClient = null }
           const res = await get().initMediasoup(socket, roomId)
           if (!res.success) throw new Error(res.message || 'media init failed')
+          const socketId = socket.id
           const { localStream, screenStream, isMuted, isVideoOff, isScreenSharing } = get()
           const a = localStream?.getAudioTracks()[0], v = localStream?.getVideoTracks()[0], sc = screenStream?.getVideoTracks()[0]
           await Promise.all([
@@ -334,6 +336,8 @@ export const useMeetingStore = create((set, get) => ({
             v && v.readyState === 'live' && !isVideoOff ? get().produceVideo(v) : null,
             isScreenSharing && sc && sc.readyState === 'live' ? get().produceScreen(sc) : null,
           ])
+          // dropped again while rebuilding: the server has already discarded these transports, start over
+          if (!socket.connected || socket.id !== socketId) throw new Error('connection dropped during recovery')
           socket.emit('room:join', { roomId }) // server answers with participants + existing producers => normal consume path
           toast.success('Media reconnected', { id: 'media-recover' })
           return
@@ -350,8 +354,32 @@ export const useMeetingStore = create((set, get) => ({
     try {
       const producer = await mediasoupClient.produceAudio(track)
       set(s => ({ producers: { ...s.producers, audio: producer } }))
+      producer.on('trackended', () => get().restoreMicrophone())
       return producer
     } catch (e) { if (e?.code === 'WEBINAR_VIEW_ONLY') toast('Webinar mode: only hosts can present', { id: 'webinar-view-only', icon: '🎤' }); else console.error('Produce audio error:', e) }
+  },
+
+  /** The microphone vanished (headset unplugged, Bluetooth switched, taken by the system): move to another one. */
+  restoreMicrophone: async () => {
+    if (get().isMuted || get().sessionPhase === 'leaving' || get().sessionPhase === 'idle') return
+    set({ selectedAudioDevice: null }) // the chosen device may be gone; fall back to the default
+    try {
+      const gum = await navigator.mediaDevices.getUserMedia({ audio: get().getAudioConstraints() })
+      const track = gum.getAudioTracks()[0]
+      const { localStream, isMuted, sessionPhase } = get()
+      if (isMuted || !localStream || sessionPhase === 'leaving' || sessionPhase === 'idle') return track.stop()
+      localStream.getAudioTracks().forEach(t => { t.stop(); localStream.removeTrack(t) })
+      localStream.addTrack(track)
+      await get().produceAudio(track)
+      mixerAdd(track)
+      get().startAudioLevelMonitor()
+      toast('Your microphone changed, switched to the default one', { id: 'mic-restored' })
+    } catch (error) {
+      console.error('Microphone restore failed:', error)
+      set({ isMuted: true, isSpeaking: false, audioLevel: 0 })
+      getSocket()?.emit('media:toggle-mute', { isMuted: true })
+      toast.error('Your microphone disconnected. Reconnect it and unmute.', { id: 'mic-restored', duration: 15000 })
+    }
   },
 
   /** Switch background blur / picture, for the camera that is on now and every later one. */
@@ -1079,7 +1107,7 @@ export const useMeetingStore = create((set, get) => ({
   switchAudioOutput: async (deviceId) => {
     set({ selectedAudioOutputDevice: deviceId })
     try {
-      const videoElements = document.querySelectorAll('video')
+      const videoElements = document.querySelectorAll('video, audio')
       for (const video of videoElements) {
         if (typeof video.setSinkId === 'function') {
           await video.setSinkId(deviceId)
