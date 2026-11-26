@@ -83,6 +83,22 @@ export async function sendVerificationEmail(user, token) {
   });
 }
 
+export async function sendPasswordCodeEmail(user, code) {
+  const name = APP_NAME();
+  return sendMail({
+    to: user.email,
+    subject: `${code} is your ${name} password change code`,
+    text: `Hi ${user.name},\n\nYour code to change your ${name} password is ${code}. It expires in 10 minutes.\n\nIf you didn't ask for this, someone is signed in to your account: change your password.`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#111">
+      <h2 style="margin:0 0 12px">Password change code</h2>
+      <p>Hi ${esc(user.name)},</p>
+      <p style="font-size:28px;letter-spacing:6px;font-weight:700;margin:20px 0">${code}</p>
+      <p>Enter it in ${esc(name)} to change your password. It expires in 10 minutes.</p>
+      <p style="font-size:12px;color:#888">If you didn't ask for this, someone is signed in to your account: change your password.</p>
+    </div>`
+  });
+}
+
 /** Team invitation. `joined` = the person already has an account and was added; otherwise they're asked to sign up. */
 export async function sendTeamInviteEmail({ to, inviterName, team, role, joined, inviteCode }) {
   const name = APP_NAME();

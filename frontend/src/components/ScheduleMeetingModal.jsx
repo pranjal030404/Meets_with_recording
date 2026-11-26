@@ -3,6 +3,7 @@ import { User, Users, Plus, Clock, Copy, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useMeetingStore } from '../store/meetingStore'
 import useTeamStore from '../store/teamStore'
+import PeoplePicker, { isEmail } from './PeoplePicker'
 
 const REMINDERS = [{ time: 15, unit: 'minutes' }, { time: 1, unit: 'hours' }]
 
@@ -26,7 +27,9 @@ export default function ScheduleMeetingModal({ teamId = '', day, onClose, onSche
   const createMeeting = useMeetingStore(s => s.createMeeting)
   const { teams, fetchTeams } = useTeamStore()
   const [kind, setKind] = useState(teamId ? 'team' : 'personal')
-  const [form, setForm] = useState({ title: '', description: '', scheduledAt: defaultTime(day), teamId, emails: '' })
+  const [form, setForm] = useState({ title: '', description: '', scheduledAt: defaultTime(day), teamId })
+  const [invitees, setInvitees] = useState([])
+  const [typed, setTyped] = useState('')
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState(null)
   const [copied, setCopied] = useState(false)
@@ -43,9 +46,10 @@ export default function ScheduleMeetingModal({ teamId = '', day, onClose, onSche
     const at = new Date(form.scheduledAt)
     if (at <= new Date()) return toast.error('Pick a time in the future')
     if (kind === 'team' && !chosenTeam) return toast.error('Pick a team')
-    const emails = form.emails.split(/[\s,;]+/).filter(Boolean)
-    const invalid = emails.find(x => !/^[^@]+@[^@]+\.[^@]+$/.test(x))
-    if (kind === 'personal' && invalid) return toast.error(`"${invalid}" is not an email address`)
+    // Whatever is still in the search box: an address counts, a half-typed name must be picked first
+    const rest = typed.trim()
+    if (kind === 'personal' && rest && !isEmail(rest)) return toast.error(`Pick "${rest}" from the list, or clear the box`)
+    const guests = rest ? [...invitees, { email: rest }] : invitees
 
     setSaving(true)
     const result = await createMeeting({
@@ -53,7 +57,7 @@ export default function ScheduleMeetingModal({ teamId = '', day, onClose, onSche
       description: form.description,
       scheduledAt: at.toISOString(),
       teamId: kind === 'team' ? chosenTeam : undefined,
-      invitees: kind === 'personal' ? emails.map(email => ({ email })) : [],
+      invitees: kind === 'personal' ? guests.map(({ userId, email }) => ({ userId, email })) : [],
       reminders: REMINDERS
     })
     setSaving(false)
@@ -119,7 +123,7 @@ export default function ScheduleMeetingModal({ teamId = '', day, onClose, onSche
               ) : (
                 <div>
                   <label className={label}>Invite people</label>
-                  <input type="text" value={form.emails} onChange={set('emails')} className="input" placeholder="Email addresses, separated by commas (optional)" />
+                  <PeoplePicker value={invitees} onChange={setInvitees} text={typed} onText={setTyped} />
                   <p className="text-xs text-gray-500 mt-1.5">People with an account get a notification. Send the link to anyone else.</p>
                 </div>
               )}

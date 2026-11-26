@@ -15,6 +15,7 @@ import {
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
+import InviteDetails from '../components/InviteDetails'
 import MeetingGate, { meetingGate } from '../components/MeetingGate'
 
 export default function JoinMeeting() {
@@ -25,6 +26,7 @@ export default function JoinMeeting() {
 
   const [roomId, setRoomId] = useState(paramRoomId || '')
   const [meeting, setMeeting] = useState(null)
+  const [people, setPeople] = useState([])
   const [localStream, setLocalStreamState] = useState(null)
   // Camera and mic start OFF: the browser's permission prompt only appears when the user turns one on
   const [isMuted, setIsMuted] = useState(true)
@@ -118,6 +120,7 @@ export default function JoinMeeting() {
 
     if (result.success) {
       setMeeting(result.meeting)
+      setPeople(result.people || [])
     } else {
       toast.error('Meeting not found')
       setMeeting(null)
@@ -291,7 +294,7 @@ export default function JoinMeeting() {
           Back to home
         </button>
 
-        <div className="grid lg:grid-cols-2 gap-8 items-stretch">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-stretch">
           {/* Video Preview */}
           <div className="glass rounded-2xl overflow-hidden flex flex-col">
             <div className="aspect-video relative">
@@ -359,7 +362,7 @@ export default function JoinMeeting() {
                         <ChevronDown className="w-3.5 h-3.5" />
                       </button>
                       {showDeviceDropdown === 'audio' && (
-                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl py-1.5 min-w-[250px] z-20 animate-slide-up border-white/10">
+                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl py-1.5 w-[min(250px,calc(50vw+3rem))] z-20 animate-slide-up border-white/10">
                           <p className="px-3.5 py-1.5 text-[11px] text-gray-500 font-semibold">Microphone</p>
                           {devices.audioinput.map(d => (
                             <button key={d.deviceId} onClick={() => switchDevice('audioinput', d.deviceId)}
@@ -391,7 +394,7 @@ export default function JoinMeeting() {
                         <ChevronDown className="w-3.5 h-3.5" />
                       </button>
                       {showDeviceDropdown === 'video' && (
-                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl py-1.5 min-w-[250px] z-20 animate-slide-up">
+                        <div className="absolute bottom-full mb-2 left-0 glass-strong rounded-xl py-1.5 w-[min(250px,calc(50vw+3rem))] z-20 animate-slide-up">
                           <p className="px-3.5 py-1.5 text-[11px] text-gray-500 font-semibold">Camera</p>
                           {devices.videoinput.map(d => (
                             <button key={d.deviceId} onClick={() => switchDevice('videoinput', d.deviceId)}
@@ -503,6 +506,7 @@ export default function JoinMeeting() {
               </div>
             )}
             </>)}
+            {meeting && !meeting.isInstant && <InviteDetails meeting={meeting} people={people} user={user} />}
           </div>
         </div>
       </div>

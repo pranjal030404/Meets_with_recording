@@ -140,7 +140,7 @@ export default function Home() {
 
         <WeekTape days={days} visits={week} unknown={unknown} now={now} loading={meetings === null} failed={loadFailed} />
 
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
           <section className="card p-4 sm:p-6">
             <CardHead title="The minutes" to="/history" link="All meetings" />
             {meetings === null && <div className="skeleton h-40 rounded-lg" aria-label="Loading meetings" />}
@@ -153,7 +153,7 @@ export default function Home() {
           </section>
 
           <div className="space-y-4">
-            <UpNext live={live} upcoming={upcoming} now={now} loading={meetings === null} failed={loadFailed} />
+            <UpNext userId={userId} live={live} upcoming={upcoming} now={now} loading={meetings === null} failed={loadFailed} />
             <ActionItems tasks={tasks} setTasks={setTasks} failed={tasksFailed} today={today} />
           </div>
         </div>
@@ -312,7 +312,7 @@ function Entry({ meeting, sessions }) {
 }
 
 // Countdown ring: the lit ticks are the share of the next 24 hours still to wait
-function UpNext({ live, upcoming, now, loading, failed }) {
+function UpNext({ live, upcoming, now, loading, failed, userId }) {
   const meeting = live || upcoming
   const at = upcoming && new Date(upcoming.scheduledAt)
   const wait = live || !at ? 0 : Math.max(0, at - now)
@@ -363,6 +363,9 @@ function UpNext({ live, upcoming, now, loading, failed }) {
             {live ? `Started ${clock(startOf(live))}` : `${dayName} at ${clock(at)}`}
             {invited ? ` · ${invited} invited` : ''}
           </p>
+          {meeting.host?.name && meeting.hostId !== userId && (
+            <p className="mt-1 truncate text-sm text-gray-400">Invited by <span className="text-gray-200">{meeting.host.name}</span></p>
+          )}
           <Link to={`/join/${meeting.roomId}`} className="btn btn-secondary mt-4 w-full">{live ? 'Join meeting' : 'Open meeting'}</Link>
         </div>
       )}

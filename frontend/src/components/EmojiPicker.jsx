@@ -92,7 +92,7 @@ export default function EmojiPicker({ onPick, onClose, className = '', closeOnPi
     <div
       ref={ref}
       onClick={(e) => e.stopPropagation()}
-      className={`absolute z-50 w-[19rem] glass-strong rounded-2xl border border-white/10 overflow-hidden ${className}`}
+      className={`absolute z-50 w-[19rem] max-w-[calc(100vw-1.5rem)] glass-strong rounded-2xl border border-white/10 overflow-hidden ${className}`}
     >
       <div className="p-2.5 pb-1.5">
         <div className="relative">

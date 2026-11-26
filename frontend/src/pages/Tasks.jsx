@@ -110,7 +110,7 @@ export function TasksPage({ teamId: fixedTeamId } = {}) {
       ) : isLoading ? (
         <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 text-gray-600 animate-spin" /></div>
       ) : (
-        <div className={`grid lg:grid-cols-3 gap-5 ${embedded ? "" : "flex-1"}`}>
+        <div className={`grid grid-cols-1 lg:grid-cols-3 gap-5 ${embedded ? "" : "flex-1"}`}>
           {COLUMNS.map(col => {
             const items = tasks.filter(t => t.status === col.key)
             return (
@@ -156,11 +156,11 @@ export function TasksPage({ teamId: fixedTeamId } = {}) {
 
 function StatCard({ label, value, icon: Icon, tone }) {
   return (
-    <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-4 flex items-center gap-4">
-      <div className={`w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center ${tone}`}>
+    <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-3 sm:p-4 flex items-center gap-3 sm:gap-4 max-[413px]:flex-col max-[413px]:items-start max-[413px]:gap-2">
+      <div className={`shrink-0 w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center ${tone}`}>
         <Icon className="w-5 h-5" />
       </div>
-      <div>
+      <div className="min-w-0">
         <p className="text-2xl font-semibold font-display">{value}</p>
         <p className="text-xs text-gray-500">{label}</p>
       </div>
@@ -201,7 +201,7 @@ function TaskCard({ task, onClick, onMove }) {
         ) : null}
       </div>
       {/* Quick status move */}
-      <div className="flex gap-1 mt-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex flex-wrap gap-1 mt-2.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
         {COLUMNS.filter(c => c.key !== task.status).map(c => (
           <button
             key={c.key}

@@ -102,6 +102,23 @@ export default function AppShell({ children, wide = false }) {
     return () => { unbindConv(); unbindPresence() }
   }, [user?.id])
 
+  // Menu drawer: Escape closes it and the page behind it does not scroll
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const onKey = (e) => e.key === 'Escape' && setSidebarOpen(false)
+    const desktop = window.matchMedia('(min-width: 1024px)')
+    const onResize = () => desktop.matches && setSidebarOpen(false)
+    const overflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', onKey)
+    desktop.addEventListener('change', onResize)
+    return () => {
+      document.body.style.overflow = overflow
+      document.removeEventListener('keydown', onKey)
+      desktop.removeEventListener('change', onResize)
+    }
+  }, [sidebarOpen])
+
   // Close status popover on outside click
   useEffect(() => {
     const handler = (e) => {
@@ -195,7 +212,7 @@ export default function AppShell({ children, wide = false }) {
       {/* User + status */}
       <div className="p-3 border-t border-white/[0.06] relative" ref={statusRef}>
         {statusOpen && (
-          <div className="absolute bottom-full left-3 right-3 mb-2 lg:bottom-3 lg:left-full lg:right-auto lg:mb-0 lg:ml-3 lg:w-80 glass-strong rounded-2xl border border-white/10 z-50">
+          <div className="absolute bottom-full left-3 right-3 mb-2 lg:bottom-3 lg:left-full lg:right-auto lg:mb-0 lg:ml-3 lg:w-80 glass-strong rounded-2xl border border-white/10 z-50 [@media(max-height:600px)]:max-h-[calc(100dvh-5rem)] [@media(max-height:600px)]:overflow-y-auto">
             {/* who am I + edit profile */}
             <div className="flex items-center gap-3 p-3 border-b border-white/[0.06]">
               <Avatar user={user} size="md" />
@@ -326,10 +343,10 @@ export default function AppShell({ children, wide = false }) {
 
       {/* Mobile sidebar */}
       {sidebarOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
+        <div className="lg:hidden fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Menu">
           <div className="absolute inset-0 bg-black/60" onClick={() => setSidebarOpen(false)} />
-          <aside className="relative w-72 flex-col glass-strong border-r border-white/[0.06] flex">
-            <button onClick={() => setSidebarOpen(false)} className="absolute top-4 right-4 p-1.5 text-gray-400 hover:text-white">
+          <aside className="relative w-72 max-w-[85vw] flex-col glass-strong border-r border-white/[0.06] flex">
+            <button onClick={() => setSidebarOpen(false)} aria-label="Close menu" className="absolute top-3 right-3 p-2.5 text-gray-400 hover:text-white">
               <X className="w-5 h-5" />
             </button>
             {sidebar(false)}
@@ -339,7 +356,7 @@ export default function AppShell({ children, wide = false }) {
 
       {/* Mobile top bar */}
       <div className="lg:hidden sticky top-0 z-30 glass-strong flex items-center justify-between px-4 py-3">
-        <button onClick={() => setSidebarOpen(true)} className="p-2 -ml-2 text-gray-300 hover:text-white">
+        <button onClick={() => setSidebarOpen(true)} aria-label="Open menu" aria-expanded={sidebarOpen} className="p-2.5 -ml-2.5 text-gray-300 hover:text-white">
           <Menu className="w-6 h-6" />
         </button>
         <Link to="/app" className="flex items-center gap-2">

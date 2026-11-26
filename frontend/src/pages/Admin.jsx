@@ -104,7 +104,7 @@ function Overview() {
 
   return (
     <div className="space-y-8">
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {cards.map(c => (
           <div key={c.label} className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-5">
             <div className="flex items-center justify-between mb-3">
@@ -117,7 +117,7 @@ function Overview() {
         ))}
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-5">
           <h3 className="font-semibold text-sm text-gray-300 mb-3">Newest members</h3>
           <div className="space-y-2">
@@ -168,7 +168,7 @@ function Analytics() {
 
   return (
     <div className="space-y-6">
-      <div className="grid lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <BarChart title="Meetings per day" data={data.meetingsPerDay} color="bg-primary-500/70" />
         <BarChart title="Messages per day" data={data.messagesPerDay} color="bg-primary-500/70" />
         <BarChart title="New signups per day" data={data.signupsPerDay} color="bg-primary-500/70" />
@@ -205,7 +205,7 @@ function BarChart({ title, data, color }) {
         {data.length === 0 && <p className="text-xs text-gray-600">No data yet.</p>}
         {data.map(d => (
           <div key={d.day} className="flex-1 flex flex-col items-center gap-1 group relative">
-            <span className="text-[9px] text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity">{d.count}</span>
+            <span className="text-[9px] text-gray-500 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">{d.count}</span>
             <div
               className={`w-full rounded-t ${color} min-h-[3px]`}
               style={{ height: `${(Number(d.count) / max) * 100}%` }}
@@ -273,13 +273,13 @@ function UsersTab() {
 
   return (
     <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-5">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="font-semibold text-sm text-gray-300">Users ({total})</h3>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
         {isSuper && <button onClick={() => setCreating(true)} className="btn btn-primary !py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4" /> Add user</button>}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-          <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search users" className="input pl-9 !py-2 text-sm w-56" />
+          <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search users" className="input pl-9 !py-2 text-sm !w-56 max-w-full" />
         </div>
         </div>
       </div>
@@ -326,7 +326,7 @@ function UsersTab() {
                   </td>
                   <td className="py-2.5 pr-4 text-gray-500">{new Date(u.createdAt).toLocaleDateString()}</td>
                   <td className="py-2.5">
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 whitespace-nowrap">
                       <button onClick={() => setHistoryUser(u)} className="text-xs text-primary-300 hover:underline">History</button>
                       {isSuper && <button onClick={() => setEditUser(u)} className="text-xs text-gray-300 hover:underline">Edit profile</button>}
                       {isSuper && (
@@ -415,9 +415,9 @@ function RolesTab() {
   if (isLoading) return <Spinner />
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex gap-2 mb-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap gap-2 mb-2">
             {[['user', 'User roles'], ['admin', 'Admin roles']].map(([k, l]) => (
               <button key={k} onClick={() => setScope(k)} className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${scope === k ? 'border-white/10 bg-white/[0.08] text-white' : 'border-white/[0.06] text-gray-400'}`}>{l}</button>
             ))}
@@ -433,11 +433,11 @@ function RolesTab() {
         )}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {roles.map(r => (
           <div key={r.id} className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-5">
-            <div className="flex items-start justify-between">
-              <div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <h4 className="font-semibold text-gray-100">
                   {r.name}
                   {r.isDefault && <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">default</span>}
@@ -463,7 +463,7 @@ function RolesTab() {
 
       {editing && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setEditing(null)}>
-          <div className="w-full max-w-lg rounded-2xl bg-dark-100 border border-white/10 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl bg-dark-100 border border-white/10 p-4 sm:p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold">{editing.id ? 'Edit role' : 'New role'}</h3>
             <input className="input" placeholder="Role name" value={editing.name} disabled={editing.isSystem} onChange={e => setEditing({ ...editing, name: e.target.value })} />
             <input className="input" placeholder="Description" value={editing.description || ''} onChange={e => setEditing({ ...editing, description: e.target.value })} />
@@ -509,7 +509,7 @@ function MeetingsTab() {
     <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-5">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="font-semibold text-sm text-gray-300">Meeting history ({total})</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} placeholder="Title or room id..." className="input !py-2 text-sm w-48" />
           <select value={status} onChange={e => { setStatus(e.target.value); setPage(1) }} className="input !w-auto !py-2 text-sm">
             <option value="">All statuses</option>
@@ -533,7 +533,7 @@ function MeetingsTab() {
                 <tr key={m.id} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
                   <td className="py-2.5 pr-4"><p className="text-gray-200">{m.title}</p><p className="text-xs text-gray-600 font-mono">{m.roomId}</p></td>
                   <td className="py-2.5 pr-4 text-gray-400">{m.host?.name || '—'}</td>
-                  <td className="py-2.5 pr-4"><span className="text-xs px-2 py-0.5 rounded bg-white/[0.05] text-gray-300">{m.status}</span></td>
+                  <td className="py-2.5 pr-4"><span className="whitespace-nowrap text-xs px-2 py-0.5 rounded bg-white/[0.05] text-gray-300">{m.status}</span></td>
                   <td className="py-2.5 pr-4 text-xs text-gray-500 whitespace-nowrap">{fmt(m.startedAt || m.scheduledAt)}</td>
                   <td className="py-2.5 pr-4 text-xs text-gray-500 whitespace-nowrap">{fmt(m.endedAt)}</td>
                   <td className="py-2.5 text-xs text-gray-500">{dur(m)}</td>
@@ -655,7 +655,7 @@ function AccountForm({ title, roles, defaultRoleName, onClose, onSubmit, isAdmin
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <form onSubmit={submit} autoComplete="off" className="w-full max-w-md rounded-2xl bg-dark-100 border border-white/10 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+      <form onSubmit={submit} autoComplete="off" className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl bg-dark-100 border border-white/10 p-4 sm:p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold">{title}</h3>
           <button type="button" onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
@@ -717,7 +717,7 @@ function AdminsTab() {
   if (isLoading) return <Spinner />
   return (
     <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-5">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="font-semibold text-sm text-gray-300">Admin accounts ({admins.length})</h3>
         <button onClick={() => setForm({})} className="btn btn-primary !py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4" /> Add admin</button>
       </div>
@@ -842,7 +842,7 @@ function SettingsTab() {
 
       <div className="rounded-2xl bg-dark-200/60 border border-white/[0.06] p-6">
         <h3 className="font-semibold mb-3">SMTP connection <span className="text-xs font-normal text-gray-500">(read from backend/.env)</span></h3>
-        <dl className="grid grid-cols-[130px_1fr] gap-y-2 text-sm">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[130px_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>dd]:break-all">
           <dt className="text-gray-500">Status</dt><dd className={smtp.configured ? 'text-emerald-300' : 'text-amber-300'}>{smtp.configured ? 'Configured' : 'Not configured'}</dd>
           <dt className="text-gray-500">Host</dt><dd className="font-mono text-gray-300">{smtp.host || '—'}</dd>
           <dt className="text-gray-500">Port</dt><dd className="font-mono text-gray-300">{smtp.port} {smtp.secure ? '(SSL)' : '(STARTTLS)'}</dd>

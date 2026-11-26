@@ -199,8 +199,8 @@ export const useMeetingStore = create((set, get) => ({
   getMeeting: async (roomId) => {
     try {
       const response = await api.get(`/meetings/${roomId}`)
-      const { meeting } = response.data.data
-      return { success: true, meeting }
+      const { meeting, people } = response.data.data
+      return { success: true, meeting, people }
     } catch (error) {
       return { success: false, message: error.response?.data?.message }
     }

@@ -210,6 +210,40 @@ router.get('/people/contacts', protect, async (req, res) => {
   }
 });
 
+// Anyone on the platform, by name. "Contacts" (teammates and people I already chat with) come first.
+// Only contacts' addresses are shown in full; others are masked so the search can't harvest emails.
+const maskEmail = (email) => email.replace(/^(.{1,2})[^@]*/, '$1***');
+
+router.get('/people/search', protect, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().slice(0, 100);
+    if (q.length < 2) return res.json({ success: true, data: { people: [] } });
+
+    const teams = await Team.findAll({ where: { isActive: true } });
+    const contactIds = new Set(teams.filter(t => t.isMember(req.user.id)).flatMap(t => (t.members || []).map(m => m.userId)));
+    const conversationIds = await getMyConversationIds(req.user.id);
+    if (conversationIds.length) {
+      const peers = await ConversationMember.findAll({ where: { conversationId: conversationIds }, attributes: ['userId'] });
+      peers.forEach(p => contactIds.add(p.userId));
+    }
+
+    const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+    const matches = { isActive: true, id: { [Op.ne]: req.user.id }, [Op.or]: [{ name: { [Op.like]: like } }, { email: q.toLowerCase() }] };
+    const find = (where) => User.findAll({ where, attributes: ['id', 'name', 'email', 'avatar'], order: [['name', 'ASC']], limit: 8 });
+    const known = contactIds.size ? await find({ [Op.and]: [matches, { id: [...contactIds] }] }) : [];
+    const others = known.length < 8 ? await find(matches) : [];
+
+    const people = [...known, ...others.filter(u => !contactIds.has(u.id))].slice(0, 8).map(u => {
+      const isContact = contactIds.has(u.id);
+      return { id: u.id, name: u.name, avatar: u.avatar, email: isContact ? u.email : maskEmail(u.email), isContact };
+    });
+    res.json({ success: true, data: { people } });
+  } catch (error) {
+    console.error('People search error:', error);
+    res.status(500).json({ success: false, message: 'Error searching people' });
+  }
+});
+
 // Conversation detail (members)
 router.get('/:conversationId', protect, async (req, res) => {
   try {

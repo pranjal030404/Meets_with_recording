@@ -164,12 +164,12 @@ export default function Whiteboard({ roomId, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
-      <div className="bg-dark-200 rounded-2xl w-full max-w-7xl h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-2 sm:p-4">
+      <div className="bg-dark-200 rounded-2xl w-full max-w-7xl h-[calc(100dvh-1rem)] sm:h-[90dvh] flex flex-col">
         {/* Toolbar */}
-        <div className="p-4 border-b border-dark-400 flex items-center justify-between gap-4 flex-wrap">
+        <div className="p-2 sm:p-4 border-b border-dark-400 flex items-center justify-between gap-2 sm:gap-4 flex-wrap [@media(max-height:500px)]:p-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-lg font-semibold mr-4">Collaborative whiteboard</h2>
+            <h2 className="text-lg font-semibold mr-4 max-sm:hidden [@media(max-height:500px)]:hidden">Collaborative whiteboard</h2>
             
             {/* Tool Buttons */}
             {TOOLS.map(([id, Icon, label]) => (
@@ -196,7 +196,7 @@ export default function Whiteboard({ roomId, onClose }) {
             )}
 
             {/* Line Width */}
-            <div className="flex items-center gap-2 ml-4">
+            <div className="flex items-center gap-1 sm:gap-2 sm:ml-4">
               <button onClick={() => setLineWidth(Math.max(1, lineWidth - 1))} className="p-2 bg-dark-400 hover:bg-dark-500 rounded-lg">
                 <Minus className="w-4 h-4" />
               </button>
@@ -207,7 +207,7 @@ export default function Whiteboard({ roomId, onClose }) {
             </div>
 
             {/* Color Picker */}
-            <div className="relative ml-4">
+            <div className="sm:relative sm:ml-4">
               <button
                 onClick={() => setShowColorPicker(!showColorPicker)}
                 className="p-2 bg-dark-400 hover:bg-dark-500 rounded-lg flex items-center gap-2"
@@ -231,17 +231,17 @@ export default function Whiteboard({ roomId, onClose }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <button onClick={clearCanvas} className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg flex items-center gap-2 transition-colors">
+            <button onClick={clearCanvas} aria-label="Clear" className="px-3 sm:px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg flex items-center gap-2 transition-colors">
               <Trash2 className="w-4 h-4" />
-              Clear
+              <span className="max-sm:hidden">Clear</span>
             </button>
-            <button onClick={downloadCanvas} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg flex items-center gap-2 transition-colors">
+            <button onClick={downloadCanvas} aria-label="Save" className="px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg flex items-center gap-2 transition-colors">
               <Download className="w-4 h-4" />
-              Save
+              <span className="max-sm:hidden">Save</span>
             </button>
-            <button onClick={onClose} className="px-4 py-2 bg-dark-400 hover:bg-dark-500 rounded-lg flex items-center gap-2 transition-colors">
+            <button onClick={onClose} aria-label="Close" className="px-3 sm:px-4 py-2 bg-dark-400 hover:bg-dark-500 rounded-lg flex items-center gap-2 transition-colors">
               <X className="w-4 h-4" />
-              Close
+              <span className="max-sm:hidden">Close</span>
             </button>
           </div>
         </div>
@@ -257,7 +257,7 @@ export default function Whiteboard({ roomId, onClose }) {
         </div>
 
         {/* Tips */}
-        <div className="p-3 border-t border-dark-400 text-xs text-gray-400 text-center">
+        <div className="p-3 border-t border-dark-400 text-xs text-gray-400 text-center [@media(max-height:500px)]:hidden">
           Everyone can draw at once. Select Save to download the whiteboard.
         </div>
       </div>
