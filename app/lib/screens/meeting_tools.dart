@@ -475,32 +475,35 @@ Future<void> saveAttendance(BuildContext context, MeetingController c) async {
 // ---------------------------------------------------------------------------
 // Camera background
 // ---------------------------------------------------------------------------
-void showBackgroundPicker(BuildContext context, MeetingController c) {
+typedef ApplyBackground = Future<void> Function(String mode, [String? imagePath]);
+
+/// [apply] saves the choice and puts it on whichever camera is open (in the call or on the preview).
+void showBackgroundPicker(BuildContext context, ApplyBackground apply) {
   showModalBottomSheet(
     context: context,
     builder: (ctx) {
-      Widget option(String mode, IconData icon, String label, Future<void> Function() apply) => ListTile(
+      Widget option(String mode, IconData icon, String label, Future<void> Function() choose) => ListTile(
             leading: Icon(icon),
             title: Text(label),
             trailing: Config.backgroundMode == mode ? const Icon(Icons.check) : null,
             onTap: () async {
               Navigator.pop(ctx);
-              await apply();
+              await choose();
             },
           );
       return SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const ListTile(title: Text('Background effects', style: TextStyle(fontWeight: FontWeight.w600)), subtitle: Text('Applies to your camera. Others only see the result.')),
-          option('off', Icons.block, 'None', () => c.setBackground('off')),
-          option('blur', Icons.blur_on, 'Blur', () => c.setBackground('blur')),
-          option('image', Icons.image_outlined, 'Choose a picture', () => _pickBackground(context, c)),
+          option('off', Icons.block, 'None', () => apply('off')),
+          option('blur', Icons.blur_on, 'Blur', () => apply('blur')),
+          option('image', Icons.image_outlined, 'Choose a picture', () => _pickBackground(context, apply)),
         ]),
       );
     },
   );
 }
 
-Future<void> _pickBackground(BuildContext context, MeetingController c) async {
+Future<void> _pickBackground(BuildContext context, ApplyBackground apply) async {
   try {
     final picked = await FilePicker.pickFiles(type: FileType.image);
     final path = picked.isEmpty ? null : picked.first.path;
@@ -508,7 +511,7 @@ Future<void> _pickBackground(BuildContext context, MeetingController c) async {
     // keep our own copy: the picker's file is temporary
     final dir = await getApplicationSupportDirectory();
     final saved = await File(path).copy('${dir.path}/background-${DateTime.now().millisecondsSinceEpoch}');
-    await c.setBackground('image', saved.path);
+    await apply('image', saved.path);
   } catch (e) {
     if (context.mounted) toast(context, 'Could not use that picture: $e', error: true);
   }

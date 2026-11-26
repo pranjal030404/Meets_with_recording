@@ -280,7 +280,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
         IconButton(
           tooltip: 'Copy invite link',
           icon: const Icon(Icons.link, color: Colors.white),
-          onPressed: () { Clipboard.setData(ClipboardData(text: '${Config.serverUrl}/meeting/${widget.roomId}')); toast(context, 'Invite link copied'); },
+          onPressed: () { Clipboard.setData(ClipboardData(text: '${Config.serverUrl}/meeting/${linkRoomId(c.meeting, widget.roomId)}')); toast(context, 'Invite link copied'); },
         ),
         if (c.camOn)
           IconButton(tooltip: 'Switch camera', icon: const Icon(Icons.cameraswitch, color: Colors.white), onPressed: c.switchCamera),
@@ -561,7 +561,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
               onTap: () { Navigator.pop(ctx); setState(() => _hideSelf = !_hideSelf); },
             ),
             if (c.canUseBackgrounds)
-              ListTile(leading: const Icon(Icons.blur_on), title: const Text('Background effects'), onTap: () { Navigator.pop(ctx); showBackgroundPicker(context, c); }),
+              ListTile(leading: const Icon(Icons.blur_on), title: const Text('Background effects'), onTap: () { Navigator.pop(ctx); showBackgroundPicker(context, c.setBackground); }),
             if (c.camOn)
               ListTile(leading: const Icon(Icons.flip), title: Text(_mirrorSelf ? 'Unmirror my video' : 'Mirror my video'), onTap: () { Navigator.pop(ctx); setState(() => _mirrorSelf = !_mirrorSelf); }),
             if (c.isManager) ...[

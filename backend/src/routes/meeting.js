@@ -11,7 +11,7 @@ import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
 import { enforceMeetingQuota, enforceRecordingAllowed, enforceTranscriptionAllowed } from '../middleware/subscription.js';
-import { recordUsage, assertCanRecord } from '../services/subscriptionService.js';
+import { recordUsage, assertCanRecord, assertCanCreateMeeting } from '../services/subscriptionService.js';
 import { saveMeetingRecording, appendRecording, enqueueTranscription, retryTranscription } from '../services/recordingService.js';
 import { buildCompleteTranscriptArtifacts } from '../services/transcriptionService.js';
 import { canManageMeeting, canAccessMeeting, hostHasJoined } from '../lib/meetingPermissions.js';
@@ -20,6 +20,7 @@ import { inviteeMachine, StateTransitionError } from '../lib/stateMachines.js';
 import { startMeeting, endMeeting, cancelMeeting, presentParticipants, isUpcoming, leaveOutcome, rescheduleMeeting } from '../services/meetingLifecycle.js';
 import { parseBreakoutRoomId, resolveBreakoutAccess } from '../lib/breakoutRoomId.js';
 import { sanitizeSettings } from '../lib/meetingSettings.js';
+import { parseSeries, createFollowing, followingInSeries, nextRoomInSeries, isOver } from '../services/meetingSeries.js';
 import { resolveOwner } from '../media/meetingPlacementService.js';
 
 const router = express.Router();
@@ -83,6 +84,15 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
       }
     }
 
+    const series = parseSeries(recurrence);
+    if (series?.error) return res.status(400).json({ success: false, message: series.error });
+    if (series && !scheduledAt) return res.status(400).json({ success: false, message: 'A repeating meeting needs a start time' });
+    if (series) {
+      // Every date counts as a meeting, so the whole series has to fit in what is left of the plan
+      const quota = await assertCanCreateMeeting(req.user.id, series.dates.length);
+      if (!quota.allowed) return res.status(403).json({ success: false, message: quota.reason, code: 'PLAN_LIMIT_REACHED' });
+    }
+
     const isInstant = !scheduledAt;
 
     const participantEntry = {
@@ -98,7 +108,7 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
       description,
       hostId: req.user.id,
       teamId,
-      scheduledAt,
+      scheduledAt: series ? series.dates[0] : scheduledAt,
       isInstant,
       settings: sanitizeSettings(settings),
       participants: [participantEntry],
@@ -107,7 +117,9 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
       inviteeIds: [],
       recordings: [],
       reminders: [],
-      recurrence: recurrence || { enabled: false }
+      recurrence: series
+        ? { enabled: true, frequency: series.frequency, seriesId: uuidv4(), index: 1, total: series.dates.length }
+        : { enabled: false }
     };
 
     const meeting = await Meeting.create(meetingData);
@@ -151,15 +163,22 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
       meeting.startedAt = new Date();
     }
 
+    if (series) meeting.recurrence = { ...meeting.recurrence, seriesRoomId: meeting.roomId };
     await meeting.save();
 
+    if (series) {
+      const rest = await createFollowing(meeting, series.dates);
+      await Promise.all(rest.map((m) => recordUsage(req.user.id, 'meeting_created', 1, m.id, { title: m.title })));
+    }
+
+    // One invitation per person, however many dates there are
     if (scheduledAt) {
       await Promise.all(meeting.inviteeIds.map((recipientId) =>
         Notification.create({
           recipientId,
           type: 'meeting_scheduled',
           title: 'Meeting Invitation',
-          message: `${req.user.name} invited you to "${meeting.title}"`,
+          message: `${req.user.name} invited you to "${meeting.title}"${series ? ` (repeats, ${series.dates.length} dates)` : ''}`,
           data: {
             meetingId: meeting.id,
             senderId: req.user.id,
@@ -352,7 +371,7 @@ router.get('/:roomId', protect, async (req, res) => {
 
     res.json({
       success: true,
-      data: { meeting: meeting.toJSON(), people }
+      data: { meeting: meeting.toJSON(), people, nextRoomId: await nextRoomInSeries(meeting) }
     });
   } catch (error) {
     console.error('Get meeting error:', error);
@@ -398,6 +417,10 @@ router.post('/:roomId/join', protect, requirePermission('meetings.join'), async 
         message: meeting.status === 'cancelled' ? 'This meeting was cancelled' : 'This meeting has ended',
         code: 'MEETING_ENDED'
       });
+    }
+
+    if (isOver(meeting) && await nextRoomInSeries(meeting)) {
+      return res.status(400).json({ success: false, message: 'This date has passed', code: 'MEETING_ENDED' });
     }
 
     if (!canAccessMeeting(meeting, req.user)) {
@@ -537,6 +560,80 @@ router.post('/:roomId/leave', protect, async (req, res) => {
       message: 'Error leaving meeting',
       error: error.message
     });
+  }
+});
+
+// The dates an edit with scope 'series' would move: this one and every later one
+router.get('/:roomId/series', protect, async (req, res) => {
+  try {
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
+    if (!meeting) return res.status(404).json({ success: false, message: 'Meeting not found' });
+    if (!canManageMeeting(meeting, req.user.id)) {
+      return res.status(403).json({ success: false, message: 'Only the host or a co-host can see this' });
+    }
+    const later = await followingInSeries(meeting);
+    res.json({ success: true, data: { dates: [meeting, ...later].map((m) => m.scheduledAt) } });
+  } catch (error) {
+    console.error('Series dates error:', error);
+    res.status(500).json({ success: false, message: 'Error fetching the dates' });
+  }
+});
+
+// Edit a meeting that has not started: title, description, settings and time, for one date or all later ones
+router.put('/:roomId/schedule', protect, async (req, res) => {
+  try {
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
+    if (!meeting) return res.status(404).json({ success: false, message: 'Meeting not found' });
+    if (!canManageMeeting(meeting, req.user.id)) {
+      return res.status(403).json({ success: false, message: 'Only the host or a co-host can edit the meeting' });
+    }
+    if (meeting.status !== 'scheduled' || !meeting.scheduledAt) {
+      return res.status(400).json({ success: false, message: 'Only an upcoming scheduled meeting can be edited' });
+    }
+
+    const { title, description, settings, dates, scope } = req.body;
+    const targets = [meeting, ...(scope === 'series' ? await followingInSeries(meeting) : [])];
+
+    let times = null;
+    if (dates !== undefined) {
+      times = Array.isArray(dates) ? dates.map((d) => new Date(d)) : [];
+      if (times.length !== targets.length) {
+        return res.status(409).json({ success: false, message: 'The dates of this meeting changed. Reload and try again.' });
+      }
+      if (times.some((d, i) => !(d > Date.now()) || (i > 0 && d <= times[i - 1]))) {
+        return res.status(400).json({ success: false, message: 'Pick times in the future' });
+      }
+    }
+
+    const moved = !!times && times.some((d, i) => d.getTime() !== new Date(targets[i].scheduledAt).getTime());
+    for (const [i, target] of targets.entries()) {
+      if (title?.trim()) target.title = title.trim();
+      if (description !== undefined) target.description = description;
+      if (settings) target.settings = { ...(target.settings || {}), ...sanitizeSettings(settings) };
+      if (times && times[i].getTime() !== new Date(target.scheduledAt).getTime()) {
+        target.scheduledAt = times[i];
+        // the new time needs its own reminders
+        target.reminders = (target.reminders || []).map(({ sentAt, ...r }) => ({ ...r, sent: false }));
+        target.notificationsSent = {};
+      }
+      await target.save();
+    }
+
+    if (moved) {
+      await Promise.all((meeting.inviteeIds || []).map((recipientId) => Notification.create({
+        recipientId,
+        type: 'meeting_scheduled',
+        title: 'Meeting time changed',
+        message: `"${meeting.title}" was moved${targets.length > 1 ? ' (this and later dates)' : ''}`,
+        data: { meetingId: meeting.id, senderId: req.user.id, link: meeting.meetingLink },
+        priority: 'high'
+      })));
+    }
+
+    res.json({ success: true, message: 'Meeting updated', data: { meeting: meeting.toJSON(), updated: targets.length } });
+  } catch (error) {
+    console.error('Edit meeting error:', error);
+    res.status(500).json({ success: false, message: 'Error editing meeting', error: error.message });
   }
 });
 
@@ -817,6 +914,16 @@ router.post('/:roomId/invite', protect, async (req, res) => {
 
     await meeting.save();
 
+    for (const later of await followingInSeries(meeting)) {
+      const have = later.invitees || [];
+      const added = (meeting.invitees || []).filter((i) => !have.some((h) => h.id === i.id
+        || (i.userId && h.userId === i.userId)));
+      if (!added.length) continue;
+      later.invitees = [...have, ...added.map((i) => ({ ...i, status: 'pending', respondedAt: undefined }))];
+      later.inviteeIds = later.invitees.map((i) => i.userId).filter(Boolean);
+      await later.save();
+    }
+
     res.json({
       success: true,
       message: 'Invitations sent successfully',
@@ -831,6 +938,41 @@ router.post('/:roomId/invite', protect, async (req, res) => {
     });
   }
 });
+
+/** Records an invitee's answer on one meeting. False if they are not invited to it. */
+const applyResponse = (meeting, user, status) => {
+  const invitees = (meeting.invitees || []).map(i => ({ ...i })); // copy, or the new status is not saved
+  const invitee = invitees.find(inv => inv.userId && inv.userId === user.id);
+  if (!invitee) return false;
+  invitee.status = status;
+  invitee.respondedAt = new Date().toISOString();
+
+  if (status === 'accepted') {
+    const participants = [...(meeting.participants || [])];
+    if (!participants.some(p => p.userId === user.id)) {
+      participants.push({
+        id: uuidv4(),
+        userId: user.id,
+        user: { id: user.id, name: user.name, email: user.email, avatar: user.avatar },
+        role: 'participant'
+      });
+      meeting.participants = participants;
+      meeting.participantIds = [...(meeting.participantIds || []), user.id];
+    }
+  }
+
+  if (status === 'declined') {
+    // Changed their mind after accepting: remove the seat they were given (unless they're in the room now)
+    const stillPresent = (meeting.participants || []).some(p => p.userId === user.id && !p.leftAt);
+    if (!stillPresent) {
+      meeting.participants = (meeting.participants || []).filter(p => p.userId !== user.id || p.leftAt);
+      meeting.participantIds = (meeting.participantIds || []).filter(id => id !== user.id);
+    }
+  }
+
+  meeting.invitees = invitees;
+  return true;
+};
 
 router.put('/:roomId/respond', protect, async (req, res) => {
   try {
@@ -867,38 +1009,13 @@ router.put('/:roomId/respond', protect, async (req, res) => {
     } catch (error) {
       return res.status(409).json({ success: false, message: error.message });
     }
-    invitee.status = status;
-    invitee.respondedAt = new Date().toISOString();
-
-    if (status === 'accepted') {
-      const participants = [...(meeting.participants || [])];
-      const alreadyParticipant = participants.some(
-        p => p.userId === req.user.id
-      );
-
-      if (!alreadyParticipant) {
-        participants.push({
-          id: uuidv4(),
-          userId: req.user.id,
-          user: { id: req.user.id, name: req.user.name, email: req.user.email, avatar: req.user.avatar },
-          role: 'participant'
-        });
-        meeting.participants = participants;
-        meeting.participantIds = [...(meeting.participantIds || []), req.user.id];
-      }
-    }
-
-    if (status === 'declined') {
-      // Changed their mind after accepting: remove the seat they were given (unless they're in the room now)
-      const stillPresent = (meeting.participants || []).some(p => p.userId === req.user.id && !p.leftAt);
-      if (!stillPresent) {
-        meeting.participants = (meeting.participants || []).filter(p => p.userId !== req.user.id || p.leftAt);
-        meeting.participantIds = (meeting.participantIds || []).filter(id => id !== req.user.id);
-      }
-    }
-
-    meeting.invitees = invitees;
+    applyResponse(meeting, req.user, status);
     await meeting.save();
+
+    // One answer covers the later dates of a repeating meeting (reminders only go to people who accepted)
+    for (const later of await followingInSeries(meeting)) {
+      if (applyResponse(later, req.user, status)) await later.save();
+    }
 
     res.json({
       success: true,
@@ -933,6 +1050,9 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
       });
     }
 
+    // scope 'series' also drops every later date; collect them before this one changes
+    const later = req.body?.scope === 'series' ? await followingInSeries(meeting) : [];
+
     try {
       await cancelMeeting(meeting);
     } catch (error) {
@@ -940,6 +1060,12 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
         return res.status(400).json({ success: false, message: 'Meeting is already ended or cancelled' });
       }
       throw error;
+    }
+
+    for (const next of later) {
+      await cancelMeeting(next).catch((e) => {
+        if (!(e instanceof StateTransitionError)) throw e;
+      });
     }
 
     // Anyone already inside a live room gets the same signal as an ended meeting
@@ -952,7 +1078,7 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
           recipientId: inv.userId,
           type: 'meeting_cancelled',
           title: 'Meeting Cancelled',
-          message: `"${meeting.title}" has been cancelled`,
+          message: later.length ? `"${meeting.title}" and its later dates have been cancelled` : `"${meeting.title}" has been cancelled`,
           data: {
             meetingId: meeting.id,
             senderId: req.user.id

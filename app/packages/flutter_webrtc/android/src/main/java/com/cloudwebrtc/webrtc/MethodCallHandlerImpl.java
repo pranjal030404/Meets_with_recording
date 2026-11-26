@@ -681,6 +681,20 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
         }
         break;
       }
+      case "startSpeechCapture":
+        try {
+          getUserMediaImpl.startSpeechCapture();
+          result.success(null);
+        } catch (Exception e) {
+          resultError("startSpeechCapture", e.getMessage(), result);
+        }
+        break;
+      case "takeSpeechAudio":
+        result.success(getUserMediaImpl.takeSpeechAudio());
+        break;
+      case "stopSpeechCapture":
+        result.success(getUserMediaImpl.stopSpeechCapture());
+        break;
       case "setAudioRecordingMic":
         getUserMediaImpl.setAudioRecordingMic(Boolean.TRUE.equals(call.argument("enabled")));
         result.success(null);

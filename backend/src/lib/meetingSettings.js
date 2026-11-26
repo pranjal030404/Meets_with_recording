@@ -3,7 +3,7 @@
  * Unknown keys are dropped (the old code merged arbitrary client JSON into the stored settings).
  */
 const BOOLEANS = ['waitingRoom', 'allowScreenShare', 'allowChat', 'allowRecording', 'muteOnEntry', 'hostManagement', 'allowReactions',
-  'allowMic', 'allowVideo', 'allowAddOns', 'hostMustJoinFirst', 'allowLinkRequests', 'isLocked', 'webinar'];
+  'allowMic', 'allowVideo', 'allowAddOns', 'hostMustJoinFirst', 'allowLinkRequests', 'isLocked', 'webinar', 'takeNotes'];
 const ACCESS_TYPES = ['trusted', 'anyone', 'open'];
 
 export const sanitizeSettings = (input, { maxParticipantsCap = parseInt(process.env.MAX_PARTICIPANTS_CAP) || 10000 } = {}) => {

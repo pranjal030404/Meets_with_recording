@@ -7,6 +7,7 @@ import '../core/files.dart';
 import '../core/session.dart';
 import '../widgets/common.dart';
 import 'prejoin_screen.dart';
+import 'meetings_screen.dart';
 
 class MeetingDetailScreen extends StatefulWidget {
   final String roomId;
@@ -17,6 +18,7 @@ class MeetingDetailScreen extends StatefulWidget {
 
 class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   Map<String, dynamic>? m;
+  String? nextRoomId;
   String? error;
   bool busy = false;
 
@@ -29,13 +31,18 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   Future<void> _load() async {
     try {
       final d = Api.unwrap(await Api.instance.get('/meetings/${Uri.encodeComponent(widget.roomId)}'));
-      if (mounted) setState(() => m = asMap(d['meeting']));
+      if (mounted) {
+        setState(() {
+          m = asMap(d['meeting']);
+          nextRoomId = d['nextRoomId']?.toString();
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => error = errMsg(e));
     }
   }
 
-  String get link => '${Config.serverUrl}/meeting/${widget.roomId}';
+  String get link => '${Config.serverUrl}/meeting/${linkRoomId(m, widget.roomId)}';
   bool get isHost => (m?['hostId'] ?? asMap(m?['host'])['id']) == Session.instance.userId;
   String get status => m?['status']?.toString() ?? '';
 
@@ -93,11 +100,20 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
           child: ListTile(
             leading: const Icon(Icons.link),
             title: Text(link, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text('Code: ${widget.roomId}'),
+            subtitle: Text('Code: ${linkRoomId(m, widget.roomId)}'),
             trailing: IconButton(icon: const Icon(Icons.copy), onPressed: () { Clipboard.setData(ClipboardData(text: link)); toast(context, 'Invite link copied'); }),
           ),
         ),
         const SizedBox(height: 12),
+        if (nextRoomId != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: FilledButton.tonalIcon(
+              onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => MeetingDetailScreen(roomId: nextRoomId!))),
+              icon: const Icon(Icons.event_repeat),
+              label: const Text('Go to the next meeting'),
+            ),
+          ),
         if (canJoin)
           FilledButton.icon(
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PreJoinScreen(roomId: widget.roomId, title: m!['title']?.toString()))),
@@ -117,6 +133,15 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
           const SectionTitle('Host actions'),
           Wrap(spacing: 8, runSpacing: 8, children: [
             OutlinedButton.icon(onPressed: busy ? null : _invite, icon: const Icon(Icons.person_add_alt), label: const Text('Invite')),
+            if (status == 'scheduled' && m!['scheduledAt'] != null)
+              OutlinedButton.icon(
+                onPressed: busy ? null : () async {
+                  final saved = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => ScheduleMeetingScreen(meeting: m)));
+                  if (saved == true && mounted) _load();
+                },
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Edit'),
+              ),
             if (status == 'scheduled')
               OutlinedButton.icon(
                 onPressed: busy ? null : () async {
@@ -125,7 +150,17 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                   }
                 },
                 icon: const Icon(Icons.event_busy),
-                label: const Text('Cancel'),
+                label: Text(asMap(m!['recurrence'])['seriesId'] != null ? 'Cancel this date' : 'Cancel'),
+              ),
+            if (status == 'scheduled' && asMap(m!['recurrence'])['seriesId'] != null)
+              OutlinedButton.icon(
+                onPressed: busy ? null : () async {
+                  if (await confirm(context, 'Cancel this and all later dates?', ok: 'Cancel all', danger: true)) {
+                    _act(() => Api.instance.put('/meetings/${widget.roomId}/cancel', {'scope': 'series'}), 'Repeating meeting cancelled');
+                  }
+                },
+                icon: const Icon(Icons.event_busy),
+                label: const Text('Cancel all'),
               ),
             if (status == 'active')
               OutlinedButton.icon(

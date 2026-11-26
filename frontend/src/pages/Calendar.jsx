@@ -43,7 +43,7 @@ const Calendar = () => {
     setLoading(true);
     try {
       // Fetch scheduled meetings
-      const response = await fetch('/api/meetings?status=scheduled', {
+      const response = await fetch('/api/meetings?status=scheduled&limit=500', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }

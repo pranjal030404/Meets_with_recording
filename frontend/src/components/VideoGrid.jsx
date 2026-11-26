@@ -217,6 +217,12 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
     return () => { stream.removeEventListener('addtrack', retry); document.removeEventListener('click', retry) }
   }, [stream, isLocal])
 
+  // The chosen speaker applies to everyone, including people who join later
+  const speaker = useMeetingStore(s => s.selectedAudioOutputDevice)
+  useEffect(() => {
+    if (speaker) audioRef.current?.setSinkId?.(speaker).catch(() => {})
+  }, [speaker])
+
   const tileClasses = small
     ? 'min-w-40 lg:min-w-0 aspect-video bg-dark-300 rounded-xl relative overflow-hidden flex-shrink-0 transition-colors'
     : 'video-container relative overflow-hidden transition-colors'

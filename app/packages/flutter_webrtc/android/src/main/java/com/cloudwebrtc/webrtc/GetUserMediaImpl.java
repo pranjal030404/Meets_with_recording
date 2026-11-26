@@ -46,6 +46,7 @@ import com.cloudwebrtc.webrtc.record.AudioMixRecorder;
 import com.cloudwebrtc.webrtc.record.AudioSamplesInterceptor;
 import com.cloudwebrtc.webrtc.record.MediaRecorderImpl;
 import com.cloudwebrtc.webrtc.record.OutputAudioSamplesInterceptor;
+import com.cloudwebrtc.webrtc.record.SpeechCapture;
 import com.cloudwebrtc.webrtc.utils.Callback;
 import com.cloudwebrtc.webrtc.utils.ConstraintsArray;
 import com.cloudwebrtc.webrtc.utils.ConstraintsMap;
@@ -997,6 +998,29 @@ class GetUserMediaImpl {
         mixRecorder = null;
         inputSamplesInterceptor.detachCallback(MIX_MIC_ID);
         recorder.stop();
+    }
+
+    // ---- the local mic for transcription (see SpeechCapture) ----
+    private static final int SPEECH_ID = -102;
+    private SpeechCapture speechCapture;
+
+    void startSpeechCapture() throws Exception {
+        if (speechCapture != null) return;
+        speechCapture = new SpeechCapture();
+        inputSamplesInterceptor.attachCallback(SPEECH_ID, speechCapture);
+    }
+
+    byte[] takeSpeechAudio() {
+        return speechCapture == null ? new byte[0] : speechCapture.take();
+    }
+
+    /** Stops listening and returns what was not collected yet. */
+    byte[] stopSpeechCapture() {
+        if (speechCapture == null) return new byte[0];
+        inputSamplesInterceptor.detachCallback(SPEECH_ID);
+        byte[] rest = speechCapture.take();
+        speechCapture = null;
+        return rest;
     }
 
     void startRecordingToFile(
