@@ -4,7 +4,7 @@ import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
   ArrowLeft,
   Plus, Send, Paperclip, Smile, Hash, Users, Phone, X, BellOff, Bell,
-  Pin, Bookmark, Forward, Pencil, Trash2, Reply, ListChecks,
+  Pin, Bookmark, Forward, Pencil, Trash2, Reply, ListChecks, MoreVertical,
   Check, CheckCheck, Loader2, Search, CornerDownLeft
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
@@ -18,6 +18,7 @@ import EmojiPicker from '../components/EmojiPicker'
 import ProfileCard from '../components/ProfileCard'
 import FileAttachment from '../components/FileAttachment'
 import useChatUpload from '../hooks/useChatUpload'
+import usePeopleSearch from '../hooks/usePeopleSearch'
 import AttachMenu from '../components/AttachMenu'
 import useMentions, { MentionText, mentionedIds } from '../hooks/useMentions'
 import toast from 'react-hot-toast'
@@ -70,6 +71,15 @@ function ChatWorkspace() {
   const [listQuery, setListQuery] = useState('')
   const [listFilter, setListFilter] = useState('all')
   const statuses = usePresenceStore(st => st.statuses)
+
+  // The search box also finds people I have no chat with yet
+  const { people } = usePeopleSearch(listQuery)
+  const newPeople = people.filter(p => !conversations.some(c => c.type === 'direct' && c.partner?.id === p.id))
+  const chatWith = async (userId) => {
+    const res = await startDirect(userId)
+    if (res.success) { setListQuery(''); navigate(`/chat/${res.conversation.id}`) }
+    else toast.error(res.message)
+  }
 
   const unreadTotal = conversations.filter(c => c.unreadCount > 0).length
   const visibleConversations = conversations.filter(c => {
@@ -143,7 +153,7 @@ function ChatWorkspace() {
         <div className="px-3 pb-2 space-y-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-            <input value={listQuery} onChange={(e) => setListQuery(e.target.value)} placeholder="Search chats" className="input !py-2 !pl-9 text-sm" />
+            <input value={listQuery} onChange={(e) => setListQuery(e.target.value)} placeholder="Search chats or people" className="input !py-2 !pl-9 text-sm" />
           </div>
           <div className="flex gap-1">
             {[['all', 'All'], ['unread', 'Unread'], ['groups', 'Groups']].map(([id, label]) => (
@@ -165,7 +175,7 @@ function ChatWorkspace() {
               No conversations yet.<br />Start one with a teammate.
             </div>
           )}
-          {conversations.length > 0 && visibleConversations.length === 0 && (
+          {conversations.length > 0 && visibleConversations.length === 0 && newPeople.length === 0 && (
             <p className="text-center text-sm text-gray-500 px-4 py-10">No chats match.</p>
           )}
           {visibleConversations.map(conv => {
@@ -200,6 +210,20 @@ function ChatWorkspace() {
               </button>
             )
           })}
+          {newPeople.length > 0 && (
+            <div className="pt-2">
+              <p className="px-3 py-1.5 text-[11px] font-semibold text-gray-500">People</p>
+              {newPeople.map(p => (
+                <button key={p.id} onClick={() => chatWith(p.id)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left hover:bg-white/[0.04]">
+                  <Avatar user={p} name={p.name} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-gray-200 truncate">{p.name}</span>
+                    <span className="block text-xs text-gray-500 truncate">{p.email}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -605,7 +629,7 @@ function ConversationView({
             placeholder={`Message ${conversation.title}`}
             className="flex-1 bg-transparent resize-none outline-none text-sm text-white placeholder-gray-500 py-2.5 max-h-32"
           />
-          <div className="relative">
+          <div className="sm:relative">
             {emojiOpen && (
               <EmojiPicker className="bottom-full right-0 mb-3" onClose={() => setEmojiOpen(false)} onPick={insertEmoji} />
             )}
@@ -651,6 +675,13 @@ function MessageRow({
 }) {
   const sender = m.sender || {}
   const [moreOpen, setMoreOpen] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false) // phones / touch: opened with the "more" button
+  useEffect(() => {
+    if (!actionsOpen) return
+    const close = () => setActionsOpen(false)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [actionsOpen])
   const reactions = m.reactions || []
   const grouped = reactions.reduce((acc, r) => {
     acc[r.emoji] = acc[r.emoji] || { count: 0, mine: false }
@@ -660,7 +691,7 @@ function MessageRow({
   }, {})
 
   return (
-    <div className={`group flex gap-3 px-2 ${compact ? 'py-0.5' : 'pt-2.5 pb-0.5'} rounded-xl hover:bg-white/[0.03] ${m.isPinned ? 'bg-amber-500/[0.05]' : ''}`}>
+    <div className={`group relative flex gap-2 sm:gap-3 px-1 sm:px-2 ${compact ? 'py-0.5' : 'pt-2.5 pb-0.5'} rounded-xl hover:bg-white/[0.03] ${m.isPinned ? 'bg-amber-500/[0.05]' : ''}`}>
       <div className="w-9 shrink-0 pt-0.5">
         {compact ? (
           <span className="block text-[10px] text-gray-600 text-right pt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -676,7 +707,7 @@ function MessageRow({
       <div className="min-w-0 flex-1">
         {!compact && (
           <div className="flex items-baseline gap-2 flex-wrap">
-            <button type="button" onClick={() => onProfile?.(sender)} className="text-sm font-semibold text-gray-100 hover:underline">{sender.name || 'Unknown'}</button>
+            <button type="button" onClick={() => onProfile?.(sender)} className="text-left text-sm font-semibold text-gray-100 hover:underline">{sender.name || 'Unknown'}</button>
             <span className="timecode !text-[11px]">{new Date(m.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
             {m.editedAt && <span className="text-[10px] text-gray-600">(edited)</span>}
             {m.isPinned && <Pin className="w-3 h-3 text-amber-400 self-center" />}
@@ -730,8 +761,12 @@ function MessageRow({
       </div>
 
       {/* Hover actions */}
-      {!m.isDeleted && !editing && (
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-start gap-0.5 pt-1 relative">
+      {!m.isDeleted && !editing && (<>
+        <button type="button" onClick={(e) => { e.stopPropagation(); setActionsOpen(o => !o) }}
+          className="msg-more" aria-label="Message actions" aria-expanded={actionsOpen}>
+          <MoreVertical className="w-4 h-4" />
+        </button>
+        <div className={`msg-actions opacity-0 group-hover:opacity-100 transition-opacity flex items-start gap-0.5 pt-1 relative ${actionsOpen || reactionOpen ? 'is-open' : ''}`}>
           <ActionButton icon={Smile} title="React" onClick={onToggleReactions} />
           <ActionButton icon={Reply} title="Reply in thread" onClick={() => onThread(m.id)} />
           <ActionButton icon={ListChecks} title="Create task" onClick={() => onCreateTask(m)} />
@@ -742,8 +777,8 @@ function MessageRow({
           {(isMine || canModerate) && <ActionButton icon={Trash2} title="Delete" onClick={() => onDelete(m.id)} danger />}
 
           {reactionOpen && (
-            <div className="absolute top-8 right-0 z-30" onClick={e => e.stopPropagation()}>
-              <div className="glass-strong border border-white/10 rounded-xl p-1.5 flex items-center gap-0.5">
+            <div className="absolute top-full right-0 z-30" onClick={e => e.stopPropagation()}>
+              <div className="glass-strong border border-white/10 rounded-xl p-1.5 flex w-max max-w-[calc(100vw-2rem)] flex-wrap justify-end items-center gap-0.5">
                 {REACTION_SET.map(emoji => (
                   <button
                     key={emoji}
@@ -773,7 +808,7 @@ function MessageRow({
             </div>
           )}
         </div>
-      )}
+      </>)}
     </div>
   )
 }
@@ -958,7 +993,12 @@ function NewChatModal({ contacts, onClose, onStartDirect, onCreateGroup }) {
   const [selected, setSelected] = useState([])
   const [query, setQuery] = useState('')
 
-  const filtered = contacts.filter(c => c.name.toLowerCase().includes(query.toLowerCase()) || c.email.toLowerCase().includes(query.toLowerCase()))
+  // Contacts are listed straight away; typing also searches everyone else
+  const { people } = usePeopleSearch(query)
+  const [picked, setPicked] = useState({}) // keeps chosen non-contacts visible after the search changes
+  const matching = contacts.filter(c => c.name.toLowerCase().includes(query.toLowerCase()) || c.email.toLowerCase().includes(query.toLowerCase()))
+  const extra = [...people, ...(query ? [] : Object.values(picked).filter(p => selected.includes(p.id)))]
+  const filtered = [...matching, ...extra.filter(p => !matching.some(c => c.id === p.id))]
 
   const toggle = (id) => {
     if (mode === 'direct') return
@@ -982,19 +1022,19 @@ function NewChatModal({ contacts, onClose, onStartDirect, onCreateGroup }) {
 
       <div className="relative mb-3">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search teammates" className="input pl-9" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name" className="input pl-9" />
       </div>
 
       <div className="space-y-1 max-h-72 overflow-y-auto">
         {filtered.length === 0 && (
           <p className="text-sm text-gray-500 text-center py-6">
-            No teammates found. Join or create a team first.
+            {query.trim().length < 2 ? 'Type a name to find people.' : 'No one found with that name.'}
           </p>
         )}
         {filtered.map(c => (
           <button
             key={c.id}
-            onClick={() => mode === 'direct' ? onStartDirect(c.id) : toggle(c.id)}
+            onClick={() => { if (mode === 'direct') return onStartDirect(c.id); setPicked(prev => ({ ...prev, [c.id]: c })); toggle(c.id) }}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${
               selected.includes(c.id) ? 'bg-primary-500/15 border border-primary-500/30' : 'hover:bg-white/[0.04] border border-transparent'
             }`}

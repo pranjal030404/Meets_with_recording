@@ -5,8 +5,9 @@ import User from '../models/User.js';
 import { protect, generateToken, clearAssetCookie, revokeToken } from '../middleware/auth.js';
 import { ensureSubscription, getSubscriptionDetails } from '../services/subscriptionService.js';
 import { getSetting } from '../services/settingsService.js';
-import { isSmtpConfigured, sendVerificationEmail } from '../services/mailService.js';
+import { isSmtpConfigured, sendVerificationEmail, sendPasswordCodeEmail } from '../services/mailService.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
+import { issueCode, consumeCode, clearCode } from '../services/otpService.js';
 import { revokeUserSessions } from '../lib/sessionRevocation.js';
 import { handleAvatarUpload, saveAvatar, clearAvatar, pickProfileFields } from '../services/avatarService.js';
 
@@ -249,29 +250,56 @@ router.put('/profile', protect, async (req, res) => {
 });
 
 // Per account, so a stolen session can't be used to guess the current password
-const passwordAttempts = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 5, prefix: 'rl:password' });
+const passwordAttempts = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, prefix: 'rl:password' });
+const otpKey = (userId) => `password:${userId}`;
 
+// Checks shared by both steps. Answers the request and returns false when something is wrong.
+// 400, not 401: the client treats 401 as "session expired" and would sign the user out.
+const passwordChangeAllowed = async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const fail = (status, message) => { res.status(status).json({ success: false, message }); return false; };
+  if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || !currentPassword) {
+    return fail(400, 'Current and new password are required');
+  }
+  if (newPassword.length < 6) return fail(400, 'Password must be at least 6 characters');
+  if (await passwordAttempts.hit(req.user.id) > 10) return fail(429, 'Too many attempts. Try again in 15 minutes.');
+  if (!(await req.user.comparePassword(currentPassword))) return fail(400, 'Current password is incorrect');
+  if (newPassword === currentPassword) return fail(400, 'Choose a password different from the current one');
+  return true;
+};
+
+// Step 1: email a one-time code
+router.post('/change-password/code', protect, async (req, res) => {
+  try {
+    if (!(await passwordChangeAllowed(req, res))) return;
+    if (!isSmtpConfigured()) {
+      return res.status(503).json({ success: false, message: 'Email is not set up on this server, so a code cannot be sent. Contact an administrator.' });
+    }
+    const code = await issueCode(otpKey(req.user.id));
+    if (!code) return res.status(429).json({ success: false, message: 'A code was just sent. Wait a minute before asking for another.' });
+    try {
+      await sendPasswordCodeEmail(req.user, code);
+    } catch (mailError) {
+      await clearCode(otpKey(req.user.id));
+      console.error('Password code email failed:', mailError.message);
+      return res.status(502).json({ success: false, message: 'The code could not be emailed. Try again later.' });
+    }
+    res.json({ success: true, message: 'Code sent', data: { email: req.user.email } });
+  } catch (error) {
+    console.error('Password code error:', error);
+    res.status(500).json({ success: false, message: 'Error sending the code' });
+  }
+});
+
+// Step 2: change it, with the code
 router.post('/change-password', protect, async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
-    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || !currentPassword) {
-      return res.status(400).json({ success: false, message: 'Current and new password are required' });
-    }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
-    }
-    if (await passwordAttempts.hit(req.user.id) > 5) {
-      return res.status(429).json({ success: false, message: 'Too many attempts. Try again in 15 minutes.' });
-    }
-    // 400, not 401: the client treats 401 as "session expired" and would sign the user out
-    if (!(await req.user.comparePassword(currentPassword))) {
-      return res.status(400).json({ success: false, message: 'Current password is incorrect' });
-    }
-    if (newPassword === currentPassword) {
-      return res.status(400).json({ success: false, message: 'Choose a password different from the current one' });
+    if (!(await passwordChangeAllowed(req, res))) return;
+    if (!(await consumeCode(otpKey(req.user.id), req.body.code))) {
+      return res.status(400).json({ success: false, message: 'That code is wrong or has expired' });
     }
 
-    req.user.password = newPassword; // hashed by the model hook
+    req.user.password = req.body.newPassword; // hashed by the model hook
     await req.user.save();
     await revokeUserSessions(req.user.id);
 

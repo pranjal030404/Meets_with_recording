@@ -223,7 +223,7 @@ const NotificationBell = ({ placement = 'header' }) => {
                               e.stopPropagation();
                               deleteNotification(notification._id);
                             }}
-                            className="p-1.5 hover:bg-red-500/15 rounded-lg text-gray-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                            className="p-1.5 hover:bg-red-500/15 rounded-lg text-gray-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>

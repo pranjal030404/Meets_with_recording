@@ -125,24 +125,26 @@ const Calendar = () => {
         </div>
 
         {/* Calendar Navigation */}
-        <div className="bg-dark-200/70 rounded-2xl p-5 sm:p-6 border border-white/[0.06]">
-          <div className="flex items-center justify-between mb-6">
+        <div className="bg-dark-200/70 rounded-2xl p-3 sm:p-6 border border-white/[0.06]">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
             <h2 className="whitespace-nowrap font-display text-lg font-semibold sm:text-2xl">{monthName}</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
               <button
                 onClick={prevMonth}
+                aria-label="Previous month"
                 className="p-2.5 hover:bg-dark-400/80 rounded-xl transition-colors text-gray-300 hover:text-white border border-transparent hover:border-white/[0.06]"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
               <button
                 onClick={() => setCurrentDate(new Date())}
-                className="px-4 py-2 text-sm font-semibold text-gray-300 hover:bg-primary-500/15 hover:text-white rounded-xl transition-colors border border-transparent hover:border-primary-500/25"
+                className="px-2 sm:px-4 py-2 text-sm font-semibold text-gray-300 hover:bg-primary-500/15 hover:text-white rounded-xl transition-colors border border-transparent hover:border-primary-500/25"
               >
                 Today
               </button>
               <button
                 onClick={nextMonth}
+                aria-label="Next month"
                 className="p-2.5 hover:bg-dark-400/80 rounded-xl transition-colors text-gray-300 hover:text-white border border-transparent hover:border-white/[0.06]"
               >
                 <ChevronRight className="w-5 h-5" />
@@ -198,13 +200,13 @@ const Calendar = () => {
                             key={meeting._id}
                             onClick={(e) => {
                               e.stopPropagation();
-                              navigate(`/meeting/${meeting.roomId}`);
+                              navigate(`/join/${meeting.roomId}`); // details first, then join
                             }}
-                            className="text-xs bg-primary-600/25 border border-primary-500/25 text-primary-200 px-2 py-1 rounded-lg truncate hover:from-primary-600/50 hover:border-primary-400/50 transition-colors"
+                            className="text-xs bg-primary-600/25 border border-primary-500/25 text-primary-200 px-1 xl:px-2 py-1 rounded-lg truncate hover:from-primary-600/50 hover:border-primary-400/50 transition-colors"
                             title={meeting.title}
                           >
                             <div className="flex items-center gap-1">
-                              <Video className="w-3 h-3 shrink-0" />
+                              <Video className="hidden xl:block w-3 h-3 shrink-0" />
                               <span className="truncate">{meeting.title}</span>
                             </div>
                             <div className="text-primary-300/80 text-[10px] font-medium">
@@ -219,10 +221,10 @@ const Calendar = () => {
                           <div
                             key={task.id}
                             onClick={(e) => { e.stopPropagation(); navigate('/tasks'); }}
-                            className={`text-xs border px-2 py-1 rounded-lg truncate flex items-center gap-1 transition-colors ${taskChip(task)}`}
+                            className={`text-xs border px-1 xl:px-2 py-1 rounded-lg truncate flex items-center gap-1 transition-colors ${taskChip(task)}`}
                             title={`Task: ${task.title}`}
                           >
-                            <CheckSquare className="w-3 h-3 shrink-0" />
+                            <CheckSquare className="hidden xl:block w-3 h-3 shrink-0" />
                             <span className="truncate">{task.title}</span>
                           </div>
                         ))}
@@ -238,6 +240,25 @@ const Calendar = () => {
               );
             })}
           </div>
+
+          {/* Phones only have room for dots in the grid, so the month's items are listed here */}
+          <ul className="sm:hidden mt-4 space-y-2">
+            {days.filter(Boolean).flatMap(day => [
+              ...getMeetingsForDate(day).map(m => ({ key: `m${m._id}`, day, title: m.title, Icon: Video, to: `/join/${m.roomId}`, time: new Date(m.scheduledAt) })),
+              ...getTasksForDate(day).map(t => ({ key: `t${t.id}`, day, title: t.title, Icon: CheckSquare, to: '/tasks' }))
+            ]).map(({ key, day, title, Icon, to, time }) => (
+              <li key={key}>
+                <button onClick={() => navigate(to)} className="w-full flex items-center gap-3 rounded-xl bg-dark-300/60 border border-white/[0.06] px-3 py-2.5 text-left">
+                  <Icon className="w-4 h-4 text-primary-300" />
+                  <span className="min-w-0 flex-1 truncate text-sm text-gray-200">{title}</span>
+                  <span className="timecode shrink-0">
+                    {day.toLocaleDateString([], { day: 'numeric', month: 'short' })}
+                    {time && `, ${time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
 

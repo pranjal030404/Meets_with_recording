@@ -129,6 +129,12 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
       if (entries.some((e) => (userId && e.userId === userId) || (email && e.email === email))) continue;
       entries.push({ id: uuidv4(), userId, email: email || undefined, status: 'pending' });
     }
+    // Drop ids that aren't real accounts (a notification to one would fail after the meeting is saved)
+    const ids = entries.map((e) => e.userId).filter(Boolean);
+    const real = new Set((ids.length ? await User.findAll({ where: { id: ids }, attributes: ['id'] }) : []).map((u) => u.id));
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].userId && !real.has(entries[i].userId)) entries.splice(i, 1);
+    }
     meeting.invitees = entries;
     meeting.inviteeIds = entries.map((e) => e.userId).filter(Boolean);
 
@@ -153,7 +159,7 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
           recipientId,
           type: 'meeting_scheduled',
           title: 'Meeting Invitation',
-          message: `You've been invited to "${meeting.title}"`,
+          message: `${req.user.name} invited you to "${meeting.title}"`,
           data: {
             meetingId: meeting.id,
             senderId: req.user.id,
@@ -329,9 +335,24 @@ router.get('/:roomId', protect, async (req, res) => {
       });
     }
 
+    // Names behind the invitations, only for people who are on this meeting
+    const mine = meeting.hostId === req.user.id
+      || (meeting.inviteeIds || []).includes(req.user.id)
+      || (meeting.participantIds || []).includes(req.user.id);
+    let people = [];
+    if (mine && meeting.invitees?.length) {
+      const ids = meeting.invitees.map((i) => i.userId).filter(Boolean);
+      const users = ids.length ? await User.findAll({ where: { id: ids }, attributes: ['id', 'name', 'avatar'] }) : [];
+      const byId = new Map(users.map((u) => [u.id, u]));
+      people = meeting.invitees.map((i) => {
+        const u = byId.get(i.userId);
+        return { id: i.userId, name: u?.name || i.email || 'Guest', avatar: u?.avatar, status: i.status };
+      });
+    }
+
     res.json({
       success: true,
-      data: { meeting: meeting.toJSON() }
+      data: { meeting: meeting.toJSON(), people }
     });
   } catch (error) {
     console.error('Get meeting error:', error);
@@ -778,7 +799,7 @@ router.post('/:roomId/invite', protect, async (req, res) => {
               recipientId: inv.userId,
               type: 'meeting_scheduled',
               title: 'Meeting Invitation',
-              message: `You've been invited to "${meeting.title}"`,
+              message: `${req.user.name} invited you to "${meeting.title}"`,
               data: {
                 meetingId: meeting.id,
                 senderId: req.user.id,

@@ -46,7 +46,7 @@ export default function FileAttachment({ fileUrl, fileName, fileType, fileSize }
 
   if (isImage) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className="block mt-1.5 max-w-xs group/img relative">
+      <a href={url} target="_blank" rel="noreferrer" className="block mt-1.5 w-fit max-w-[min(20rem,100%)] group/img relative">
         {!loaded && (
           <div className="absolute inset-0 rounded-2xl bg-dark-300/60 border border-white/[0.06] animate-pulse" />
         )}
@@ -56,7 +56,7 @@ export default function FileAttachment({ fileUrl, fileName, fileType, fileSize }
           onLoad={() => setLoaded(true)}
           className="rounded-2xl border border-white/[0.08] max-h-72 w-auto object-cover transition-transform group-hover/img:scale-[1.02]"
         />
-        <span className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/60 opacity-0 group-hover/img:opacity-100 transition-opacity">
+        <span className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/60 opacity-0 group-hover/img:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
           <Download className="w-3.5 h-3.5 text-white" />
         </span>
       </a>
@@ -65,7 +65,7 @@ export default function FileAttachment({ fileUrl, fileName, fileType, fileSize }
 
   if (isVideo) {
     return (
-      <div className="mt-1.5 max-w-sm">
+      <div className="mt-1.5 w-full max-w-sm min-w-0">
         <video
           src={url}
           controls
@@ -79,7 +79,7 @@ export default function FileAttachment({ fileUrl, fileName, fileType, fileSize }
 
   if (isAudio) {
     return (
-      <div className="mt-1.5 max-w-sm rounded-2xl bg-dark-300/60 border border-white/[0.08] p-3">
+      <div className="mt-1.5 w-full max-w-sm min-w-0 rounded-2xl bg-dark-300/60 border border-white/[0.08] p-3">
         <FileMetaRow fileName={fileName} sizeLabel={sizeLabel} href={url} Icon={Music} />
         <audio src={url} controls className="w-full mt-2 h-9" preload="metadata" />
       </div>
@@ -92,7 +92,7 @@ export default function FileAttachment({ fileUrl, fileName, fileType, fileSize }
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="mt-1.5 flex items-center gap-3 rounded-2xl bg-dark-300/60 border border-white/[0.08] px-4 py-3 hover:border-primary-500/40 transition-colors max-w-sm group/file"
+      className="mt-1.5 flex w-full min-w-0 items-center gap-3 rounded-2xl bg-dark-300/60 border border-white/[0.08] px-4 py-3 hover:border-primary-500/40 transition-colors max-w-sm group/file"
     >
       <span className="w-10 h-10 rounded-xl bg-primary-500/15 border border-primary-500/25 flex items-center justify-center shrink-0">
         <Icon className="w-5 h-5 text-primary-300" />

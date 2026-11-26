@@ -150,7 +150,7 @@ export default function MeetingControls({
             label="Reactions"
           />
           {showReactionPicker && (
-            <div className="absolute bottom-full mb-2 sm:mb-3 left-1/2 -translate-x-1/2 max-w-[calc(100vw-1rem)] flex-wrap justify-center glass-strong rounded-2xl p-2.5 flex gap-1 z-50 animate-slide-up border border-white/10">
+            <div className="absolute bottom-full mb-2 sm:mb-3 left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-1rem)] flex-wrap justify-center glass-strong rounded-2xl p-2.5 flex gap-1 z-50 animate-fade-in border border-white/10">
               {REACTION_EMOJIS.map((emoji, i) => (
                 <button key={emoji} onClick={() => { onSendReaction(emoji); setShowReactionPicker(false) }}
                   className="w-11 h-11 flex items-center justify-center text-2xl hover:bg-primary-500/15 rounded-xl transition-colors transform"
@@ -221,7 +221,7 @@ export default function MeetingControls({
           />
 
           {showMore && (
-            <div className="absolute bottom-full mb-2 sm:mb-3 right-2 sm:right-0 glass-strong rounded-2xl py-2 w-[min(18rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto z-50 animate-slide-up border border-white/10 ">
+            <div className="absolute bottom-full mb-2 sm:mb-3 right-2 sm:right-0 glass-strong rounded-2xl py-2 w-[min(18rem,calc(100vw-1rem))] max-h-[min(70dvh,calc(100dvh-7rem))] overflow-y-auto z-50 animate-slide-up border border-white/10 ">
               {/* Recording */}
               <MoreMenuItem
                 icon={<Circle className={`w-4 h-4 ${isRecording ? 'fill-red-500 text-red-500 animate-pulse' : ''}`} />}

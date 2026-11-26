@@ -52,6 +52,27 @@ p, h1, h2, h3, h4, li, td, th, label { overflow-wrap: anywhere; }
   }
 }
 
+/* Chat message actions: a hover toolbar with a mouse, a "more" menu on phones and touch screens */
+.msg-more { display: none; }
+@media (max-width: 767px), (hover: none) {
+  .msg-more {
+    display: flex; flex-shrink: 0; align-self: flex-start; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem; color: #8a847b;
+  }
+  .msg-actions { display: none; }
+  .msg-actions.is-open {
+    display: flex; flex-wrap: wrap; justify-content: flex-end; opacity: 1;
+    position: absolute; top: 2.25rem; right: 0.25rem; z-index: 20; max-width: calc(100% - 1rem);
+    padding: 0.25rem; border-radius: 0.75rem; background: #211f1d; border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .msg-actions.is-open > button { padding: 0.625rem; }
+}
+
+/* iOS Safari zooms the page when a focused field is under 16px */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }
+}
+
 /* Scroll wrapper for wide tables so only the table scrolls, never the page */
 .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table-scroll > table { min-width: 36rem; }
@@ -348,6 +369,15 @@ h1, h2, h3, .font-display {
   .tooltip-host:hover::before {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+  }
+
+  /* no hover tooltips on phones / touch; static so pop-up menus anchor to the control bar */
+  @media (max-width: 639px), (hover: none) {
+    .tooltip-host:not([class*="sm:relative"]) { position: relative; }
+    .tooltip-host::before { display: none; }
+  }
+  @media (max-width: 639px) {
+    .tooltip-host[class*="sm:relative"] { position: static; }
   }
 
   /* ---------- Live dot ---------- */

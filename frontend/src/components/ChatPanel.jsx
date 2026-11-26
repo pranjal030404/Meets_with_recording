@@ -182,7 +182,7 @@ export default function ChatPanel({ roomId, onClose }) {
 
                     {/* Reply button on hover */}
                     <button onClick={() => setReplyingTo(message)}
-                      className="absolute -top-2 right-0 hidden group-hover:flex p-1 bg-dark-300 rounded hover:bg-dark-400 transition-colors">
+                      className="absolute -top-2 right-0 hidden group-hover:flex [@media(hover:none)]:flex p-1 bg-dark-300 rounded hover:bg-dark-400 transition-colors">
                       <Reply className="w-3 h-3 text-gray-400" />
                     </button>
                   </div>

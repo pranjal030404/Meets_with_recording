@@ -48,7 +48,8 @@ const TeamDetail = () => {
   const [inviteRole, setInviteRole] = useState('member');
   const [copiedCode, setCopiedCode] = useState(false);
   const [messageInput, setMessageInput] = useState('');
-  const [showMembers, setShowMembers] = useState(true);
+  // open beside the chat on wide screens; on smaller ones it is a drawer, so it starts closed
+  const [showMembers, setShowMembers] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
   const [view, setView] = useState('chat'); // chat | tasks | calendar
   const [showDelete, setShowDelete] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState('');
@@ -289,7 +290,7 @@ const TeamDetail = () => {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-dark-100">
+    <div className="h-screen h-[100dvh] flex flex-col bg-dark-100">
       {/* Header */}
       <div className="glass-strong border-b border-white/[0.06] px-4 sm:px-6 py-3.5 relative z-20">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
@@ -311,7 +312,7 @@ const TeamDetail = () => {
               <p className="text-sm text-gray-400 truncate">{currentTeam.description}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded-xl bg-dark-300/60 border border-white/[0.06] p-1">
               {[['chat', 'Chat', MessageSquare], ['tasks', 'Tasks', ListTodo], ['calendar', 'Calendar', CalendarDays]].map(([key, label, Icon]) => (
                 <button key={key} onClick={() => setView(key)}
@@ -321,9 +322,9 @@ const TeamDetail = () => {
               ))}
             </div>
             {isOwnerOrAdmin && (
-              <button onClick={() => setShowInviteModal(true)} className="btn btn-primary text-sm">
+              <button onClick={() => setShowInviteModal(true)} className="btn btn-primary text-sm" aria-label="Invite">
                 <UserPlus className="w-4 h-4" />
-                Invite
+                <span className="hidden sm:inline">Invite</span>
               </button>
             )}
             <button
@@ -379,7 +380,7 @@ const TeamDetail = () => {
                 <span className="text-sm font-medium truncate">{channel.name}</span>
               </button>
               {isOwnerOrAdmin && channel.type === 'custom' && (
-                <button onClick={() => setChannelToDelete(channel)} className="absolute right-2 top-1/2 -translate-y-[60%] p-1 rounded-md text-gray-500 hover:text-red-300 hover:bg-red-500/10 opacity-0 group-hover/ch:opacity-100 focus:opacity-100 transition" title="Delete channel" aria-label={`Delete ${channel.name}`}>
+                <button onClick={() => setChannelToDelete(channel)} className="absolute right-2 top-1/2 -translate-y-[60%] p-1 rounded-md text-gray-500 hover:text-red-300 hover:bg-red-500/10 [@media(hover:none)]:opacity-100 opacity-0 group-hover/ch:opacity-100 focus:opacity-100 transition" title="Delete channel" aria-label={`Delete ${channel.name}`}>
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               )}
@@ -413,11 +414,11 @@ const TeamDetail = () => {
 
         {/* Chat Area */}
         {view === 'chat' && <div className="flex-1 flex flex-col bg-dark-100 min-w-0">
-          <div className="border-b border-white/[0.05] px-5 sm:px-6 py-3 bg-dark-200/60 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
+          <div className="border-b border-white/[0.05] px-3 sm:px-6 py-3 bg-dark-200/60 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
               <Hash className="w-5 h-5 text-primary-400" />
               <select value={activeChannel} onChange={(e) => setActiveChannel(e.target.value)}
-                className="md:hidden input !w-auto !py-1.5 text-sm" aria-label="Channel">
+                className="md:hidden input !w-auto min-w-0 !py-1.5 text-sm" aria-label="Channel">
                 {currentTeam.channels?.map(c => <option key={c.id || c._id} value={channelKey(c)}>#{c.name}</option>)}
               </select>
               <h2 className="hidden md:block font-semibold font-display">
@@ -436,7 +437,7 @@ const TeamDetail = () => {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4">
             {messages.length === 0 ? (
               <div className="text-center text-gray-500 mt-16">
                 <div className="inline-flex w-16 h-16 rounded-2xl bg-dark-300/70 border border-white/[0.05] items-center justify-center mb-4">
@@ -540,7 +541,9 @@ const TeamDetail = () => {
 
         {/* Members Sidebar */}
         {showMembers && (
-          <div className="hidden lg:block w-72 bg-dark-200/60 border-l border-white/[0.05] overflow-y-auto animate-slide-in-right">
+          <>
+          <div className="lg:hidden fixed inset-0 z-30 bg-black/60" onClick={() => setShowMembers(false)} />
+          <div className="fixed inset-y-0 right-0 z-40 w-[min(18rem,100%)] bg-dark-200 lg:static lg:z-auto lg:w-72 lg:shrink-0 lg:bg-dark-200/60 border-l border-white/[0.05] overflow-y-auto animate-slide-in-right">
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold font-display flex items-center gap-2">
@@ -548,6 +551,9 @@ const TeamDetail = () => {
                   Members
                   <span className="text-sm font-normal text-gray-500">({teamMembers.length})</span>
                 </h3>
+                <button onClick={() => setShowMembers(false)} className="lg:hidden p-2 -mr-2 rounded-lg text-gray-400 hover:text-white" aria-label="Close members">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
               {/* Invite Code Section */}
@@ -601,7 +607,7 @@ const TeamDetail = () => {
                     {isOwnerOrAdmin && member.role !== 'owner' && member.user._id !== user._id && (
                       <button
                         onClick={() => handleRemoveMember(member.user._id, member.user.name)}
-                        className="p-1.5 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                        className="p-1.5 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                         title="Remove member"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -612,6 +618,7 @@ const TeamDetail = () => {
               </div>
             </div>
           </div>
+          </>
         )}
       </div>
 

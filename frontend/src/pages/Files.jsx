@@ -181,7 +181,7 @@ function FilesPage() {
                 </p>
               </div>
               {!showTrash ? (
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                   <a href={downloadUrl(f.id)} target="_blank" rel="noreferrer" className="p-2 rounded-lg text-gray-400 hover:text-primary-300 hover:bg-primary-500/10" title="Download">
                     <Download className="w-4 h-4" />
                   </a>
