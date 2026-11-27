@@ -9,7 +9,7 @@ export default function WaitingRoom({ waitingUsers = [], onAdmit, onDeny, onClos
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold text-sm">Waiting room ({waitingUsers.length})</h3>
         {onClose && (
-          <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded">
+          <button aria-label="Close" onClick={onClose} className="p-1 hover:bg-dark-400 rounded">
             <X className="w-4 h-4" />
           </button>
         )}

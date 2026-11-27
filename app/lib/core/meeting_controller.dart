@@ -790,6 +790,7 @@ class MeetingController extends ChangeNotifier {
 
     _on('room:participants', (d) {
       phase = RoomPhase.connected;
+      _loadChat(); // history is only readable once actually in (a waiting guest was refused earlier)
       s.emit('whiteboard:request', {'roomId': roomId});
       s.emit('tools:request', {'roomId': roomId});
       if (!inBreakout) _checkAssignment();

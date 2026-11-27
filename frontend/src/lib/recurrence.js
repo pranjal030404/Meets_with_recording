@@ -31,23 +31,15 @@ export function occurrences(start, frequency, count) {
   return dates
 }
 
-/** A list of meetings keeping only the soonest upcoming date of each repeating one. */
-export function collapseSeries(meetings) {
-  const soonest = new Map()
-  for (const m of meetings) {
-    const id = m.recurrence?.seriesId
-    if (!id || m.status !== 'scheduled' || Date.now() - new Date(m.scheduledAt) > 12 * 3600 * 1000) continue
-    const best = soonest.get(id)
-    if (!best || new Date(m.scheduledAt) < new Date(best.scheduledAt)) soonest.set(id, m)
-  }
-  return meetings.filter(m => !m.recurrence?.seriesId || m.status !== 'scheduled' || soonest.get(m.recurrence.seriesId) === m)
-}
-
 /** The room in a meeting's invite link: one link for a whole repeating meeting. */
 export const linkRoomId = (meeting, roomId = meeting?.roomId) => meeting?.recurrence?.seriesRoomId || roomId
 
-/** Moves dates by as many days as the first one moved, all at its new time of day. */
-export function shiftDates(dates, newFirst) {
+/**
+ * Moves dates by as many days as the first one moved, all at its new time of day. A weekday or monthly series is
+ * laid out again from the new first date, so it cannot land on a weekend or twice in one month.
+ */
+export function shiftDates(dates, newFirst, frequency) {
+  if (frequency === 'weekdays' || frequency === 'monthly') return occurrences(newFirst, frequency, dates.length)
   const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
   const days = Math.round((midnight(newFirst) - midnight(dates[0])) / 86400000)
   return dates.map((date) => {

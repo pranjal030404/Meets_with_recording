@@ -4,6 +4,14 @@ import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
+// fonts ship with the app: no visitor request goes to a third party
+import '@fontsource/manrope/400.css'
+import '@fontsource/manrope/500.css'
+import '@fontsource/manrope/600.css'
+import '@fontsource/space-grotesk/500.css'
+import '@fontsource/space-grotesk/600.css'
+import '@fontsource/jetbrains-mono/400.css'
+import '@fontsource/jetbrains-mono/500.css'
 import './index.css'
 import branding, { pageTitle } from './config/branding'
 
@@ -20,7 +28,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ErrorBoundary><App /></ErrorBoundary>
       <Toaster
-        position="top-right"
+        position="top-center" // the corners hold buttons a toast would sit on
         toastOptions={{
           duration: 4000,
           style: {

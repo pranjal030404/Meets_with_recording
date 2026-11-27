@@ -21,7 +21,7 @@ export default function TeamCalendar({ teamId }) {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    api.get(`/meetings/team/${teamId}`, { params: { limit: 200 } })
+    api.get(`/meetings/team/${teamId}`, { params: { limit: 2000 } })
       .then(res => { if (!cancelled) setMeetings((res.data.data.meetings || []).filter(m => m.status !== 'cancelled')) })
       .catch(() => { if (!cancelled) setMeetings([]) })
       .finally(() => { if (!cancelled) setLoading(false) })

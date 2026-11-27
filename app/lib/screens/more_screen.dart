@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../core/api.dart';
 import '../core/session.dart';
+import '../core/socket_service.dart';
 import '../widgets/common.dart';
 
 const _statusPresets = [
@@ -23,7 +24,7 @@ class MoreScreen extends StatelessWidget {
       builder: (context, _) {
         final s = Session.instance;
         final u = s.user ?? {};
-        final plan = asMap(s.subscription?['plan'])['name'];
+        final plan = s.billingEnabled ? asMap(s.subscription?['plan'])['name'] : null;
         return ListView(padding: const EdgeInsets.all(12), children: [
           Card(
             child: ListTile(
@@ -69,11 +70,48 @@ class MoreScreen extends StatelessWidget {
               }
             },
           ),
+          ListTile(
+            leading: const Icon(Icons.person_remove_outlined, color: AppTheme.overdue),
+            title: const Text('Delete account', style: TextStyle(color: AppTheme.overdue)),
+            onTap: () => _deleteAccount(context),
+          ),
           const SizedBox(height: 24),
           Center(child: Text('Minutes mobile 1.0.0', style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12))),
         ]);
       },
     );
+  }
+
+  Future<void> _deleteAccount(BuildContext context) async {
+    final password = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Delete account?'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('This cannot be undone. Your profile, files, messages and the recordings of meetings you hosted are removed.'),
+          const SizedBox(height: 12),
+          TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Your password')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep my account')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Delete for good', style: TextStyle(color: AppTheme.overdue))),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    // close our own socket first, as sign-out does: the server closes it when the account goes, and both ends
+    // closing at once throws inside the socket library
+    SocketService.instance.disconnect();
+    try {
+      await Api.instance.delete('/auth/me', {'password': password.text});
+    } catch (e) {
+      SocketService.instance.connect(); // still signed in
+      if (context.mounted) toast(context, errMsg(e), error: true);
+      return;
+    }
+    if (context.mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+    await Session.instance.logout();
   }
 
   Widget _tile(BuildContext context, IconData icon, String title, Widget page) => ListTile(

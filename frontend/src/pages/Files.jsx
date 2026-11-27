@@ -45,7 +45,7 @@ export default function Files() {
 
 function FilesPage() {
   const { user } = useAuthStore()
-  const { files, trash, storage, isLoading, isUploading, fetchFiles, fetchStorage, upload, deleteFile, restoreFile, fetchTrash, downloadUrl } = useFileStore()
+  const { files, trash, storage, isLoading, isUploading, fetchFiles, fetchStorage, upload, deleteFile, restoreFile, fetchTrash, download } = useFileStore()
   const { teams, fetchTeams } = useTaskStore()
   const [scope, setScope] = useState('mine')
   const [teamId, setTeamId] = useState('')
@@ -60,6 +60,7 @@ function FilesPage() {
   }, [])
 
   useEffect(() => {
+    if (scope === 'team' && !teamId) { useFileStore.setState({ files: [] }); return } // choose a team first
     if (!showTrash) fetchFiles({ scope, teamId: teamId || undefined, search: search || undefined })
   }, [scope, teamId, search, showTrash])
 
@@ -182,9 +183,9 @@ function FilesPage() {
               </div>
               {!showTrash ? (
                 <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
-                  <a href={downloadUrl(f.id)} target="_blank" rel="noreferrer" className="p-2 rounded-lg text-gray-400 hover:text-primary-300 hover:bg-primary-500/10" title="Download">
+                  <button type="button" onClick={async () => { const r = await download(f.id, f.originalName); if (!r.success) toast.error(r.message) }} className="p-2 rounded-lg text-gray-400 hover:text-primary-300 hover:bg-primary-500/10" title="Download" aria-label={`Download ${f.originalName}`}>
                     <Download className="w-4 h-4" />
-                  </a>
+                  </button>
                   {f.ownerId === user.id && (
                     <button onClick={async () => { const r = await deleteFile(f.id); r.success ? toast.success('Moved to trash') : toast.error(r.message) }} className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10" title="Delete">
                       <Trash2 className="w-4 h-4" />

@@ -12,6 +12,7 @@ import { usePresenceStore, bindPresenceSocket, getActiveStatus } from '../store/
 import Avatar from './Avatar'
 import EmojiPicker from './EmojiPicker'
 import ProfileModal from './ProfileModal'
+import useBilling from '../lib/useBilling'
 import NotificationBell from './NotificationBell'
 import toast from 'react-hot-toast'
 import api from '../lib/api'
@@ -64,6 +65,7 @@ export default function AppShell({ children, wide = false }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
+  const billing = useBilling()
   const conversations = useConversationStore(s => s.conversations)
   const fetchConversations = useConversationStore(s => s.fetchConversations)
   const statuses = usePresenceStore(s => s.statuses)
@@ -154,8 +156,9 @@ export default function AppShell({ children, wide = false }) {
 
   const handleLogout = async () => {
     await logout()
-    toast.success('Logged out successfully')
-    navigate('/')
+    // A full load, not a client-side navigation: every store is dropped with the page, so the next person to
+    // sign in on this browser cannot see the previous one's chats or meetings
+    window.location.replace('/')
   }
 
   const sidebar = (withBell) => (
@@ -184,7 +187,7 @@ export default function AppShell({ children, wide = false }) {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 space-y-0.5">
-        {NAV_ITEMS.map(item => {
+        {NAV_ITEMS.filter(item => item.to !== '/billing' || billing).map(item => {
           const active = isActive(item)
           return (
             <Link

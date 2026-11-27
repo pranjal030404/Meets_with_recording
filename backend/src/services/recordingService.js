@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { updateLocked } from '../lib/locked.js';
 import Meeting from '../models/Meeting.js';
 import { generateTranscriptionArtifacts } from './transcriptionService.js';
 import { transcriptionMachine, StateTransitionError } from '../lib/stateMachines.js';
@@ -41,26 +42,23 @@ const withLocalLock = (meetingId, fn) => {
 const withMeetingLock = (meetingId, fn) => withLocalLock(meetingId, () => withLock(`meeting-recordings:${meetingId}`, 15000, fn));
 
 const updateRecording = (meetingId, recordingId, mutate) => withMeetingLock(meetingId, async () => {
-  const meeting = await Meeting.findByPk(meetingId);
-  if (!meeting) return null;
-  const recordings = [...(meeting.recordings || [])];
-  const idx = recordings.findIndex((r) => recordingIdOf(r) === recordingId);
-  if (idx === -1) return null;
-  const next = mutate(recordings[idx]);
-  if (!next) return null;
-  recordings[idx] = next;
-  meeting.recordings = recordings;
-  meeting.changed('recordings', true);
-  await meeting.save();
-  return next;
+  const updated = await updateLocked(Meeting, meetingId, (meeting) => {
+    const recordings = [...(meeting.recordings || [])];
+    const idx = recordings.findIndex((r) => recordingIdOf(r) === recordingId);
+    const next = idx === -1 ? null : mutate(recordings[idx]);
+    if (!next) return false;
+    recordings[idx] = next;
+    meeting.recordings = recordings;
+    return next;
+  });
+  return updated?.result || null;
 });
 
 /** Add a recording entry (status 'queued') under the same lock, so it can't race a status update. */
 export const appendRecording = (meetingId, recording) => withMeetingLock(meetingId, async () => {
-  const meeting = await Meeting.findByPk(meetingId);
-  meeting.recordings = [...(meeting.recordings || []), recording];
-  meeting.changed('recordings', true);
-  await meeting.save();
+  await updateLocked(Meeting, meetingId, (meeting) => {
+    meeting.recordings = [...(meeting.recordings || []), recording];
+  });
   return recording;
 });
 

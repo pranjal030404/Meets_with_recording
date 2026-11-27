@@ -19,7 +19,16 @@ export const useConversationStore = create((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const res = await api.get('/conversations');
-      set({ conversations: res.data.data.conversations, isLoading: false });
+      // a list that was on its way while a message arrived must not undo what the socket already told us
+      set(state => ({
+        isLoading: false,
+        conversations: res.data.data.conversations.map(fetched => {
+          const live = state.conversations.find(c => c.id === fetched.id);
+          return live && new Date(live.lastMessageAt) > new Date(fetched.lastMessageAt)
+            ? { ...fetched, lastMessagePreview: live.lastMessagePreview, lastMessageAt: live.lastMessageAt, unreadCount: live.unreadCount }
+            : fetched;
+        })
+      }));
       return { success: true };
     } catch (error) {
       set({ isLoading: false, error: error.response?.data?.message || 'Failed to load conversations' });
@@ -140,6 +149,7 @@ export const useConversationStore = create((set, get) => ({
   },
 
   handleActivity: ({ conversationId, lastMessagePreview, lastMessageAt }) => {
+    if (!get().conversations.some(c => c.id === conversationId)) return void get().fetchConversations(); // not listed yet
     set(state => ({
       conversations: state.conversations.map(c =>
         c.id === conversationId

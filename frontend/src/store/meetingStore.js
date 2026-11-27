@@ -209,7 +209,7 @@ export const useMeetingStore = create((set, get) => ({
   getMeetings: async (status) => {
     set({ isLoading: true })
     try {
-      const params = { limit: 200, ...(status && { status }) }
+      const params = { limit: 200, series: 'next', ...(status && { status }) }
       const response = await api.get('/meetings', { params })
       const { meetings } = response.data.data
       set({ meetings, isLoading: false })
@@ -308,7 +308,7 @@ export const useMeetingStore = create((set, get) => ({
     try {
       // inside a breakout room we must come back to that room, not the main one
       const roomId = window.location.pathname.split('/meeting/')[1] || currentMeeting.roomId
-      const token = getSocket()?.auth?.token
+      const userId = getSocket()?.__user
       for (let attempt = 0; attempt < 8; attempt++) {
         if (get().sessionPhase === 'leaving' || get().sessionPhase === 'idle') return
         try {
@@ -318,7 +318,7 @@ export const useMeetingStore = create((set, get) => ({
           if (moved || !socket?.connected) {
             // Same owner and still disconnected => it may simply be restarting: wait and retry
             if (!moved && socket && !socket.connected && reason === 'node-unreachable') throw new Error('owner not reachable yet')
-            if (moved) { socket = initSocket(token, placement.url); set({ socketEpoch: get().socketEpoch + 1 }) }
+            if (moved) { socket = initSocket(userId, placement.url); set({ socketEpoch: get().socketEpoch + 1 }) }
             await new Promise((res, rej) => { if (socket.connected) return res(); const t = setTimeout(() => rej(new Error('socket timeout')), 8000); socket.once('connect', () => { clearTimeout(t); res() }) })
           }
           // Tear down every piece of local media state tied to the dead transports
@@ -875,6 +875,12 @@ export const useMeetingStore = create((set, get) => ({
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 })
         ctx.resume?.()
         recordingMixer = { ctx, dest: ctx.createMediaStreamDestination(), nodes: new Map() }
+        // With every mic off nothing feeds the mix and the recorder never gets data: keep a silent source running
+        const silence = ctx.createConstantSource()
+        const mute = ctx.createGain()
+        mute.gain.value = 0
+        silence.connect(mute).connect(recordingMixer.dest)
+        silence.start()
         get().localStream?.getAudioTracks().forEach(mixerAdd)
         streamToRecord.getAudioTracks().forEach(mixerAdd) // shared-tab audio
         for (const [, entry] of get().remoteStreams) entry.stream.getAudioTracks().forEach(mixerAdd)
@@ -903,7 +909,12 @@ export const useMeetingStore = create((set, get) => ({
         }
 
         const blob = new Blob(recordedChunks, { type: blobType })
-        if (blob.size === 0) { set({ recordedChunks: [] }); return }
+        if (blob.size === 0) {
+          set({ recordedChunks: [], recordingUpload: 'failed' })
+          toast.error('Nothing was recorded, so nothing was saved. Turn on your mic or camera and record again.', { duration: 8000 })
+          return
+        }
+        toast.success('Recording stopped. Saving…')
         const url = URL.createObjectURL(blob)
         const fileName = `meeting-recording-${Date.now()}.${ext}`
         const a = document.createElement('a'); a.href = url

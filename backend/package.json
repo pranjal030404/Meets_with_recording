@@ -12,7 +12,11 @@
     "db:setup": "node src/database/createdb.js && node src/database/migrate.js",
     "test": "node --test --test-force-exit --test-timeout=60000 tests/*.test.js",
     "worker": "node src/workers/main.js",
-    "create-admin": "node src/scripts/createSuperAdmin.js"
+    "create-admin": "node src/scripts/createSuperAdmin.js",
+    "preflight": "node src/scripts/preflight.js",
+    "set-admin-password": "node src/scripts/setAdminPassword.js",
+    "rotate-invite-codes": "node src/scripts/rotateInviteCodes.js",
+    "check-integrity": "node src/scripts/checkIntegrity.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1173.0",
@@ -22,6 +26,7 @@
     "@opentelemetry/exporter-trace-otlp-http": "^0.301.2",
     "@opentelemetry/sdk-node": "^0.301.2",
     "@socket.io/redis-adapter": "^8.3.0",
+    "bcrypt": "^6.0.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^6.7.8",
     "cors": "^2.8.5",
@@ -35,13 +40,21 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^10.6.0",
     "prom-client": "^15.1.3",
+    "proxy-addr": "^2.0.8",
     "sequelize": "^6.37.7",
     "socket.io": "^4.7.2",
-    "uuid": "^9.0.1"
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "ioredis-mock": "^8.13.1",
     "nodemon": "^3.0.2",
     "socket.io-client": "^4.8.4"
+  },
+  "overrides": {
+    "uuid": "$uuid",
+    "gaxios": "^7.3.1"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

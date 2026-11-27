@@ -72,7 +72,7 @@ export default function Modal({
               <h2 className="text-2xl font-semibold text-white font-display">{title}</h2>
             )}
             {showCloseButton && (
-              <button
+              <button aria-label="Close"
                 onClick={onClose}
                 className="p-2 hover:bg-dark-400/70 rounded-xl transition-colors text-gray-400 hover:text-white ml-auto"
               >

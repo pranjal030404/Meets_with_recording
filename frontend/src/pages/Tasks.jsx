@@ -46,6 +46,7 @@ export function TasksPage({ teamId: fixedTeamId } = {}) {
   }, [])
 
   useEffect(() => {
+    if (scope === 'team' && !teamId) return // the page asks for a team first
     fetchTasks({ scope, teamId: teamId || undefined })
   }, [scope, teamId])
 
@@ -260,7 +261,7 @@ function CreateTaskModal({ teams, presetTeamId, onClose }) {
       <div className="relative glass-strong rounded-2xl border border-white/10 w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-semibold font-display">New task</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06]"><X className="w-5 h-5" /></button>
+          <button aria-label="Close" onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06]"><X className="w-5 h-5" /></button>
         </div>
         <div className="space-y-3">
           <input value={form.title} onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Task title" className="input" autoFocus />
@@ -361,7 +362,7 @@ function TaskDetailModal({ task, teams, onClose, onDelete }) {
             <button onClick={onDelete} className="p-1.5 rounded-lg text-gray-500 hover:bg-red-500/10 hover:text-red-400" title="Delete task">
               <Trash2 className="w-4 h-4" />
             </button>
-            <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06]"><X className="w-5 h-5" /></button>
+            <button aria-label="Close" onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06]"><X className="w-5 h-5" /></button>
           </div>
         </div>
 

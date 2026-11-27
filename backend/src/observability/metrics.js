@@ -133,6 +133,8 @@ export const startMetricsServer = () => {
     try { res.setHeader('Content-Type', registry.contentType); res.end(await registry.metrics()); }
     catch (e) { res.statusCode = 500; res.end(e.message); }
   });
+  // monitoring is optional: a busy port must not take the application down
+  srv.on('error', (e) => console.warn(`[metrics] not listening: ${e.message}`));
   srv.listen(port, host, () => console.log(`[metrics] listening on ${host}:${port}`));
   return srv;
 };

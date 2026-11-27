@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import LegalLinks from '../components/LegalLinks'
 import { Link } from 'react-router-dom'
 import { User, Mail, Lock } from 'lucide-react'
 import api from '../lib/api'
@@ -74,7 +75,7 @@ export default function Signup() {
   }
 
   return (
-    <AuthLayout title="Create your account" subtitle="You start on the Free plan">
+    <AuthLayout title="Create your account" subtitle="Meetings, chat and files in one place">
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         {error && <FormError>{error}</FormError>}
         <Field id="name" label="Full name" icon={User} autoComplete="name" placeholder="Aisha Rao"
@@ -94,6 +95,7 @@ export default function Signup() {
           </p>
         )}
         <SubmitButton busy={isLoading} busyLabel="Creating account…">Create account</SubmitButton>
+        <LegalLinks prefix="By creating an account you agree to the " className="block text-xs text-gray-500 text-center" />
         <p className="text-center text-sm text-gray-400">
           Already have an account?{' '}
           <Link to="/login" className="font-medium text-primary-300 underline-offset-4 hover:underline">Sign in</Link>

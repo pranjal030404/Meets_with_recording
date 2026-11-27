@@ -10,6 +10,8 @@ import { protect } from '../middleware/auth.js';
 import logAudit from '../services/auditService.js';
 import { isSmtpConfigured, sendTaskAssignedEmail } from '../services/mailService.js';
 import { requirePermission } from '../lib/permissions.js';
+import { canReadMessage, isInsider } from '../lib/access.js';
+import Meeting from '../models/Meeting.js';
 import { Sequelize } from 'sequelize';
 
 const router = express.Router();
@@ -137,11 +139,19 @@ router.post('/', protect, requirePermission('tasks.create'), async (req, res) =>
     if (parentId) {
       const parent = await Task.findByPk(parentId);
       if (!parent) return res.status(404).json({ success: false, message: 'Parent task not found' });
+      if (!(await visibleTo(parent, req.user)) || (parent.teamId || null) !== (teamId || null)) {
+        return res.status(403).json({ success: false, message: 'No access to the parent task' });
+      }
     }
 
     if (messageId) {
       const sourceMessage = await Message.findByPk(messageId);
       if (!sourceMessage) return res.status(404).json({ success: false, message: 'Source message not found' });
+      if (!(await canReadMessage(sourceMessage, req.user))) return res.status(403).json({ success: false, message: 'No access to that message' });
+    }
+    if (meetingId) {
+      const meeting = await Meeting.findByPk(meetingId);
+      if (!meeting || !(await isInsider(meeting, req.user))) return res.status(403).json({ success: false, message: 'No access to that meeting' });
     }
 
     const task = await Task.create({
@@ -203,7 +213,16 @@ router.put('/:taskId', protect, async (req, res) => {
     const { title, description, assigneeId, dueDate, priority, status, labels } = req.body;
     const prevAssignee = task.assigneeId;
 
-    if (title !== undefined) task.title = title.trim();
+    if (title !== undefined) {
+      if (typeof title !== 'string' || !title.trim()) return res.status(400).json({ success: false, message: 'Task title is required' });
+      task.title = title.trim();
+    }
+    if (assigneeId && assigneeId !== task.assigneeId && task.teamId) {
+      const team = await Team.findByPk(task.teamId);
+      if (!team || !team.isMember(assigneeId)) {
+        return res.status(400).json({ success: false, message: 'Assignee is not a member of this team' });
+      }
+    }
     if (description !== undefined) task.description = description;
     if (dueDate !== undefined) task.dueDate = dueDate ? new Date(dueDate) : null;
     if (priority !== undefined) task.priority = priority;
@@ -254,8 +273,14 @@ router.delete('/:taskId', protect, async (req, res) => {
       return res.status(403).json({ success: false, message: 'Only the creator or a team admin can delete this task' });
     }
 
-    await Task.destroy({ where: { parentId: task.id } });
-    await task.destroy();
+    // every level below, not just direct children
+    const doomed = [task.id];
+    for (let level = [task.id]; level.length;) {
+      const children = await Task.findAll({ where: { parentId: level }, attributes: ['id'] });
+      level = children.map((c) => c.id).filter((id) => !doomed.includes(id));
+      doomed.push(...level);
+    }
+    await Task.destroy({ where: { id: doomed } });
 
     logAudit({ actor: req.user, action: 'task.delete', entityType: 'Task', entityId: req.params.taskId, req });
     res.json({ success: true, message: 'Task deleted' });

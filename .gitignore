@@ -101,3 +101,11 @@ uploads/*
 app/build/
 app/android/.gradle/
 app/android/local.properties
+
+# Audit reports describe weaknesses of the running site: keep them out of a public repository
+qa-reports/
+
+# Signing keys
+app/android/key.properties
+*.jks
+*.keystore

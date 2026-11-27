@@ -5,6 +5,8 @@ import { protect } from '../middleware/auth.js';
 import Question from '../models/Question.js';
 import Meeting from '../models/Meeting.js';
 import User from '../models/User.js';
+import { requireInsider } from '../lib/meetingAccess.js';
+import { updateLocked } from '../lib/locked.js';
 
 const notify = async (req, meetingId) => {
   try {
@@ -22,9 +24,9 @@ router.post('/', protect, async (req, res) => {
   try {
     const { meetingId, question } = req.body;
 
-    const meeting = await Meeting.findByPk(meetingId);
-    if (!meeting) {
-      return res.status(404).json({ message: 'Meeting not found' });
+    if (!(await requireInsider(req, res, meetingId))) return;
+    if (typeof question !== 'string' || !question.trim()) {
+      return res.status(400).json({ message: 'Type a question' });
     }
 
     const newQuestion = await Question.create({
@@ -48,6 +50,7 @@ router.post('/', protect, async (req, res) => {
 router.get('/meeting/:meetingId', protect, async (req, res) => {
   try {
     const { meetingId } = req.params;
+    if (!(await requireInsider(req, res, meetingId))) return;
 
     const questions = await Question.findAll({
       where: {
@@ -90,20 +93,17 @@ router.put('/:questionId/upvote', protect, async (req, res) => {
       return res.status(404).json({ message: 'Question not found' });
     }
 
-    const upvotes = question.upvotes || [];
+    if (!(await requireInsider(req, res, question.meetingId))) return;
 
-    if (question.hasUserUpvoted(req.user.id)) {
-      question.upvotes = upvotes.filter(id => id !== req.user.id);
-    } else {
-      question.upvotes = [...upvotes, req.user.id];
-    }
+    const { row } = await updateLocked(Question, question.id, (q) => {
+      q.upvotes = q.hasUserUpvoted(req.user.id) ? (q.upvotes || []).filter((id) => id !== req.user.id) : [...(q.upvotes || []), req.user.id];
+    });
 
-    await question.save();
-
-    notify(req, question.meetingId);
+    notify(req, row.meetingId);
     res.json({
       success: true,
-      data: { question: question.toJSON() }
+      // who else voted is not the client's business
+      data: { question: { ...row.toJSON(), upvotes: undefined, hasUpvoted: row.hasUserUpvoted(req.user.id) } }
     });
   } catch (error) {
     console.error('Upvote question error:', error);

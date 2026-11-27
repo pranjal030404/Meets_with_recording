@@ -1,3 +1,5 @@
+import useBilling from '../lib/useBilling'
+import LegalLinks from '../components/LegalLinks'
 import { Link } from 'react-router-dom'
 import {
   Video,
@@ -55,6 +57,7 @@ const TRANSCRIPT = [
 export default function Landing() {
   const { isAuthenticated } = useAuthStore()
   const primaryTo = isAuthenticated ? '/app' : '/signup'
+  const billing = useBilling()
 
   return (
     <div className="lp">
@@ -70,7 +73,7 @@ export default function Landing() {
             <a href="#features" className="lp-link">Features</a>
             <a href="#how" className="lp-link">How it works</a>
             <a href="#highlights" className="lp-link">Highlights</a>
-            <Link to="/pricing" className="lp-link">Pricing</Link>
+            {billing && <Link to="/pricing" className="lp-link">Pricing</Link>}
           </div>
 
           <div className="lp-nav-actions">
@@ -264,6 +267,7 @@ export default function Landing() {
       <footer className="lp-footer">
         <div className="lp-wrap lp-footer-in">
           <span>{branding.appName} · {branding.tagline}</span>
+          <LegalLinks />
           <span>© {new Date().getFullYear()} {copyrightHolder}</span>
         </div>
       </footer>

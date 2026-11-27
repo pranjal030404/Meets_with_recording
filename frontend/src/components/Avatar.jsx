@@ -44,7 +44,7 @@ export default function Avatar({ user, name, src, size = 'md', online, ring = fa
 
   const handleError = () => {
     setFailed(true)
-    if (attempt > 0 || !url.startsWith('/uploads/') || !localStorage.getItem('token')) return
+    if (attempt > 0 || !url.startsWith('/uploads/') || !localStorage.getItem('user')) return
     refreshAssetCookie()
       .then(() => { setAttempt(1); setFailed(false) })
       .catch(() => {}) // keep the initials

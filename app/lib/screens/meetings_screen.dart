@@ -49,23 +49,13 @@ List<DateTime> occurrences(DateTime start, String frequency, int count) {
   return dates;
 }
 
-/// Moves dates by as many days as the first one moved, all at its new time of day.
-List<DateTime> shiftDates(List<DateTime> dates, DateTime newFirst) {
+/// Moves dates by as many days as the first one moved, all at its new time of day. A weekday or monthly series is
+/// laid out again from the new first date, so it cannot land on a weekend or twice in one month.
+List<DateTime> shiftDates(List<DateTime> dates, DateTime newFirst, [String? frequency]) {
+  if (frequency == 'weekdays' || frequency == 'monthly') return occurrences(newFirst, frequency!, dates.length);
   final first = dates.first;
   final days = DateTime.utc(newFirst.year, newFirst.month, newFirst.day).difference(DateTime.utc(first.year, first.month, first.day)).inDays;
   return dates.map((d) => DateTime(d.year, d.month, d.day + days, newFirst.hour, newFirst.minute)).toList();
-}
-
-/// Keeps only the soonest date of each repeating meeting in an already sorted list.
-List<Map<String, dynamic>> collapseSeries(List<Map<String, dynamic>> sorted) {
-  final seen = <Object>{};
-  final cutoff = DateTime.now().subtract(const Duration(hours: 12));
-  return sorted.where((m) {
-    final id = asMap(m['recurrence'])['seriesId'];
-    if (id == null || m['status'] != 'scheduled') return true;
-    if (parseDate(m['scheduledAt'])?.isBefore(cutoff) ?? false) return false;
-    return seen.add(id);
-  }).toList();
 }
 
 class MeetingsScreen extends StatefulWidget {
@@ -79,12 +69,12 @@ class MeetingsScreenState extends State<MeetingsScreen> {
   String _filter = 'upcoming'; // upcoming | past
 
   Future<List<Map<String, dynamic>>> _load() async {
-    final d = Api.unwrap(await Api.instance.get('/meetings', query: {'limit': 200}));
+    final d = Api.unwrap(await Api.instance.get('/meetings', query: {'limit': 200, 'series': 'next'}));
     final all = asList(d['meetings']).map(asMap).toList();
     final upcoming = all.where((m) => m['status'] == 'scheduled' || m['status'] == 'active').toList()
       ..sort((a, b) => (parseDate(a['scheduledAt'] ?? a['createdAt']) ?? DateTime.now()).compareTo(parseDate(b['scheduledAt'] ?? b['createdAt']) ?? DateTime.now()));
     final past = all.where((m) => m['status'] == 'ended' || m['status'] == 'cancelled').toList();
-    return _filter == 'upcoming' ? collapseSeries(upcoming) : past;
+    return _filter == 'upcoming' ? upcoming : past;
   }
 
   void _reload() => _listKey.currentState?.reload();
@@ -281,7 +271,7 @@ class _ScheduleMeetingScreenState extends State<ScheduleMeetingScreen> {
         var moved = [_when];
         if (_allLater) {
           final d = Api.unwrap(await Api.instance.get('/meetings/$room/series'));
-          moved = shiftDates(asList(d['dates']).map((x) => parseDate(x)!.toLocal()).toList(), _when);
+          moved = shiftDates(asList(d['dates']).map((x) => parseDate(x)!.toLocal()).toList(), _when, asMap(widget.meeting?['recurrence'])['frequency']?.toString());
         }
         dates = moved.map((d) => d.toUtc().toIso8601String()).toList();
       }

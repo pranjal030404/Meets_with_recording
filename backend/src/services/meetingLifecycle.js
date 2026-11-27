@@ -1,5 +1,6 @@
 import { Op } from 'sequelize';
 import Meeting from '../models/Meeting.js';
+import { updateLocked } from '../lib/locked.js';
 import Poll from '../models/Poll.js';
 import BreakoutRoom from '../models/BreakoutRoom.js';
 import { meetingMachine } from '../lib/stateMachines.js';
@@ -50,6 +51,13 @@ export const startMeeting = async (meeting) => {
   return true;
 };
 
+const closeAttendance = async (meeting, leftAt) => {
+  await updateLocked(Meeting, meeting.id, (row) => {
+    row.participants = (row.participants || []).map((p) => ({ ...p, leftAt: p.leftAt || leftAt }));
+  });
+  await meeting.reload();
+};
+
 /**
  * scheduled|active → ended, exactly once. The status flip is one conditional UPDATE, so two
  * concurrent callers (host clicks End while the last participant leaves) can't both win or both bill.
@@ -66,9 +74,7 @@ export const endMeeting = async (meeting) => {
   await meeting.reload();
   if (!affected) return { changed: false };
 
-  const leftAt = endedAt.toISOString();
-  meeting.participants = (meeting.participants || []).map((p) => ({ ...p, leftAt: p.leftAt || leftAt }));
-  await meeting.save();
+  await closeAttendance(meeting, endedAt.toISOString());
 
   // Nothing in a finished meeting should stay open: close breakout rooms, end running polls.
   await Promise.all([
@@ -101,9 +107,7 @@ export const cancelMeeting = async (meeting) => {
     meetingMachine.assertTransition(meeting.status, 'cancelled');
     return { changed: false };
   }
-  const leftAt = cancelledAt.toISOString();
-  meeting.participants = (meeting.participants || []).map((p) => ({ ...p, leftAt: p.leftAt || leftAt }));
-  await meeting.save();
+  await closeAttendance(meeting, cancelledAt.toISOString());
   await Promise.all([
     BreakoutRoom.update({ status: 'closed' }, { where: { parentMeetingId: meeting.id, status: 'open' } }),
     Poll.update({ status: 'ended', endsAt: cancelledAt }, { where: { meetingId: meeting.id, status: 'active' } })

@@ -26,6 +26,7 @@ class Api {
         headers: {
           'Content-Type': 'application/json',
           if (Config.token != null) 'Authorization': 'Bearer ${Config.token}',
+          if (Config.deviceToken != null) 'X-Device-Token': Config.deviceToken,
         },
       ));
 
@@ -61,7 +62,7 @@ class Api {
       _run((d) => d.post(path, data: body ?? {}), path);
   Future<dynamic> put(String path, [Object? body]) =>
       _run((d) => d.put(path, data: body ?? {}), path);
-  Future<dynamic> delete(String path) => _run((d) => d.delete(path), path);
+  Future<dynamic> delete(String path, [Object? body]) => _run((d) => d.delete(path, data: body), path);
 
   /// Message actions live under `/messages/messages/:id/...` on the server router, while older
   /// clients call `/messages/:id/...`. Try the mounted path first, then fall back on 404.

@@ -12,6 +12,8 @@ class Session extends ChangeNotifier {
 
   Map<String, dynamic>? user;
   Map<String, dynamic>? subscription;
+  /// False when this server has no paid plans: billing screens are hidden.
+  bool billingEnabled = false;
   bool booting = true;
 
   bool get isLoggedIn => user != null;
@@ -34,6 +36,11 @@ class Session extends ChangeNotifier {
 
   Future<void> refresh() async {
     final d = Api.unwrap(await Api.instance.get('/auth/me'));
+    try {
+      billingEnabled = Api.unwrap(await Api.instance.get('/config'))['billingEnabled'] == true;
+    } catch (_) {
+      billingEnabled = false;
+    }
     user = Map<String, dynamic>.from(d['user']);
     subscription = d['subscription'] is Map ? Map<String, dynamic>.from(d['subscription']) : null;
     notifyListeners();
@@ -42,6 +49,7 @@ class Session extends ChangeNotifier {
   Future<void> login(String email, String password) async {
     final d = Api.unwrap(await Api.instance.post('/auth/login', {'email': email.trim(), 'password': password}));
     await Config.setToken(d['token']);
+    await Config.rememberDevice(d['deviceToken']);
     user = Map<String, dynamic>.from(d['user']);
     SocketService.instance.connect();
     notifyListeners();
@@ -68,11 +76,12 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // close our own socket first: the server also closes it when the session ends
+    SocketService.instance.disconnect();
     try {
       if (Config.token != null) await Api.instance.post('/auth/logout');
     } catch (_) {}
     await Config.setToken(null);
-    SocketService.instance.disconnect();
     user = null;
     subscription = null;
     notifyListeners();

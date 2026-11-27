@@ -64,11 +64,11 @@ const sameSeries = (meeting) => (m) => m.recurrence?.seriesId === meeting.recurr
 /** Later occurrences of the same series that have not started yet, soonest first. */
 export const followingInSeries = async (meeting) => {
   if (!meeting.recurrence?.seriesId || !meeting.scheduledAt) return [];
-  const later = await Meeting.findAll({
-    where: { hostId: meeting.hostId, status: 'scheduled', scheduledAt: { [Op.gt]: meeting.scheduledAt } },
-    order: [['scheduledAt', 'ASC']]
-  });
-  return later.filter(sameSeries(meeting));
+  // "Later" means later in the series, so moving one date does not make the others disappear from it
+  const rows = await Meeting.findAll({ where: { hostId: meeting.hostId, status: 'scheduled' } });
+  return rows.filter(sameSeries(meeting))
+    .filter((m) => m.id !== meeting.id && m.recurrence.index > meeting.recurrence.index)
+    .sort((a, b) => a.recurrence.index - b.recurrence.index);
 };
 
 /** Is this date finished (or long missed), so its link should point on to the next one? */
@@ -84,4 +84,24 @@ export const nextRoomInSeries = async (meeting, now = Date.now()) => {
     order: [['scheduledAt', 'ASC']]
   });
   return rows.filter(sameSeries(meeting)).find((m) => !isOver(m, now))?.roomId || null;
+};
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Ids a meeting list leaves out so repeating meetings cannot crowd everything else off the page:
+ * of each series it keeps the next date (and one from the last 12 hours that never started), drops
+ * the rest. Calendars ask for every date and do not use this.
+ */
+export const hiddenSeriesDates = (rows, now = Date.now()) => {
+  const covered = new Set(); // series whose next date has been kept
+  const waiting = rows
+    .filter((m) => m.status === 'scheduled' && m.recurrence?.seriesId && m.scheduledAt)
+    .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
+  return waiting.filter((m) => {
+    const age = now - new Date(m.scheduledAt);
+    if (age > MISSED_AFTER_MS || covered.has(m.recurrence.seriesId)) return true;
+    if (age <= HOUR_MS) covered.add(m.recurrence.seriesId);
+    return false;
+  }).map((m) => m.id);
 };

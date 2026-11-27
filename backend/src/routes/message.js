@@ -9,10 +9,13 @@ import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
 import logAudit from '../services/auditService.js';
+import { canReadMessage } from '../lib/access.js';
+import { updateLocked } from '../lib/locked.js';
+import { requirePermission } from '../lib/permissions.js';
 
 const router = express.Router();
 
-const USER_ATTRS = ['id', 'name', 'email', 'avatar', 'customStatus', 'statusEmoji', 'statusExpiresAt', 'title'];
+const USER_ATTRS = ['id', 'name', 'avatar', 'customStatus', 'statusEmoji', 'statusExpiresAt', 'title'];
 
 const senderInclude = () => ({ model: User, as: 'sender', attributes: USER_ATTRS });
 
@@ -40,9 +43,8 @@ const assertContextAccess = async (message, user) => {
   }
   if (message.meetingId) {
     const meeting = await Meeting.findByPk(message.meetingId);
-    const isHost = meeting && meeting.hostId === user.id;
-    const isParticipant = meeting && (meeting.participantIds || []).includes(user.id);
-    return { meeting, allowed: !!meeting, isHost };
+    const allowed = await canReadMessage(message, user);
+    return { meeting, allowed, isHost: allowed && meeting.hostId === user.id };
   }
   return { allowed: false };
 };
@@ -82,7 +84,7 @@ router.get(['/messages/:messageId/thread', '/:messageId/thread'], protect, async
 });
 
 // Reply in thread
-router.post(['/messages/:messageId/replies', '/:messageId/replies'], protect, async (req, res) => {
+router.post(['/messages/:messageId/replies', '/:messageId/replies'], protect, requirePermission('chat.send'), async (req, res) => {
   try {
     const { content, mentions = [] } = req.body;
     if (!content || content.trim() === '') {
@@ -243,16 +245,16 @@ router.post(['/messages/:messageId/react', '/:messageId/react'], protect, async 
       return res.status(403).json({ success: false, message: 'No access to this message' });
     }
 
-    const reactions = message.reactions || [];
-    const existing = reactions.find(r => r.userId === req.user.id && r.emoji === emoji);
-    let updated;
-    if (existing) {
-      updated = reactions.filter(r => !(r.userId === req.user.id && r.emoji === emoji));
-    } else {
-      updated = [...reactions, { emoji, userId: req.user.id, userName: req.user.name }];
+    if (typeof emoji !== 'string' || emoji.length > 16) {
+      return res.status(400).json({ success: false, message: 'Invalid emoji' });
     }
-    message.reactions = updated;
-    await message.save();
+    await updateLocked(Message, message.id, (row) => {
+      const reactions = row.reactions || [];
+      const mine = (r) => r.userId === req.user.id && r.emoji === emoji;
+      row.reactions = reactions.some(mine)
+        ? reactions.filter((r) => !mine(r))
+        : [...reactions, { emoji, userId: req.user.id, userName: req.user.name }];
+    });
 
     const fullMessage = await getFullMessage(message.id);
     const io = req.app.get('io');
@@ -300,12 +302,15 @@ router.put(['/messages/:messageId/pin', '/:messageId/pin'], protect, async (req,
 });
 
 // Forward a message to a conversation or team channel
-router.post(['/messages/:messageId/forward', '/:messageId/forward'], protect, async (req, res) => {
+router.post(['/messages/:messageId/forward', '/:messageId/forward'], protect, requirePermission('chat.send'), async (req, res) => {
   try {
     const { conversationId, teamId, channelType = 'general' } = req.body;
     const source = await Message.findByPk(req.params.messageId, { include: [senderInclude()] });
     if (!source || source.isDeleted) {
       return res.status(404).json({ success: false, message: 'Message not found' });
+    }
+    if (!(await canReadMessage(source, req.user))) {
+      return res.status(403).json({ success: false, message: 'No access to this message' });
     }
 
     let target;
@@ -364,6 +369,9 @@ router.post(['/messages/:messageId/save', '/:messageId/save'], protect, async (r
     if (!message || message.isDeleted) {
       return res.status(404).json({ success: false, message: 'Message not found' });
     }
+    if (!(await canReadMessage(message, req.user))) {
+      return res.status(403).json({ success: false, message: 'No access to this message' });
+    }
 
     const existing = await SavedMessage.findOne({ where: { userId: req.user.id, messageId: message.id } });
     if (existing) {
@@ -395,7 +403,7 @@ router.get('/saved', protect, async (req, res) => {
 
     res.json({
       success: true,
-      data: { saved: saved.filter(s => s.message).map(s => ({ savedId: s.id, savedAt: s.createdAt, message: s.message.toJSON() })) }
+      data: { saved: (await Promise.all(saved.filter(s => s.message).map(async s => (await canReadMessage(s.message, req.user)) ? { savedId: s.id, savedAt: s.createdAt, message: s.message.toJSON() } : null))).filter(Boolean) }
     });
   } catch (error) {
     console.error('List saved messages error:', error);

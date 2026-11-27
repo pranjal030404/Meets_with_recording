@@ -5,8 +5,22 @@ import Subscription from '../models/Subscription.js';
 import Payment from '../models/Payment.js';
 import UsageLog from '../models/UsageLog.js';
 import { subscriptionMachine, paymentMachine } from '../lib/stateMachines.js';
+import { withLock } from '../infrastructure/redis/lock.js';
 
 const FREE_PLAN_SLUG = 'free';
+
+// The built-in "demo-card" gateway accepts everything. It must be asked for: there is no real payment provider.
+const BILLING_DEMO_MODE = process.env.BILLING_DEMO_MODE === 'true';
+
+// Checking a limit and spending it must not interleave between two requests of one user
+const userQueues = new Map();
+const withUserLock = (userId, fn) => {
+  const run = (userQueues.get(userId) || Promise.resolve()).then(() => withLock(`quota:${userId}`, 15000, fn));
+  const tail = run.catch(() => {});
+  userQueues.set(userId, tail);
+  tail.then(() => { if (userQueues.get(userId) === tail) userQueues.delete(userId); });
+  return run;
+};
 
 // Self-hosted mode: every account gets Enterprise-level limits without paying.
 // Applied in memory only (the stored plan/subscription rows are untouched), so
@@ -279,7 +293,34 @@ const subscribeToPlan = async (userId, planSlug, billingInterval = 'monthly') =>
     return { subscription, payment: null };
   }
 
+  if (!BILLING_DEMO_MODE) {
+    throw new SubscriptionError('Online payment is not set up on this server, so paid plans cannot be activated.', 402, 'PAYMENTS_NOT_CONFIGURED');
+  }
   return activatePaidPlan(userId, subscription, plan, interval);
+};
+
+/** { allowed, reason, subscription, limits } for a yes/no plan feature such as canBreakout or canPoll. */
+const assertFeature = async (userId, key, label) => {
+  const subscription = await ensureSubscription(userId);
+  const limits = subscription.plan?.limits || {};
+  if (limits[key] === false) return { allowed: false, subscription, limits, reason: `${label} is not available on the ${subscription.plan.name} plan.` };
+  return { allowed: true, subscription, limits };
+};
+
+/** A numeric limit: is `used + adding` still within limits[key]? -1 means unlimited. */
+const assertWithin = async (userId, key, used, adding, label) => {
+  const subscription = await ensureSubscription(userId);
+  const limits = subscription.plan?.limits || {};
+  const max = limits[key];
+  if (max === undefined || max === -1 || used + adding <= max) return { allowed: true, subscription, limits };
+  return { allowed: false, subscription, limits, reason: `Your ${subscription.plan.name} plan allows ${max} ${label}.` };
+};
+
+const capParticipants = async (userId, wanted) => {
+  const { plan } = await ensureSubscription(userId);
+  const max = plan?.limits?.participantsPerMeeting;
+  if (!(max > 0)) return wanted; // no limit: keep whatever the host chose, including nothing
+  return wanted ? Math.min(wanted, max) : max;
 };
 
 const cancelSubscription = async (userId) => {
@@ -366,7 +407,13 @@ const listAllSubscriptions = async () => {
 };
 
 export {
+  UNLOCK_ALL_FEATURES,
+  getPlanBySlug,
   SubscriptionError,
+  withUserLock,
+  assertFeature,
+  assertWithin,
+  capParticipants,
   ensureSubscription,
   getSubscriptionDetails,
   getUsageSummary,

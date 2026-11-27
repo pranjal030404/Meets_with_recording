@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import '../core/config.dart';
 import '../core/session.dart';
 import '../core/theme.dart';
 import '../widgets/common.dart';
@@ -146,11 +147,97 @@ class _LoginScreenState extends State<LoginScreen> {
               onFieldSubmitted: (_) => _submit(),
             )),
             const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ForgotPasswordScreen())),
+                child: const Text('Forgot password?'),
+              ),
+            ),
             _SubmitButton(label: 'Sign in', busy: _busy, onPressed: _submit),
             if (_needsVerify) TextButton(onPressed: _resend, child: const Text('Resend verification email')),
           ]),
         ),
         _switchLine("Don't have an account?", 'Sign up', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SignupScreen()))),
+      ],
+    );
+  }
+}
+
+/// Forgotten password: ask for an emailed code, then set a new password with it.
+class ForgotPasswordScreen extends StatefulWidget {
+  const ForgotPasswordScreen({super.key});
+  @override
+  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+}
+
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
+  final _form = GlobalKey<FormState>();
+  final _email = TextEditingController();
+  final _code = TextEditingController();
+  final _pass = TextEditingController();
+  bool _busy = false;
+  bool _sent = false;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _code.dispose();
+    _pass.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_form.currentState!.validate()) return;
+    setState(() => _busy = true);
+    try {
+      if (!_sent) {
+        await Api.instance.post('/auth/forgot-password', {'email': _email.text.trim()});
+        if (!mounted) return;
+        toast(context, 'If that account exists, a reset code has been emailed to it.');
+        setState(() => _sent = true);
+      } else {
+        final reset = await Api.instance.post('/auth/reset-password', {'email': _email.text.trim(), 'code': _code.text.trim(), 'newPassword': _pass.text});
+        await Config.rememberDevice(reset['data']?['deviceToken']);
+        if (!mounted) return;
+        toast(context, 'Password changed. Sign in with your new password.');
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) toast(context, errMsg(e), error: true);
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _AuthScaffold(
+      title: 'Reset password',
+      subtitle: _sent ? 'Enter the code we emailed you' : 'We will email you a code',
+      children: [
+        Form(
+          key: _form,
+          child: Column(children: [
+            _Labeled('Email', TextFormField(
+              controller: _email,
+              enabled: !_sent,
+              keyboardType: TextInputType.emailAddress,
+              validator: (v) => (v == null || !v.contains('@')) ? 'Enter a valid email' : null,
+            )),
+            if (_sent) _Labeled('Code', TextFormField(
+              controller: _code,
+              keyboardType: TextInputType.number,
+              validator: (v) => RegExp(r'^\d{6}$').hasMatch((v ?? '').trim()) ? null : 'Enter the 6-digit code',
+            )),
+            if (_sent) _Labeled('New password', TextFormField(
+              controller: _pass,
+              obscureText: true,
+              validator: (v) => (v ?? '').length < 6 ? 'At least 6 characters' : null,
+            )),
+            _SubmitButton(label: _sent ? 'Set new password' : 'Email me a code', busy: _busy, onPressed: _submit),
+          ]),
+        ),
+        _switchLine('Remembered it?', 'Back to sign in', () => Navigator.pop(context)),
       ],
     );
   }
@@ -194,7 +281,7 @@ class _SignupScreenState extends State<SignupScreen> {
     return Stack(children: [
       _AuthScaffold(
         title: 'Create your account',
-        subtitle: 'Every new account starts on the Free plan',
+        subtitle: 'Meetings, chat and files in one place',
         children: [
           Form(
             key: _form,

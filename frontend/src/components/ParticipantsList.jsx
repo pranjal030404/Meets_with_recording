@@ -26,7 +26,7 @@ export default function ParticipantsList({
       {/* Header */}
       <div className="p-4 border-b border-dark-400 flex items-center justify-between">
         <h2 className="font-semibold">Participants ({participants.length + 1})</h2>
-        <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
+        <button aria-label="Close" onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
           <X className="w-5 h-5" />
         </button>
       </div>
@@ -254,7 +254,7 @@ function ParticipantItem({ participant, isCurrentUser, isHost, isCoHost, canCont
       {/* Host controls */}
       {finalCanControl && !isCurrentUser && (
         <div className="relative" ref={menuRef}>
-          <button onClick={() => setShowMenu(!showMenu)}
+          <button onClick={() => setShowMenu(!showMenu)} aria-label={`Actions for ${participant?.user?.name || 'participant'}`}
             className="p-1 hover:bg-dark-400 rounded transition-colors">
             <MoreVertical className="w-4 h-4 text-gray-400" />
           </button>

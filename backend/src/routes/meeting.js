@@ -1,5 +1,5 @@
 import express from 'express';
-import { Op, fn, col, where as seqWhere } from 'sequelize';
+import { Op } from 'sequelize';
 import fs from 'fs/promises';
 import multer from 'multer';
 import path from 'path';
@@ -20,8 +20,18 @@ import { inviteeMachine, StateTransitionError } from '../lib/stateMachines.js';
 import { startMeeting, endMeeting, cancelMeeting, presentParticipants, isUpcoming, leaveOutcome, rescheduleMeeting } from '../services/meetingLifecycle.js';
 import { parseBreakoutRoomId, resolveBreakoutAccess } from '../lib/breakoutRoomId.js';
 import { sanitizeSettings } from '../lib/meetingSettings.js';
-import { parseSeries, createFollowing, followingInSeries, nextRoomInSeries, isOver } from '../services/meetingSeries.js';
+import { parseSeries, createFollowing, followingInSeries, nextRoomInSeries, isOver, hiddenSeriesDates } from '../services/meetingSeries.js';
 import { resolveOwner } from '../media/meetingPlacementService.js';
+import { admissionError, isInsider, hasAttended, maxParticipantsOf } from '../lib/access.js';
+import { updateLocked } from '../lib/locked.js';
+import { addAttendee } from '../services/attendance.js';
+import { withoutServerPaths } from '../lib/publicJson.js';
+import { publicBaseUrl } from '../lib/appLinks.js';
+import { capParticipants, withUserLock } from '../services/subscriptionService.js';
+import { emailMeetingPeople } from '../services/meetingMail.js';
+import { fixUploadName } from '../lib/validate.js';
+import { meetingIdsOf } from '../models/membership.js';
+import { uploadRefusal } from '../lib/uploadSafety.js';
 
 const router = express.Router();
 
@@ -33,7 +43,7 @@ const recordingUpload = multer({
   storage: multer.diskStorage({
     destination: async (req, file, callback) => {
       try {
-        const roomTempDir = path.join(temporaryRecordingRoot, req.params.roomId);
+        const roomTempDir = path.join(temporaryRecordingRoot, req.recordingMeeting.id);
         await fs.mkdir(roomTempDir, { recursive: true });
         callback(null, roomTempDir);
       } catch (error) {
@@ -47,8 +57,36 @@ const recordingUpload = multer({
   }),
   limits: {
     fileSize: 1024 * 1024 * 512
-  }
+  },
+  // the stored name keeps the sender's extension, so only media ones are taken
+  fileFilter: (req, file, callback) => fixUploadName(req, file, () => (/^(\.(webm|mp4|mkv|mov|ogg|oga|opus|wav|mp3|m4a|aac))?$/i.test(path.extname(file.originalname || ''))
+    ? callback(null, true)
+    : callback(Object.assign(new Error('A recording must be an audio or video file'), { status: 415, expose: true }))))
 });
+
+// Anyone who took part may upload, even after leftAt is set: the recorder's onstop upload routinely lands
+// after /leave or /end has already closed their entry.
+const authorizeRecordingUpload = async (req, res, next) => {
+  try {
+    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
+    if (!meeting) return res.status(404).json({ success: false, message: 'Meeting not found' });
+    if (meeting.hostId !== req.user.id && !hasAttended(meeting, req.user.id)) {
+      return res.status(403).json({ success: false, message: 'Only meeting participants can upload recordings' });
+    }
+    req.recordingMeeting = meeting;
+    // whatever happens next, no temporary file outlives the request
+    res.once('finish', () => { if (req.file?.path) fs.unlink(req.file.path).catch(() => {}); });
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+const cappedSettings = async (meeting, input) => {
+  const clean = sanitizeSettings(input);
+  if (clean.maxParticipants) clean.maxParticipants = await capParticipants(meeting.hostId, clean.maxParticipants);
+  return clean;
+};
 
 const includeHost = () => ({
   model: User,
@@ -62,7 +100,11 @@ const includeTeam = () => ({
   attributes: ['id', 'name', 'description']
 });
 
-router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQuota, async (req, res) => {
+router.post('/', protect, requirePermission('meetings.create'), (req, res, next) => withUserLock(req.user.id, () => new Promise((done) => {
+  res.once('finish', done);
+  res.once('close', done);
+  next();
+})).catch(next), enforceMeetingQuota, async (req, res) => {
   try {
     const { title, description, scheduledAt, settings, invitees, reminders, recurrence } = req.body;
     const teamId = req.body.teamId || null; // "No team" arrives as an empty string
@@ -94,6 +136,15 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
     }
 
     const isInstant = !scheduledAt;
+    // A little slack for clocks and slow forms; a series may start earlier today as long as dates remain
+    const lastDate = series ? series.dates[series.dates.length - 1] : scheduledAt ? new Date(scheduledAt) : null;
+    if (lastDate && !(new Date(lastDate).getTime() > Date.now() - 5 * 60 * 1000)) {
+      return res.status(400).json({ success: false, message: 'Pick a time in the future' });
+    }
+    // What was not specified keeps the documented default (so "no link requests" really restricts the meeting)
+    const cleanSettings = { ...Meeting.rawAttributes.settings.defaultValue, ...sanitizeSettings(settings) };
+    const cap = await capParticipants(req.user.id, cleanSettings.maxParticipants);
+    if (cap) cleanSettings.maxParticipants = cap;
 
     const participantEntry = {
       id: uuidv4(),
@@ -110,7 +161,7 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
       teamId,
       scheduledAt: series ? series.dates[0] : scheduledAt,
       isInstant,
-      settings: sanitizeSettings(settings),
+      settings: cleanSettings,
       participants: [participantEntry],
       participantIds: [req.user.id],
       invitees: [],
@@ -124,7 +175,7 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
 
     const meeting = await Meeting.create(meetingData);
     await recordUsage(req.user.id, 'meeting_created', 1, meeting.id, { title: meeting.title });
-    meeting.meetingLink = `${req.protocol}://${req.get('host')}/meeting/${meeting.roomId}`;
+    meeting.meetingLink = `${publicBaseUrl(req)}/meeting/${meeting.roomId}`;
 
     // A scheduled team meeting invites the whole team, so it shows up on everyone's calendar
     const requested = [
@@ -188,6 +239,8 @@ router.post('/', protect, requirePermission('meetings.create'), enforceMeetingQu
         })));
     }
 
+    if (scheduledAt) emailMeetingPeople(meeting, { kind: 'invite', from: req.user.name, entries: meeting.invitees });
+
     const fullMeeting = await Meeting.findByPk(meeting.id, {
       include: [includeHost(), teamId ? includeTeam() : null].filter(Boolean)
     });
@@ -211,16 +264,17 @@ router.get('/', protect, async (req, res) => {
   try {
     const { status, limit = 20, page = 1 } = req.query;
 
-    const whereClause = {
-      [Op.or]: [
-        { hostId: req.user.id },
-        seqWhere(fn('JSON_CONTAINS', col('participantIds'), JSON.stringify(req.user.id)), 1),
-        seqWhere(fn('JSON_CONTAINS', col('inviteeIds'), JSON.stringify(req.user.id)), 1)
-      ]
-    };
+    const whereClause = { [Op.and]: [{ id: { [Op.in]: meetingIdsOf(req.user.id) } }] };
 
     if (status) {
       whereClause.status = status;
+    }
+
+    // ?series=next: one upcoming date per repeating meeting (applied before paging)
+    if (req.query.series === 'next') {
+      const rows = await Meeting.findAll({ where: whereClause, attributes: ['id', 'status', 'scheduledAt', 'recurrence'] });
+      const hidden = hiddenSeriesDates(rows);
+      if (hidden.length) whereClause.id = { [Op.notIn]: hidden };
     }
 
     const meetings = await Meeting.findAll({
@@ -317,9 +371,12 @@ router.get('/team/:teamId', protect, async (req, res) => {
 router.get('/:roomId/placement', protect, async (req, res) => {
   try {
     const roomId = parseBreakoutRoomId(req.params.roomId)?.parentRoomId || req.params.roomId;
-    const meeting = await Meeting.findOne({ where: { roomId }, attributes: ['id', 'status'] });
+    const meeting = await Meeting.findOne({ where: { roomId }, attributes: ['id', 'status', 'hostId', 'settings', 'participants', 'participantIds', 'invitees', 'inviteeIds', 'teamId'] });
     if (!meeting || meeting.status === 'ended' || meeting.status === 'cancelled') {
       return res.status(404).json({ success: false, message: 'Meeting not available' });
+    }
+    if (!canAccessMeeting(meeting, req.user) && !(await isInsider(meeting, req.user))) {
+      return res.status(403).json({ success: false, message: 'This meeting is restricted to invited people' });
     }
     const owner = await resolveOwner(roomId, { region: req.query.region });
     if (!owner) return res.status(503).json({ success: false, message: 'No media capacity available' });
@@ -337,7 +394,7 @@ router.get('/:roomId', protect, async (req, res) => {
     if (parseBreakoutRoomId(lookupRoomId)) {
       const access = await resolveBreakoutAccess(lookupRoomId, req.user.id);
       if (!access) {
-        return res.status(403).json({ success: false, message: 'Breakout room is closed or not assigned to you' });
+        return res.status(403).json({ success: false, code: 'BREAKOUT_CLOSED', message: 'Breakout room is closed or not assigned to you' });
       }
       lookupRoomId = access.meeting.roomId;
     }
@@ -354,10 +411,11 @@ router.get('/:roomId', protect, async (req, res) => {
       });
     }
 
-    // Names behind the invitations, only for people who are on this meeting
-    const mine = meeting.hostId === req.user.id
-      || (meeting.inviteeIds || []).includes(req.user.id)
-      || (meeting.participantIds || []).includes(req.user.id);
+    const mine = await isInsider(meeting, req.user);
+    // Someone with only the link may see what they need to join; strangers to a restricted meeting see nothing
+    if (!mine && !canAccessMeeting(meeting, req.user)) {
+      return res.status(403).json({ success: false, message: 'This meeting is restricted to invited people' });
+    }
     let people = [];
     if (mine && meeting.invitees?.length) {
       const ids = meeting.invitees.map((i) => i.userId).filter(Boolean);
@@ -369,9 +427,16 @@ router.get('/:roomId', protect, async (req, res) => {
       });
     }
 
+    const json = meeting.toJSON();
+    if (!mine) {
+      for (const key of ['participants', 'participantIds', 'invitees', 'inviteeIds', 'recordings', 'reminders']) json[key] = [];
+      delete json.aiSummary;
+      delete json.completeTranscript;
+      if (json.host) json.host = { id: json.host.id, name: json.host.name, avatar: json.host.avatar };
+    }
     res.json({
       success: true,
-      data: { meeting: meeting.toJSON(), people, nextRoomId: await nextRoomInSeries(meeting) }
+      data: { meeting: json, people, nextRoomId: mine || canAccessMeeting(meeting, req.user) ? await nextRoomInSeries(meeting) : null }
     });
   } catch (error) {
     console.error('Get meeting error:', error);
@@ -389,7 +454,7 @@ router.post('/:roomId/join', protect, requirePermission('meetings.join'), async 
     if (parseBreakoutRoomId(req.params.roomId)) {
       const access = await resolveBreakoutAccess(req.params.roomId, req.user.id);
       if (!access) {
-        return res.status(403).json({ success: false, message: 'Breakout room is closed or not assigned to you' });
+        return res.status(403).json({ success: false, code: 'BREAKOUT_CLOSED', message: 'Breakout room is closed or not assigned to you' });
       }
       return res.json({
         success: true,
@@ -423,77 +488,36 @@ router.post('/:roomId/join', protect, requirePermission('meetings.join'), async 
       return res.status(400).json({ success: false, message: 'This date has passed', code: 'MEETING_ENDED' });
     }
 
-    if (!canAccessMeeting(meeting, req.user)) {
-      return res.status(403).json({
-        success: false,
-        message: 'This meeting is restricted to invited people'
-      });
+    const manager = canManageMeeting(meeting, req.user.id);
+    const returning = hasAttended(meeting, req.user.id);
+    const refused = await admissionError(meeting, req.user);
+    if (refused) {
+      return res.status(refused.status).json({ success: false, message: refused.message, code: refused.code });
+    }
+    if (!manager && !returning && meeting.settings?.isLocked) {
+      return res.status(403).json({ success: false, message: 'This meeting is locked by the host', code: 'MEETING_LOCKED' });
+    }
+    // In a waiting room nobody is a participant until the host admits them (the socket join records it then)
+    if (!manager && !returning && meeting.settings?.waitingRoom) {
+      const preview = meeting.toJSON();
+      for (const key of ['participants', 'participantIds', 'invitees', 'inviteeIds', 'recordings', 'reminders']) preview[key] = [];
+      delete preview.aiSummary;
+      delete preview.completeTranscript;
+      return res.json({ success: true, message: 'Waiting for the host to let you in', data: { meeting: preview, waiting: true } });
     }
 
-    // Guests wait for the start time; the host or a co-host can open the room early
-    if (meeting.status === 'scheduled' && isUpcoming(meeting) && !canManageMeeting(meeting, req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'This meeting has not started yet',
-        code: 'MEETING_NOT_STARTED'
-      });
+    const updated = await updateLocked(Meeting, meeting.id, async (row) => {
+      // checked again on the locked row, so simultaneous joins cannot overfill the meeting
+      const others = presentParticipants(row).filter((p) => p.userId !== req.user.id).length;
+      if (!manager && others >= maxParticipantsOf(row)) return { full: true };
+      const added = addAttendee(row, req.user);
+      const started = await startMeeting(row);
+      return added || started ? {} : false;
+    });
+    if (updated?.result?.full) {
+      return res.status(400).json({ success: false, message: 'Meeting is full' });
     }
-
-    if (
-      meeting.settings?.hostMustJoinFirst &&
-      !canManageMeeting(meeting, req.user.id) &&
-      !hostHasJoined(meeting)
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: 'The host has not joined yet. Please try again shortly.',
-        code: 'HOST_NOT_JOINED'
-      });
-    }
-
-    const participants = meeting.participants || [];
-    const activeParticipants = presentParticipants(meeting).length;
-    const maxParticipants = (meeting.settings && meeting.settings.maxParticipants) || 50;
-
-    if (activeParticipants >= maxParticipants) {
-      console.warn(`Join failed: meeting ${meeting.roomId} is full (${activeParticipants}/${maxParticipants})`);
-      return res.status(400).json({
-        success: false,
-        message: 'Meeting is full'
-      });
-    }
-
-    const existingParticipant = participants.find(
-      p => p.userId === req.user.id && !p.leftAt
-    );
-
-    if (existingParticipant) {
-      // Seeded entries (scheduled host, accepted invitee) only count as present once they really join
-      if (!existingParticipant.joinedAt) {
-        existingParticipant.joinedAt = new Date().toISOString();
-        meeting.participants = [...participants];
-      }
-    } else {
-      const previousEntry = participants.find(
-        p => p.userId === req.user.id && p.role === 'co-host'
-      );
-      meeting.participants = [
-        ...participants,
-        {
-          id: uuidv4(),
-          userId: req.user.id,
-          user: { id: req.user.id, name: req.user.name, email: req.user.email, avatar: req.user.avatar },
-          role: previousEntry ? 'co-host' : 'participant',
-          joinedAt: new Date().toISOString(),
-          isMuted: meeting.settings && meeting.settings.muteOnEntry
-        }
-      ];
-      meeting.participantIds = [...new Set([...(meeting.participantIds || []), req.user.id])];
-    }
-
-    await startMeeting(meeting);
-
-    await meeting.save();
+    await meeting.reload();
 
     res.json({
       success: true,
@@ -526,18 +550,15 @@ router.post('/:roomId/leave', protect, async (req, res) => {
       });
     }
 
-    const participants = meeting.participants || [];
-    const participant = participants.find(
-      p => p.userId === req.user.id && !p.leftAt
-    );
-
-    if (participant) {
-      participant.leftAt = new Date().toISOString();
-    }
-
-    meeting.participants = participants;
-    meeting.changed('participants', true); // leftAt was set in place
-    await meeting.save();
+    const left = await updateLocked(Meeting, meeting.id, (row) => {
+      const mine = (row.participants || []).filter((p) => p.userId === req.user.id && !p.leftAt);
+      if (!mine.length) return false;
+      for (const entry of mine) entry.leftAt = new Date().toISOString();
+      return true;
+    });
+    // Only someone who was in the meeting can empty it
+    if (!left?.result) return res.json({ success: true, message: 'Left meeting successfully' });
+    await meeting.reload();
 
     // The last person leaving ends the meeting, as does the host leaving with no co-host to carry on
     // (once, and it gets billed). Scheduled meetings that haven't really happened stay open.
@@ -593,6 +614,9 @@ router.put('/:roomId/schedule', protect, async (req, res) => {
 
     const { title, description, settings, dates, scope } = req.body;
     const targets = [meeting, ...(scope === 'series' ? await followingInSeries(meeting) : [])];
+    if (targets.some((t) => !canManageMeeting(t, req.user.id))) {
+      return res.status(403).json({ success: false, message: 'Only the host can change every date of this meeting' });
+    }
 
     let times = null;
     if (dates !== undefined) {
@@ -609,7 +633,7 @@ router.put('/:roomId/schedule', protect, async (req, res) => {
     for (const [i, target] of targets.entries()) {
       if (title?.trim()) target.title = title.trim();
       if (description !== undefined) target.description = description;
-      if (settings) target.settings = { ...(target.settings || {}), ...sanitizeSettings(settings) };
+      if (settings) target.settings = { ...(target.settings || {}), ...await cappedSettings(target, settings) };
       if (times && times[i].getTime() !== new Date(target.scheduledAt).getTime()) {
         target.scheduledAt = times[i];
         // the new time needs its own reminders
@@ -659,7 +683,7 @@ router.put('/:roomId/settings', protect, async (req, res) => {
 
     if (title) meeting.title = title;
     if (settings) {
-      meeting.settings = { ...(meeting.settings || {}), ...sanitizeSettings(settings) };
+      meeting.settings = { ...(meeting.settings || {}), ...await cappedSettings(meeting, settings) };
     }
 
     await meeting.save();
@@ -757,29 +781,9 @@ router.post('/:roomId/recordings/:recordingId/retry-transcription', protect, req
   }
 });
 
-router.post('/:roomId/recordings', protect, requirePermission('meetings.record'), enforceRecordingAllowed, recordingUpload.single('recording'), async (req, res) => {
+router.post('/:roomId/recordings', protect, requirePermission('meetings.record'), enforceRecordingAllowed, authorizeRecordingUpload, recordingUpload.single('recording'), async (req, res) => {
   try {
-    const meeting = await Meeting.findOne({ where: { roomId: req.params.roomId } });
-
-    if (!meeting) {
-      return res.status(404).json({
-        success: false,
-        message: 'Meeting not found'
-      });
-    }
-
-    const participants = meeting.participants || [];
-    const isHost = meeting.hostId === req.user.id;
-    // Anyone who took part may upload, even after leftAt is set: the recorder's onstop upload
-    // routinely lands after /leave or /end has already closed their participant entry.
-    const isParticipant = participants.some(p => p.userId === req.user.id && p.joinedAt);
-
-    if (!isHost && !isParticipant) {
-      return res.status(403).json({
-        success: false,
-        message: 'Only meeting participants can upload recordings'
-      });
-    }
+    const meeting = req.recordingMeeting;
 
     if (!req.file) {
       return res.status(400).json({
@@ -787,6 +791,9 @@ router.post('/:roomId/recordings', protect, requirePermission('meetings.record')
         message: 'Recording file is required'
       });
     }
+
+    const refusal = await uploadRefusal(req.file);
+    if (refusal) return res.status(refusal.status).json({ success: false, message: refusal.message });
 
     const duration = Number(req.body.duration);
     const language = req.body.language || process.env.TRANSCRIPTION_LANGUAGE || 'en';
@@ -835,7 +842,7 @@ router.post('/:roomId/recordings', protect, requirePermission('meetings.record')
       success: true,
       message: 'Recording uploaded; transcription is processing',
       data: {
-        recording: result.recording
+        recording: withoutServerPaths(result.recording)
       }
     });
   } catch (error) {
@@ -867,52 +874,41 @@ router.post('/:roomId/invite', protect, async (req, res) => {
       });
     }
 
-    if (invitees && Array.isArray(invitees)) {
-      // copies: Sequelize does not notice (or save) a JSON array edited in place
-      const currentInvitees = [...(meeting.invitees || [])];
-      const currentInviteeIds = [...(meeting.inviteeIds || [])];
-
-      for (const inv of invitees) {
-        const email = (inv.email || '').trim().toLowerCase();
-        if (!inv.userId && email) {
-          const account = await User.findOne({ where: { email }, attributes: ['id'] });
-          if (account) inv.userId = account.id;
-        }
-        const alreadyInvited = currentInvitees.some(
-          existing => (inv.userId && existing.userId === inv.userId) || (email && (existing.email || '').toLowerCase() === email)
-        );
-
-        if (!alreadyInvited) {
-          currentInvitees.push({
-            id: uuidv4(),
-            userId: inv.userId,
-            email: inv.email,
-            status: 'pending'
-          });
-          if (inv.userId) currentInviteeIds.push(inv.userId);
-
-          if (inv.userId) {
-            Notification.create({
-              recipientId: inv.userId,
-              type: 'meeting_scheduled',
-              title: 'Meeting Invitation',
-              message: `${req.user.name} invited you to "${meeting.title}"`,
-              data: {
-                meetingId: meeting.id,
-                senderId: req.user.id,
-                link: meeting.meetingLink
-              },
-              priority: 'normal'
-            }).catch(err => console.error('Notification error:', err));
-          }
-        }
-      }
-
-      meeting.invitees = currentInvitees;
-      meeting.inviteeIds = currentInviteeIds;
+    const wanted = [];
+    for (const inv of Array.isArray(invitees) ? invitees : []) {
+      const email = String(inv?.email || '').trim().toLowerCase();
+      let userId = inv?.userId;
+      if (!userId && email) userId = (await User.findOne({ where: { email }, attributes: ['id'] }))?.id;
+      if (userId && !(await User.findByPk(userId, { attributes: ['id'] }))) continue;
+      if (userId || email) wanted.push({ userId, email: email || undefined });
     }
 
-    await meeting.save();
+    const added = [];
+    await updateLocked(Meeting, meeting.id, (row) => {
+      const list = [...(row.invitees || [])];
+      for (const inv of wanted) {
+        if (list.some((e) => (inv.userId && e.userId === inv.userId) || (inv.email && (e.email || '').toLowerCase() === inv.email))) continue;
+        const entry = { id: uuidv4(), userId: inv.userId, email: inv.email, status: 'pending' };
+        list.push(entry);
+        added.push(entry);
+      }
+      if (!added.length) return false;
+      row.invitees = list;
+      row.inviteeIds = [...new Set(list.map((e) => e.userId).filter(Boolean))];
+    });
+    await meeting.reload();
+
+    for (const entry of added.filter((e) => e.userId)) {
+      Notification.create({
+        recipientId: entry.userId,
+        type: 'meeting_scheduled',
+        title: 'Meeting Invitation',
+        message: `${req.user.name} invited you to "${meeting.title}"`,
+        data: { meetingId: meeting.id, senderId: req.user.id, link: meeting.meetingLink },
+        priority: 'normal'
+      }).catch(err => console.error('Notification error:', err));
+    }
+    emailMeetingPeople(meeting, { kind: 'invite', from: req.user.name, entries: added });
 
     for (const later of await followingInSeries(meeting)) {
       const have = later.invitees || [];
@@ -963,9 +959,9 @@ const applyResponse = (meeting, user, status) => {
 
   if (status === 'declined') {
     // Changed their mind after accepting: remove the seat they were given (unless they're in the room now)
-    const stillPresent = (meeting.participants || []).some(p => p.userId === user.id && !p.leftAt);
-    if (!stillPresent) {
-      meeting.participants = (meeting.participants || []).filter(p => p.userId !== user.id || p.leftAt);
+    // A seat that was only reserved is given back; someone who actually attended keeps their history
+    if (!hasAttended(meeting, user.id) && meeting.hostId !== user.id) {
+      meeting.participants = (meeting.participants || []).filter(p => p.userId !== user.id);
       meeting.participantIds = (meeting.participantIds || []).filter(id => id !== user.id);
     }
   }
@@ -1009,12 +1005,12 @@ router.put('/:roomId/respond', protect, async (req, res) => {
     } catch (error) {
       return res.status(409).json({ success: false, message: error.message });
     }
-    applyResponse(meeting, req.user, status);
-    await meeting.save();
+    await updateLocked(Meeting, meeting.id, (row) => applyResponse(row, req.user, status));
+    await meeting.reload();
 
     // One answer covers the later dates of a repeating meeting (reminders only go to people who accepted)
     for (const later of await followingInSeries(meeting)) {
-      if (applyResponse(later, req.user, status)) await later.save();
+      await updateLocked(Meeting, later.id, (row) => applyResponse(row, req.user, status));
     }
 
     res.json({
@@ -1052,6 +1048,9 @@ router.put('/:roomId/cancel', protect, async (req, res) => {
 
     // scope 'series' also drops every later date; collect them before this one changes
     const later = req.body?.scope === 'series' ? await followingInSeries(meeting) : [];
+    if (later.some((t) => !canManageMeeting(t, req.user.id))) {
+      return res.status(403).json({ success: false, message: 'Only the host can cancel every date of this meeting' });
+    }
 
     try {
       await cancelMeeting(meeting);
@@ -1123,7 +1122,7 @@ router.post('/:roomId/complete-transcript', protect, requirePermission('meetings
     }
 
     if (meeting.completeTranscript && !req.body.regenerate) {
-      return res.json({ success: true, data: { completeTranscript: meeting.completeTranscript, cached: true } });
+      return res.json({ success: true, data: { completeTranscript: withoutServerPaths(meeting.completeTranscript), cached: true } });
     }
 
     const recordings = Array.isArray(meeting.recordings) ? meeting.recordings : [];

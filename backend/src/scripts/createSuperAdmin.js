@@ -1,9 +1,9 @@
-import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sequelize } from '../database/index.js';
 import Admin from '../models/Admin.js';
+import { weakAdminPassword } from '../lib/password.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +13,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 const SUPERADMIN_CREDENTIALS = {
   name: process.env.SUPERADMIN_NAME || 'Super Admin',
   email: process.env.SUPERADMIN_EMAIL || 'admin@meetclone.com',
-  password: process.env.SUPERADMIN_PASSWORD || 'SuperAdmin@2026',
+  password: process.env.SUPERADMIN_PASSWORD,
   role: 'superadmin'
 };
 
@@ -32,13 +32,14 @@ const createSuperAdmin = async () => {
       console.log('Email:', SUPERADMIN_CREDENTIALS.email);
       console.log('Password: (unchanged)');
     } else {
-      const salt = await bcrypt.genSalt(12);
-      const hashedPassword = await bcrypt.hash(SUPERADMIN_CREDENTIALS.password, salt);
-
+      if (weakAdminPassword(SUPERADMIN_CREDENTIALS.password)) {
+        console.error('Set SUPERADMIN_PASSWORD in backend/.env to a private password of at least 10 characters.');
+        process.exit(1);
+      }
       await Admin.create({
         name: SUPERADMIN_CREDENTIALS.name,
         email: SUPERADMIN_CREDENTIALS.email,
-        password: hashedPassword,
+        password: SUPERADMIN_CREDENTIALS.password, // hashed once, by the model hook
         role: SUPERADMIN_CREDENTIALS.role,
         avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(SUPERADMIN_CREDENTIALS.name)}&background=random`
       });
@@ -46,7 +47,7 @@ const createSuperAdmin = async () => {
       console.log('Superadmin created successfully!');
       console.log('\nLOGIN CREDENTIALS:');
       console.log('Email:    ', SUPERADMIN_CREDENTIALS.email);
-      console.log('Password: ', SUPERADMIN_CREDENTIALS.password);
+      console.log('Password:  the one in SUPERADMIN_PASSWORD');
       console.log('\nPlease change the password after first login!');
     }
 

@@ -2,10 +2,18 @@ import { create } from 'zustand'
 import api from '../lib/api'
 import { initSocket, disconnectSocket } from '../lib/socket'
 
+// A returning visitor is shown as signed in at once, so the socket has to exist at once too: components subscribe
+// to it as they mount, and one that mounts before it exists would never receive live updates.
+// Earlier versions kept the session token in page storage. Drop it: those people sign in once more.
+if (localStorage.getItem('token') || localStorage.getItem('adminToken')) {
+  for (const key of ['token', 'user', 'adminToken']) localStorage.removeItem(key)
+}
+const storedUser = JSON.parse(localStorage.getItem('user') || 'null')
+if (storedUser) initSocket(storedUser.id)
+
 export const useAuthStore = create((set, get) => ({
-  user: JSON.parse(localStorage.getItem('user') || 'null'),
-  token: localStorage.getItem('token') || null,
-  isAuthenticated: !!localStorage.getItem('token'),
+  user: storedUser,
+  isAuthenticated: !!storedUser,
   isLoading: false,
   error: null,
 
@@ -13,17 +21,15 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const response = await api.post('/auth/login', { email, password })
-      const { user, token } = response.data.data
+      const { user } = response.data.data
 
-      localStorage.setItem('token', token)
       localStorage.setItem('user', JSON.stringify(user))
 
       // Initialize socket connection
-      initSocket(token)
+      initSocket(user.id)
 
       set({
         user,
-        token,
         isAuthenticated: true,
         isLoading: false,
         error: null
@@ -51,17 +57,15 @@ export const useAuthStore = create((set, get) => ({
         return { success: true, requiresVerification: true, emailSent, email: sentTo, message: response.data.message }
       }
 
-      const { user, token } = response.data.data
+      const { user } = response.data.data
 
-      localStorage.setItem('token', token)
       localStorage.setItem('user', JSON.stringify(user))
 
       // Initialize socket connection
-      initSocket(token)
+      initSocket(user.id)
 
       set({
         user,
-        token,
         isAuthenticated: true,
         isLoading: false,
         error: null
@@ -84,13 +88,11 @@ export const useAuthStore = create((set, get) => ({
       console.error('Logout error:', error)
     }
 
-    localStorage.removeItem('token')
     localStorage.removeItem('user')
     disconnectSocket()
 
     set({
       user: null,
-      token: null,
       isAuthenticated: false,
       error: null
     })
@@ -118,26 +120,24 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
-  // A stored token only means "was logged in once": confirm it (and the account) is still valid.
+  // A stored profile only means "was logged in once": confirm the session (and the account) is still valid.
   initializeAuth: async () => {
-    const token = localStorage.getItem('token')
-    if (!token) return
+    if (!localStorage.getItem('user')) return
     try {
       const response = await api.get('/auth/me')
       const user = response.data?.data?.user
       if (user) {
         localStorage.setItem('user', JSON.stringify(user))
         set({ user })
+        initSocket(user.id)
       }
-      initSocket(token)
     } catch (error) {
       // 401 / suspended are handled (session cleared + redirect) by the api interceptor; a network
       // error just leaves the stored session alone so a flaky connection doesn't log people out.
       if (error.response) {
-        localStorage.removeItem('token')
         localStorage.removeItem('user')
         disconnectSocket()
-        set({ user: null, token: null, isAuthenticated: false })
+        set({ user: null, isAuthenticated: false })
       }
     }
   },

@@ -31,7 +31,9 @@ export const contributorAllowed = (meeting, userId, key) => {
 // members; everyone else needs the "anyone with the link" option.
 export const canAccessMeeting = (meeting, user) => {
   const settings = meeting.settings || {};
-  if (settings.accessType !== 'trusted') return true;
+  // Older rows may say "no link requests" without naming an access type: that was meant as a restriction
+  const restrictable = settings.accessType === 'trusted' || (!settings.accessType && settings.allowLinkRequests === false);
+  if (!restrictable) return true;
   if (canManageMeeting(meeting, user.id)) return true;
   if ((meeting.participantIds || []).includes(user.id)) return true;
   const invited = (meeting.invitees || []).some(

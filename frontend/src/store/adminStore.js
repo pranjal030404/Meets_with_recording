@@ -1,18 +1,18 @@
 import { create } from 'zustand'
-import adminApi, { ADMIN_TOKEN_KEY } from '../lib/adminApi'
+import adminApi, { ADMIN_FLAG } from '../lib/adminApi'
 
 export const useAdminStore = create((set) => ({
   admin: null,
   permissions: [],
-  isLoading: !!localStorage.getItem(ADMIN_TOKEN_KEY),
+  isLoading: !!localStorage.getItem(ADMIN_FLAG),
   error: null,
 
   login: async (email, password) => {
     set({ isLoading: true, error: null })
     try {
       const res = await adminApi.post('/admin/auth/login', { email, password })
-      const { admin, token, permissions } = res.data.data
-      localStorage.setItem(ADMIN_TOKEN_KEY, token)
+      const { admin, permissions } = res.data.data
+      localStorage.setItem(ADMIN_FLAG, '1')
       set({ admin, permissions, isLoading: false })
       return { success: true }
     } catch (err) {
@@ -25,18 +25,19 @@ export const useAdminStore = create((set) => ({
   },
 
   restore: async () => {
-    if (!localStorage.getItem(ADMIN_TOKEN_KEY)) return set({ isLoading: false })
+    if (!localStorage.getItem(ADMIN_FLAG)) return set({ isLoading: false })
     try {
       const res = await adminApi.get('/admin/auth/me')
       set({ admin: res.data.data.admin, permissions: res.data.data.permissions, isLoading: false })
     } catch {
-      localStorage.removeItem(ADMIN_TOKEN_KEY)
+      localStorage.removeItem(ADMIN_FLAG)
       set({ admin: null, isLoading: false })
     }
   },
 
-  logout: () => {
-    localStorage.removeItem(ADMIN_TOKEN_KEY)
+  logout: async () => {
+    await adminApi.post('/admin/auth/logout').catch(() => {}) // ends the session and removes the cookie
+    localStorage.removeItem(ADMIN_FLAG)
     set({ admin: null, permissions: [], error: null })
   }
 }))

@@ -1,4 +1,5 @@
 import { io } from 'socket.io-client'
+import api from './api'
 
 const SOCKET_URL = import.meta.env.DEV
   ? import.meta.env.VITE_SOCKET_URL || ''
@@ -16,14 +17,29 @@ const RECONNECT_BASE_DELAY = 500
 const RECONNECT_MAX_DELAY = 5000
 const KEEPALIVE_INTERVAL = 20000
 
-export const initSocket = (token, nodeUrl = '') => {
+// The page cannot read its session, so each connection asks for a one-minute ticket. A connection attempt made while
+// the server is unreachable waits here; without a ticket it would be refused and never tried again.
+const withTicket = (isCurrent) => async function ticket(callback) {
+  for (;;) {
+    try {
+      const { data } = await api.get('/auth/socket-ticket')
+      return callback({ token: data.data.ticket })
+    } catch (error) {
+      if ([401, 403].includes(error.response?.status)) return callback({}) // signed out
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+      if (!isCurrent()) return
+    }
+  }
+}
+
+export const initSocket = (userId, nodeUrl = '') => {
   // Callers without an explicit node (auth store) must reuse whatever live socket exists, never replace a meeting's node socket
   const target = nodeUrl || SOCKET_URL
   // Reuse a live socket only if it belongs to the same user: after a login as someone else it must be replaced
   // `active` is true while connecting / reconnecting too. Replacing a socket that is still connecting
   // (e.g. the auth check calling initSocket right after the meeting page did) killed the instance the
   // meeting page was holding: it never emitted room:join, so nobody could see anybody.
-  if (socket && socket.auth?.token === token && (!nodeUrl || socket.__target === target) && (socket.connected || socket.active)) {
+  if (socket && socket.__user === userId && (!nodeUrl || socket.__target === target) && (socket.connected || socket.active)) {
     return socket
   }
 
@@ -33,8 +49,9 @@ export const initSocket = (token, nodeUrl = '') => {
     socket = null
   }
 
-  socket = io(target, {
-    auth: { token },
+  let created = null
+  created = socket = io(target, {
+    auth: withTicket(() => socket === created),
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
@@ -46,6 +63,7 @@ export const initSocket = (token, nodeUrl = '') => {
   })
 
   socket.__target = target
+  socket.__user = userId
 
   socket.on('connect', () => {
     if (keepAliveTimer) clearInterval(keepAliveTimer)

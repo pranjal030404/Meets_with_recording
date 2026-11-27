@@ -27,7 +27,7 @@ export default function DeviceSettings({ onClose, initialTab = 'audio' }) {
       <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-semibold">Settings</h2>
-          <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
+          <button aria-label="Close" onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>

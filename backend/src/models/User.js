@@ -1,5 +1,5 @@
 import { DataTypes } from 'sequelize';
-import bcrypt from 'bcryptjs';
+import { hashPassword, checkPassword } from '../lib/password.js';
 import { sequelize } from '../database/index.js';
 
 const User = sequelize.define('User', {
@@ -94,8 +94,7 @@ const User = sequelize.define('User', {
   hooks: {
     beforeSave: async (user) => {
       if (user.changed('password')) {
-        const salt = await bcrypt.genSalt(12);
-        user.password = await bcrypt.hash(user.password, salt);
+        user.password = await hashPassword(user.password);
       }
     }
   },
@@ -110,7 +109,7 @@ const User = sequelize.define('User', {
 });
 
 User.prototype.comparePassword = async function(candidatePassword) {
-  return await bcrypt.compare(candidatePassword, this.password);
+  return await checkPassword(candidatePassword, this.password);
 };
 
 User.prototype.toJSON = function() {

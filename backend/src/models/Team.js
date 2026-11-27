@@ -25,7 +25,7 @@ const Team = sequelize.define('Team', {
   inviteCode: {
     type: DataTypes.STRING(50),
     unique: true,
-    defaultValue: () => uuidv4().split('-')[0]
+    defaultValue: () => uuidv4().replace(/-/g, '').slice(0, 16)
   },
   // JSON columns written by team routes — declared so Sequelize tracks changes
   members: {
@@ -57,20 +57,22 @@ const Team = sequelize.define('Team', {
   hooks: {
     beforeCreate: async (team) => {
       if (team.isNewRecord) {
-        team.inviteCode = team.inviteCode || uuidv4().split('-')[0];
+        team.inviteCode = team.inviteCode || uuidv4().replace(/-/g, '').slice(0, 16);
       }
     }
   }
 });
 
 Team.prototype.isMember = function(userId) {
-  return this.members && this.members.some(m => {
+  if (this.isActive === false) return false; // deleted: nothing in it is readable any more
+  return !!this.members && this.members.some(m => {
     const memberId = m.userId || m.id;
     return memberId.toString() === userId.toString();
   });
 };
 
 Team.prototype.getMemberRole = function(userId) {
+  if (this.isActive === false) return null;
   const member = this.members && this.members.find(m => {
     const memberId = m.userId || m.id;
     return memberId.toString() === userId.toString();

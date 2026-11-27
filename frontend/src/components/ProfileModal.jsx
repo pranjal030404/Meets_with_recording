@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import api from '../lib/api'
 import Avatar from './Avatar'
 import ChangePassword from './ChangePassword'
+import AccountData from './AccountData'
 import { useAuthStore } from '../store/authStore'
 
 const MAX_MB = 5
@@ -158,6 +159,7 @@ export default function ProfileModal({ onClose, target, endpoints, onSaved, clie
           </div>
           {/* Admins editing someone else use the admin console's own password reset */}
           {isSelf && <div className="sm:col-span-2 mt-2"><ChangePassword /></div>}
+          {isSelf && <div className="sm:col-span-2"><AccountData /></div>}
         </div>
 
         <div className="flex justify-end gap-2 px-6 py-5">

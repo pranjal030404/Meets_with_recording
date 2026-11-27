@@ -35,6 +35,7 @@ export default function JoinMeeting() {
   const [isMuted, setIsMuted] = useState(true)
   const [isVideoOff, setIsVideoOff] = useState(true)
   const [isCheckingMeeting, setIsCheckingMeeting] = useState(false)
+  const [lookupError, setLookupError] = useState('')
   const [showDeviceDropdown, setShowDeviceDropdown] = useState(null) // 'audio' | 'video' | null
   const [devices, setDevices] = useState({ audioinput: [], videoinput: [], audiooutput: [] })
   const [selectedAudioDevice, setSelectedAudioDevice] = useState(null)
@@ -148,6 +149,7 @@ export default function JoinMeeting() {
 
   const checkMeeting = async (id) => {
     setIsCheckingMeeting(true)
+    setLookupError('')
     const result = await getMeeting(id)
     setIsCheckingMeeting(false)
 
@@ -158,7 +160,10 @@ export default function JoinMeeting() {
       setMeeting(result.meeting)
       setPeople(result.people || [])
     } else {
-      toast.error('Meeting not found')
+      // say why: not found, or not yours to see
+      const reason = result.message || 'Meeting not found'
+      toast.error(reason)
+      setLookupError(reason)
       setMeeting(null)
     }
   }
@@ -401,7 +406,7 @@ export default function JoinMeeting() {
                   </button>
                   {devices.audioinput.length > 1 && (
                     <div className="relative">
-                      <button onClick={() => setShowDeviceDropdown(showDeviceDropdown === 'audio' ? null : 'audio')}
+                      <button aria-label="Choose microphone" onClick={() => setShowDeviceDropdown(showDeviceDropdown === 'audio' ? null : 'audio')}
                         className="h-12 px-1.5 bg-dark-400 hover:bg-dark-500 border-l border-black/20 rounded-r-full transition-colors text-gray-300">
                         <ChevronDown className="w-3.5 h-3.5" />
                       </button>
@@ -433,7 +438,7 @@ export default function JoinMeeting() {
                   </button>
                   {devices.videoinput.length > 1 && (
                     <div className="relative">
-                      <button onClick={() => setShowDeviceDropdown(showDeviceDropdown === 'video' ? null : 'video')}
+                      <button aria-label="Choose camera" onClick={() => setShowDeviceDropdown(showDeviceDropdown === 'video' ? null : 'video')}
                         className="h-12 px-1.5 bg-dark-400 hover:bg-dark-500 border-l border-black/20 rounded-r-full transition-colors text-gray-300">
                         <ChevronDown className="w-3.5 h-3.5" />
                       </button>
@@ -506,6 +511,9 @@ export default function JoinMeeting() {
                 : 'Enter a meeting code to join'
               }
             </p>
+            {!meeting && lookupError && (
+              <p role="alert" className="-mt-4 mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-200">{lookupError}</p>
+            )}
 
             {!meeting && (
               <form onSubmit={handleCheckMeeting} className="mb-6 group">

@@ -1,3 +1,4 @@
+import { UNLOCK_ALL_FEATURES } from '../services/subscriptionService.js';
 import express from 'express';
 import SubscriptionPlan, { normalizePlan } from '../models/SubscriptionPlan.js';
 import { protect } from '../middleware/auth.js';
@@ -81,6 +82,9 @@ router.post('/subscribe', protect, async (req, res) => {
   try {
     const { planSlug, billingInterval } = req.body;
 
+    if (UNLOCK_ALL_FEATURES) {
+      return res.status(400).json({ success: false, message: 'Every feature is already included on this server. There is nothing to buy.' });
+    }
     if (!planSlug) {
       return res.status(400).json({ success: false, message: 'planSlug is required' });
     }

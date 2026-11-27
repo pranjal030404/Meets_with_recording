@@ -42,7 +42,7 @@ import { checkRedis } from './infrastructure/redis/redisHealth.js';
 import { runExclusive } from './infrastructure/redis/lock.js';
 import { attachSocketAdapter } from './realtime/socketAdapter.js';
 import { onlineUserIds } from './realtime/presenceManager.js';
-import { createRateLimiter } from './middleware/rateLimit.js';
+import { createRateLimiter, perCaller } from './middleware/rateLimit.js';
 import { httpMetrics, attachCollectors, startMetricsServer } from './observability/metrics.js';
 import { queueCounts } from './queues/index.js';
 import { getMonitor } from './media/sfuManager.js';
@@ -53,6 +53,20 @@ import { closeQueues } from './queues/index.js';
 import { registerShutdown, state as lifecycle } from './lib/shutdown.js';
 import './models/associations.js';
 import User from './models/User.js';
+import Admin from './models/Admin.js';
+import './models/RevokedSession.js';
+import { usePersistentStore } from './lib/sessionRevocation.js';
+import { revocationStore } from './lib/revocationStore.js';
+import { counterStore } from './lib/counterStore.js';
+import { useCounterStore } from './middleware/rateLimit.js';
+import { UNLOCK_ALL_FEATURES } from './services/subscriptionService.js';
+import { backfillMembership } from './models/membership.js';
+import { securityHeaders, apiResponses, apiNotFound, errorHandler } from './lib/http.js';
+import { validateRequest } from './lib/validate.js';
+import { trustProxySetting } from './lib/clientIp.js';
+import { PUBLISHED_PASSWORDS } from './lib/password.js';
+import { checkConfig } from './lib/configCheck.js';
+import { legalDetails } from './lib/legal.js';
 import { processExpiries } from './services/subscriptionService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -70,16 +84,14 @@ let io;
 const app = express();
 // Behind nginx/Apache/a cloud balancer: trust X-Forwarded-* so req.ip, secure cookies and logs see the real client.
 // TRUST_PROXY=1 (one hop, default in production), a number of hops, or 'false' to disable.
-if (process.env.TRUST_PROXY !== 'false') {
-  const hops = parseInt(process.env.TRUST_PROXY);
-  app.set('trust proxy', Number.isFinite(hops) ? hops : (process.env.NODE_ENV === 'production' ? 1 : false));
-}
+app.set('trust proxy', trustProxySetting());
+app.disable('x-powered-by');
 
 const httpServer = createServer(app);
 
 io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL || true,
+    origin: process.env.CLIENT_URL || process.env.NODE_ENV !== 'production', // without CLIENT_URL: same origin only in production
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -98,19 +110,45 @@ app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true
 }));
+app.use(securityHeaders);
+app.use('/api', apiResponses);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Redis-backed (shared by all instances); degrades to per-process counting if Redis is down
-app.use('/api', createRateLimiter({ windowMs: 60000, max: parseInt(process.env.RATE_LIMIT_MAX) || 100 }));
+app.use('/api', createRateLimiter({ windowMs: 60000, identify: perCaller(parseInt(process.env.RATE_LIMIT_MAX) || 100) }));
 
 app.use(httpMetrics);
+// Health probes come before the web app's catch-all, which would otherwise answer them with index.html
+// Liveness: process is up (never checks dependencies, so a DB blip doesn't restart-loop the pod)
+// What this installation offers; the clients hide what it does not (no sign-in needed)
+app.get('/api/config', (req, res) => res.json({ success: true, data: { billingEnabled: !UNLOCK_ALL_FEATURES, legal: legalDetails() } }));
+
+app.get('/healthz', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+
+// Readiness: should the balancer send traffic here? Fails while draining or if the DB is unreachable.
+// Redis down is reported but not fatal (non-meeting features degrade); set REDIS_REQUIRED=true to make it fatal.
+app.get('/readyz', async (req, res) => {
+  if (lifecycle.draining) return res.status(503).json({ status: 'draining' });
+  const checks = {};
+  try { await sequelize.query('SELECT 1'); checks.database = { ok: true }; } catch (e) { console.warn('Readiness: database', e.message); checks.database = { ok: false }; }
+  checks.redis = await checkRedis();
+  checks.socketAdapter = socketAdapter.status();
+  checks.media = { workers: mediasoupService.workers.length };
+  checks.dbPool = poolStats();
+  const redisRequired = process.env.REDIS_REQUIRED === 'true';
+  const ready = checks.database.ok && (!redisRequired || checks.redis.ok);
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', checks });
+});
+
 // Private files: authenticated + authorised per path (was a public express.static). See routes/uploads.js
 app.use('/uploads', createUploadsRouter());
 
 if (process.env.NODE_ENV === 'production') {
   const frontendDist = path.resolve(__dirname, '../../frontend/dist');
-  app.use(express.static(frontendDist, { maxAge: '1y' }));
+  const webFiles = express.static(frontendDist, { maxAge: '1y' });
+  // not for the API: looking for a file on disk uses the same thread pool as password hashing
+  app.use((req, res, next) => (req.path.startsWith('/api') ? next() : webFiles(req, res, next)));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
     res.sendFile(path.join(frontendDist, 'index.html'));
@@ -121,6 +159,7 @@ if (process.env.NODE_ENV === 'production') {
 // ROUTES
 // =============================================
 app.use('/api', activityLog);
+app.use('/api', validateRequest);
 app.use('/api/auth', authRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/chat', chatRoutes);
@@ -140,30 +179,14 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/storage', storageRoutes);
 app.use('/api/webrtc', webrtcRoutes);
 
-// Liveness: process is up (never checks dependencies, so a DB blip doesn't restart-loop the pod)
-app.get('/healthz', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
-
-// Readiness: should the balancer send traffic here? Fails while draining or if the DB is unreachable.
-// Redis down is reported but not fatal (non-meeting features degrade); set REDIS_REQUIRED=true to make it fatal.
-app.get('/readyz', async (req, res) => {
-  if (lifecycle.draining) return res.status(503).json({ status: 'draining' });
-  const checks = {};
-  try { await sequelize.query('SELECT 1'); checks.database = { ok: true }; } catch (e) { checks.database = { ok: false, error: e.message }; }
-  checks.redis = await checkRedis();
-  checks.socketAdapter = socketAdapter.status();
-  checks.media = { workers: mediasoupService.workers.length };
-  checks.dbPool = poolStats();
-  const redisRequired = process.env.REDIS_REQUIRED === 'true';
-  const ready = checks.database.ok && (!redisRequired || checks.redis.ok);
-  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', checks });
-});
-
 // Back-compat for existing monitors/deploy scripts
 app.get('/api/health', (req, res) => {
   if (lifecycle.draining) return res.status(503).json({ status: 'draining' });
+  const basic = { status: 'ok', timestamp: new Date().toISOString() };
+  // process and media details are for monitoring on this machine, not for the internet
+  if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.ip)) return res.json(basic);
   res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
+    ...basic,
     pid: process.pid,
     uptime: process.uptime(),
     mediasoup: mediasoupService.workers.length > 0 ? mediasoupService.getStats() : 'inactive',
@@ -176,6 +199,23 @@ app.get('/api/health', (req, res) => {
 initializeSocketHandlers(io);
 app.set('io', io);
 
+app.use('/api', apiNotFound);
+app.use(errorHandler);
+
+// A forgotten await somewhere must not take every live meeting down with it
+process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
+
+const warnAboutAdminPasswords = async () => {
+  for (const admin of await Admin.findAll({ attributes: ['email', 'password'] })) {
+    for (const known of PUBLISHED_PASSWORDS) {
+      if (await admin.comparePassword(known)) {
+        console.warn(`SECURITY: administrator ${admin.email} still has a password published in this repository. Change it now.`);
+        break;
+      }
+    }
+  }
+};
+
 // =============================================
 // START
 // =============================================
@@ -186,10 +226,34 @@ let stopCollectors = null;
 let metricsServer = null;
 const startServer = async () => {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      const { fatal, warnings } = checkConfig();
+      warnings.forEach((w) => console.warn(`CONFIG: ${w}`));
+      if (fatal.length) {
+        fatal.forEach((f) => console.error(`Refusing to start: ${f}`));
+        process.exit(1);
+      }
+    }
     await connectDB();
     recoverStuckTranscriptions().then((n) => n && console.log(`Marked ${n} interrupted transcription(s) as failed (retry available)`)).catch((e) => console.error('Transcription recovery failed:', e.message));
-    await sequelize.sync({ alter: false });
+    // Two instances starting together can both try to create the same index: the loser simply tries again
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await sequelize.sync({ alter: false });
+        break;
+      } catch (e) {
+        if (attempt >= 5 || !/ER_DUP_KEYNAME|ER_TABLE_EXISTS|ER_LOCK_DEADLOCK/.test(`${e.original?.code}`)) throw e;
+        await new Promise((r) => setTimeout(r, attempt * 500));
+      }
+    }
     console.log('Database tables synchronized');
+    if (!redisEnabled()) {
+      await usePersistentStore(revocationStore);
+      useCounterStore(counterStore);
+      timers.push(setInterval(() => counterStore.prune().catch(() => {}), 60 * 60 * 1000));
+    }
+    await runExclusive('job:membership-backfill', 10 * 60 * 1000, () => backfillMembership());
+    await warnAboutAdminPasswords().catch((e) => console.warn('Admin password check failed:', e.message));
     // Single-instance (no Redis): no sockets survive a restart, so nobody can still be online.
     // With Redis other instances may hold live sockets, so we must NOT reset globally; the leader-elected
     // reconcile below clears stale flags using the TTL-based presence set instead.

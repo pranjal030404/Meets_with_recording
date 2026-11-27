@@ -1,28 +1,32 @@
+import useBilling from './lib/useBilling'
+import lazyPage from './lib/lazyPage'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { useEffect, lazy, Suspense } from 'react'
+import { useEffect, Suspense } from 'react'
 import { useAuthStore } from './store/authStore'
 import { useAdminStore } from './store/adminStore'
 
 // Pages are code-split: each route downloads only when visited (the first load used to ship the whole app)
-const Landing = lazy(() => import('./pages/Landing'))
-const Login = lazy(() => import('./pages/Login'))
-const Signup = lazy(() => import('./pages/Signup'))
-const VerifyEmail = lazy(() => import('./pages/VerifyEmail'))
-const Home = lazy(() => import('./pages/Home'))
-const Meeting = lazy(() => import('./pages/Meeting'))
-const JoinMeeting = lazy(() => import('./pages/JoinMeeting'))
-const MeetingHistory = lazy(() => import('./pages/MeetingHistory'))
-const Teams = lazy(() => import('./pages/Teams'))
-const TeamDetail = lazy(() => import('./pages/TeamDetail'))
-const Calendar = lazy(() => import('./pages/Calendar'))
-const Pricing = lazy(() => import('./pages/Pricing'))
-const Billing = lazy(() => import('./pages/Billing'))
-const Chat = lazy(() => import('./pages/Chat'))
-const Tasks = lazy(() => import('./pages/Tasks'))
-const Files = lazy(() => import('./pages/Files'))
-const Search = lazy(() => import('./pages/Search'))
-const Admin = lazy(() => import('./pages/Admin'))
-const AdminLogin = lazy(() => import('./pages/AdminLogin'))
+const Landing = lazyPage(() => import('./pages/Landing'))
+const Login = lazyPage(() => import('./pages/Login'))
+const ForgotPassword = lazyPage(() => import('./pages/ForgotPassword'))
+const Signup = lazyPage(() => import('./pages/Signup'))
+const VerifyEmail = lazyPage(() => import('./pages/VerifyEmail'))
+const Home = lazyPage(() => import('./pages/Home'))
+const Meeting = lazyPage(() => import('./pages/Meeting'))
+const JoinMeeting = lazyPage(() => import('./pages/JoinMeeting'))
+const MeetingHistory = lazyPage(() => import('./pages/MeetingHistory'))
+const Teams = lazyPage(() => import('./pages/Teams'))
+const TeamDetail = lazyPage(() => import('./pages/TeamDetail'))
+const Calendar = lazyPage(() => import('./pages/Calendar'))
+const Pricing = lazyPage(() => import('./pages/Pricing'))
+const Billing = lazyPage(() => import('./pages/Billing'))
+const Chat = lazyPage(() => import('./pages/Chat'))
+const Tasks = lazyPage(() => import('./pages/Tasks'))
+const Files = lazyPage(() => import('./pages/Files'))
+const Search = lazyPage(() => import('./pages/Search'))
+const Admin = lazyPage(() => import('./pages/Admin'))
+const AdminLogin = lazyPage(() => import('./pages/AdminLogin'))
+const Legal = lazyPage(() => import('./pages/Legal'))
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
@@ -58,6 +62,13 @@ function PublicRoute({ children }) {
   return children
 }
 
+// Pricing and billing exist only where there are paid plans
+function PaidOnly({ children }) {
+  const billing = useBilling()
+  if (billing === null) return null
+  return billing ? children : <Navigate to="/" replace />
+}
+
 // Admin portal: separate admin session, only reachable via /admin
 function AdminRoute() {
   const { admin, isLoading, restore } = useAdminStore()
@@ -75,7 +86,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
 
       {/* Pricing (public, also viewable when logged in) */}
-      <Route path="/pricing" element={<Pricing />} />
+      <Route path="/pricing" element={<PaidOnly><Pricing /></PaidOnly>} />
 
       {/* Public Routes */}
       <Route path="/login" element={
@@ -83,7 +94,14 @@ export default function App() {
           <Login />
         </PublicRoute>
       } />
+      <Route path="/forgot-password" element={
+        <PublicRoute>
+          <ForgotPassword />
+        </PublicRoute>
+      } />
       <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/privacy" element={<Legal page="privacy" />} />
+      <Route path="/terms" element={<Legal page="terms" />} />
       <Route path="/signup" element={
         <PublicRoute>
           <Signup />
@@ -133,7 +151,7 @@ export default function App() {
       } />
       <Route path="/billing" element={
         <ProtectedRoute>
-          <Billing />
+          <PaidOnly><Billing /></PaidOnly>
         </ProtectedRoute>
       } />
       <Route path="/chat" element={
