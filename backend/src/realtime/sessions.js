@@ -4,6 +4,7 @@
  */
 import crypto from 'crypto';
 import { _clearSocketAuthCache } from '../middleware/auth.js';
+import { redisEnabled } from '../infrastructure/redis/redisClient.js';
 
 export const roomOfSessionHash = (hash) => `session:${String(hash).slice(0, 32)}`;
 export const sessionRoom = (token) => roomOfSessionHash(crypto.createHash('sha256').update(String(token)).digest('hex'));
@@ -17,9 +18,14 @@ export const disconnectSession = (io, token) => {
   setTimeout(() => io?.in(sessionRoom(token)).disconnectSockets(true), LOGOUT_GRACE_MS).unref?.();
 };
 
+const FORGET_AUTH = 'auth:forget';
+export const listenForAuthChanges = (io) => io.on(FORGET_AUTH, _clearSocketAuthCache);
+
 /** Every open connection of a user: suspension, password change or reset. */
 export const disconnectUser = (io, userId) => {
   _clearSocketAuthCache();
+  // every server keeps its own short cache of who is allowed in; the others must forget too, or they let the user back
+  if (redisEnabled()) io?.serverSideEmit(FORGET_AUTH);
   io?.in(`user:${userId}`).disconnectSockets(true);
 };
 

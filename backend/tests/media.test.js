@@ -80,6 +80,17 @@ test('failure: stale-but-present owner record is reassigned via compare-and-set'
   const second = await resolveOwner('room-E');
   assert.notEqual(second.nodeId, first);
 });
+test('a busy processor or full memory steers meetings away but never leaves them with nowhere to go', () => {
+  const busy = node({ nodeId: 'busy', cpu: 0.99 }), tight = node({ nodeId: 'tight', memory: 0.95 }), calm = node({ nodeId: 'calm' });
+  assert.equal(pickBestNode([busy, tight, calm], ctx).node.nodeId, 'calm');
+  assert.equal(pickBestNode([busy], ctx).node.nodeId, 'busy');
+  assert.equal(pickBestNode([busy, tight], ctx).node.nodeId, 'tight'); // the less overloaded of the two
+  // a limit the operator set, draining and ill health still refuse
+  assert.equal(pickBestNode([node({ cpu: 0.99, consumers: 1000 })], ctx), null);
+  assert.equal(pickBestNode([node({ cpu: 0.99, draining: true })], ctx), null);
+  assert.equal(pickBestNode([node({ cpu: 0.99, status: 'unhealthy' })], ctx), null);
+});
+
 test('placement fails closed (null) when no node has capacity', async () => {
   for (const k of await getRedis().smembers('sfu:nodes')) await getRedis().del(`sfu:node:${k}`);
   assert.equal(await resolveOwner('room-F'), null);

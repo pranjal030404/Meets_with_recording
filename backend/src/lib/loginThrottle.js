@@ -15,11 +15,11 @@ const keys = (req, account) => {
     : [[PER_ADDRESS, `${account}|${req.ip}`, 10], [PER_ACCOUNT, account, 30]];
 };
 
-/** Answers 429 and returns true when this account has had too many wrong passwords recently. */
-export const tooManyAttempts = async (req, res, account) => {
+/** Answers 429 and returns true when this account has had too many wrong passwords recently. `hint`: a way on. */
+export const tooManyAttempts = async (req, res, account, hint = '') => {
   for (const [limiter, key, max] of keys(req, account)) {
     if (await limiter.count(key) >= max) {
-      res.status(429).json({ success: false, message: 'Too many wrong passwords. Try again in 15 minutes.' });
+      res.status(429).json({ success: false, message: `Too many wrong passwords. Try again in 15 minutes.${hint}` });
       return true;
     }
   }

@@ -54,3 +54,14 @@ test('TC-LOCK-005 a reply must belong to the conversation it is sent in', async 
   assert.equal((await api('POST', `/api/conversations/${c}/messages`, { token: b.token, body: { content: 'two', replyToId: sent.id } })).status, 201);
   assert.equal((await api('POST', `/api/conversations/${c}/messages`, { token: b.token, body: { content: 'x', replyToId: uid() } })).status, 400);
 });
+
+test('TC-LOCK-006 one place can only be told "this address has an account" so many times', async () => {
+  const u = await newUser('listed');
+  const signup = (email, n) => api('POST', '/api/auth/signup', { headers: from(n), body: { name: 'Guess Work', email, password: PASSWORD } });
+  const n = 130 + Math.floor(Math.random() * 100); // a place not used by an earlier run
+  const statuses = [];
+  for (let i = 0; i < 12; i++) statuses.push((await signup(u.email, n)).status);
+  assert.deepEqual(statuses, [...Array(10).fill(400), 429, 429]);
+  assert.equal((await signup(`fresh.${uid()}@example.test`, n)).status, 429, 'the same place cannot tell by trying a new address either');
+  assert.equal((await signup(`fresh.${uid()}@example.test`, 62)).status, 201, 'everybody else can still sign up');
+});

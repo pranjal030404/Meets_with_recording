@@ -40,6 +40,10 @@ async function issueVerification(user) {
   await sendVerificationEmail(user, token);
 }
 
+// With verification off, signup has to say that an address is taken (the new account would sign in at once), so how
+// often one place may be told that is limited: it slows somebody listing accounts, it cannot stop them
+const takenAnswers = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, prefix: 'rl:signup-taken' });
+
 router.post('/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -65,6 +69,11 @@ router.post('/signup', async (req, res) => {
 
     const needsVerification = await verificationRequired();
 
+    // checked before the lookup, so that a refused caller learns nothing about the address
+    if (!needsVerification && await takenAnswers.count(req.ip) >= 10) {
+      return res.status(429).json({ success: false, message: 'Too many attempts. Try again in 15 minutes.' });
+    }
+
     const existingUser = await User.findOne({ where: { email: email.toLowerCase() } });
     if (existingUser) {
       // With verification on, the answer is the same as for a new address, so it does not tell who has an account:
@@ -78,6 +87,7 @@ router.post('/signup', async (req, res) => {
           data: { requiresVerification: true, emailSent: true, email: existingUser.email }
         });
       }
+      await takenAnswers.hit(req.ip);
       return res.status(400).json({
         success: false,
         message: 'User with this email already exists'
@@ -153,7 +163,9 @@ router.post('/login', async (req, res) => {
     }
 
     const account = email.toLowerCase();
-    if (await tooManyAttempts(req, res, account)) return;
+    // an emailed reset code proves ownership, so it is the way in for an owner refused because of somebody else
+    const hint = isSmtpConfigured() ? ' Or use “Forgot password?” to get in now.' : '';
+    if (await tooManyAttempts(req, res, account, hint)) return;
 
     const user = await User.findOne({
       where: { email: account },
@@ -318,7 +330,9 @@ router.post('/reset-password', async (req, res) => {
     await user.save();
     await revokeUserSessions(user.id);
     disconnectUser(req.app.get('io'), user.id);
-    // reading the emailed code proves ownership: this device can sign in even while strangers are guessing
+    // reading the emailed code proves ownership: this device can sign in even while strangers are guessing,
+    // and wrong passwords typed on it before the reset no longer count
+    await clearFailures(req, email);
     res.json({ success: true, message: 'Password changed. Sign in with your new password.', data: rememberDevice(req, res, email) });
   } catch (error) {
     console.error('Reset password error:', error);

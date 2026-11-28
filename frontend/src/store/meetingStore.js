@@ -25,6 +25,7 @@ const producerCatalog = new Map() // producerId -> { peerId, user, mediaType, an
 let mediaPolicy = { mode: 'small', maxVideo: 1e9, maxAudio: 1e9, maxScreen: 4 } // permissive until the server announces
 let activeSpeakerPeers = new Set()
 let reconcileTimer = null
+let reconcileWaiters = [] // everyone who asked since the last pass; all of them must be answered
 let reconciling = false
 let reconcileAgain = false
 const appliedLayers = new Map() // consumerId -> spatial layer last requested
@@ -244,7 +245,7 @@ export const useMeetingStore = create((set, get) => ({
     if (screenStream) screenStream.getTracks().forEach(t => t.stop())
 
     consumeInFlight.clear(); consumedProducers.clear(); closedProducers.clear()
-    producerCatalog.clear(); appliedLayers.clear(); activeSpeakerPeers = new Set(); clearTimeout(reconcileTimer)
+    producerCatalog.clear(); appliedLayers.clear(); activeSpeakerPeers = new Set(); clearTimeout(reconcileTimer); reconcileWaiters.splice(0).forEach((done) => done())
     mediaPolicy = { mode: 'small', maxVideo: 1e9, maxAudio: 1e9, maxScreen: 4 }
     unsubscribeInterest?.(); unsubscribeInterest = null; setNodeUnreachableHandler(null)
     if (mediasoupClient) { mediasoupClient.closeAll(); mediasoupClient = null }
@@ -304,7 +305,7 @@ export const useMeetingStore = create((set, get) => ({
     if (recovering || !currentMeeting) return
     recovering = true
     set({ mediaLink: 'reconnecting' })
-    toast.loading('Reconnecting media…', { id: 'media-recover' })
+    toast.loading(reason === 'no-capacity' ? 'The server is busy. Trying again…' : 'Reconnecting media…', { id: 'media-recover' })
     try {
       // inside a breakout room we must come back to that room, not the main one
       const roomId = window.location.pathname.split('/meeting/')[1] || currentMeeting.roomId
@@ -339,7 +340,7 @@ export const useMeetingStore = create((set, get) => ({
           // dropped again while rebuilding: the server has already discarded these transports, start over
           if (!socket.connected || socket.id !== socketId) throw new Error('connection dropped during recovery')
           socket.emit('room:join', { roomId }) // server answers with participants + existing producers => normal consume path
-          toast.success('Media reconnected', { id: 'media-recover' })
+          toast.success(reason === 'no-capacity' ? 'Connected' : 'Media reconnected', { id: 'media-recover' })
           return
         } catch (e) {
           await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** attempt, 8000)))
@@ -453,8 +454,12 @@ export const useMeetingStore = create((set, get) => ({
 
   // Coalesces bursts (a room of 50 joining at once) into one pass
   reconcileSubscriptions: () => new Promise((resolve) => {
+    reconcileWaiters.push(resolve)
     clearTimeout(reconcileTimer)
-    reconcileTimer = setTimeout(() => { get()._reconcile().finally(resolve) }, 30)
+    reconcileTimer = setTimeout(() => {
+      const waiting = reconcileWaiters.splice(0)
+      get()._reconcile().finally(() => waiting.forEach((done) => done()))
+    }, 30)
   }),
 
   _reconcile: async () => {

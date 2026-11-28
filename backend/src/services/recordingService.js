@@ -122,6 +122,23 @@ export const ensureLocalRecording = async (recording, storage = getStorage()) =>
   throw new Error('Recording file is not available on this node');
 };
 
+const stillListed = async (meetingId, recordingId) => {
+  const meeting = await Meeting.findByPk(meetingId, { attributes: ['recordings'] });
+  return !!meeting && (meeting.recordings || []).some((r) => recordingIdOf(r) === recordingId);
+};
+
+/** The recording was erased while it was being worked on: nothing about it may stay behind. */
+const discardTranscript = async (roomId, recording, storage = getStorage()) => {
+  const dir = path.join(uploadsRoot, 'transcripts', roomId);
+  for (const ext of ['json', 'txt', 'srt', 'vtt']) {
+    const file = path.join(dir, `${recording.id}.${ext}`);
+    await fs.rm(file, { force: true });
+    if (storage.name === 's3') await storage.deleteObject(keyFor(file)).catch((e) => console.error(`[erase] could not delete ${keyFor(file)} from object storage: ${e.message}`));
+  }
+  await fs.rmdir(dir).catch(() => {}); // only when nothing else is in it
+  await fs.rm(recording.path, { force: true }); // a worker on another node holds its own copy
+};
+
 export const runTranscription = async ({ meetingId, roomId, recording, language, context }, { throwOnError = false, final = true } = {}) => {
   try {
     await setTranscriptionStatus(meetingId, recording.id, 'processing', { startedAt: new Date().toISOString(), error: null });
@@ -136,8 +153,10 @@ export const runTranscription = async ({ meetingId, roomId, recording, language,
     });
     const record = buildTranscriptionRecord(transcript, roomId, recording.id, recording.duration);
     for (const ext of ['json', 'txt', 'srt', 'vtt']) if (transcript.files?.[ext]) await mirrorFile(transcript.files[ext], 'text/plain'); // so any node / the summary worker can read them
-    await setTranscriptionStatus(meetingId, recording.id, record.status, record);
+    if (!(await setTranscriptionStatus(meetingId, recording.id, record.status, record))) await discardTranscript(roomId, recording);
   } catch (error) {
+    // erased while we were working on it: that is not a failure, and not worth a retry
+    if (!(await stillListed(meetingId, recording.id).catch(() => true))) return discardTranscript(roomId, recording);
     console.error('Transcription failed:', error.message);
     // With a durable queue a non-final attempt is retried by BullMQ: only mark `failed` (UI-visible) on the last one
     if (!throwOnError || final) await setTranscriptionStatus(meetingId, recording.id, 'failed', { error: error.message, finishedAt: new Date().toISOString() }).catch(() => {});

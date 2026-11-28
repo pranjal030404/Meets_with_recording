@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/api.dart';
 import '../core/config.dart';
 import '../core/files.dart';
@@ -278,4 +279,31 @@ class TallyDot extends StatelessWidget {
 String linkRoomId(Map<String, dynamic>? meeting, String roomId) {
   final series = meeting?['recurrence'];
   return (series is Map ? series['seriesRoomId']?.toString() : null) ?? roomId;
+}
+
+/// Links to the privacy notice and terms on the server's web app; nothing where the operator has not published them.
+class LegalLinks extends StatefulWidget {
+  const LegalLinks({super.key});
+  @override
+  State<LegalLinks> createState() => _LegalLinksState();
+}
+
+class _LegalLinksState extends State<LegalLinks> {
+  late final Future<bool> _published = Api.instance
+      .get('/config')
+      .then((r) => Api.unwrap(r)['legal'] is Map)
+      .catchError((_) => false);
+
+  Widget _link(String label, String path) => TextButton(
+        onPressed: () => launchUrl(Uri.parse('${Config.serverUrl}$path'), mode: LaunchMode.externalApplication),
+        child: Text(label),
+      );
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<bool>(
+        future: _published,
+        builder: (_, snapshot) => snapshot.data == true
+            ? Wrap(alignment: WrapAlignment.center, children: [_link('Privacy notice', '/privacy'), _link('Terms of service', '/terms')])
+            : const SizedBox.shrink(),
+      );
 }

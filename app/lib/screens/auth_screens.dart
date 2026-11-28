@@ -319,6 +319,7 @@ class _SignupScreenState extends State<SignupScreen> {
             ]),
           ),
           _switchLine('Already have an account?', 'Sign in', () => Navigator.pop(context)),
+          const LegalLinks(),
         ],
       ),
       Positioned(top: 0, left: 0, child: SafeArea(child: BackButton(onPressed: () => Navigator.pop(context)))),

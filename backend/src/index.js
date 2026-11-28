@@ -253,7 +253,6 @@ const startServer = async () => {
       timers.push(setInterval(() => counterStore.prune().catch(() => {}), 60 * 60 * 1000));
     }
     await runExclusive('job:membership-backfill', 10 * 60 * 1000, () => backfillMembership());
-    await warnAboutAdminPasswords().catch((e) => console.warn('Admin password check failed:', e.message));
     // Single-instance (no Redis): no sockets survive a restart, so nobody can still be online.
     // With Redis other instances may hold live sockets, so we must NOT reset globally; the leader-elected
     // reconcile below clears stale flags using the TTL-based presence set instead.
@@ -287,6 +286,8 @@ const startServer = async () => {
 
     httpServer.listen(PORT, () => {
       console.log(`Server (pid:${process.pid}) running on port ${PORT}`);
+      // after listening: it hashes each administrator's password several times and must not hold up a restart
+      warnAboutAdminPasswords().catch((e) => console.warn('Admin password check failed:', e.message));
       if (process.env.REDIS_REQUIRED === 'true' && !getRedis()) { console.error('REDIS_REQUIRED=true but REDIS_URL is not set'); process.exit(1); }
       if (mediasoupService.workers.length > 0) console.log('Mediasoup SFU active');
       // In-process workers by default; set WORKERS_IN_PROCESS=false when running dedicated `node src/workers/main.js` pods

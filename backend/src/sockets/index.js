@@ -26,7 +26,7 @@ import { admissionError } from '../lib/access.js';
 import { updateLocked } from '../lib/locked.js';
 import { addAttendee } from '../services/attendance.js';
 import { capParticipants } from '../services/subscriptionService.js';
-import { roomOfSessionHash } from '../realtime/sessions.js';
+import { roomOfSessionHash, listenForAuthChanges } from '../realtime/sessions.js';
 
 const roomParticipants = new Map();
 const meetingNotes = new Map(); // roomId -> shared notes text
@@ -201,6 +201,7 @@ const recordAttendance = async (meeting, user) => {
 };
 
 export const initializeSocketHandlers = (io) => {
+  listenForAuthChanges(io);
   // A dead worker takes its routers' transports with it; they cannot migrate. Tell the room so clients rebuild media.
   mediasoupService.onActiveSpeakers = (roomId, speakers) => {
     io.to(roomId).emit('media:active-speakers', { roomId, userIds: speakers.map((x) => x.userId).filter(Boolean), producerIds: speakers.map((x) => x.producerId) });
@@ -305,7 +306,7 @@ export const initializeSocketHandlers = (io) => {
         // Meeting affinity: this meeting's state + media live on exactly one node. Anyone else is redirected.
         const guard = await ownershipGuard(roomId);
         if (guard?.redirect) { socket.emit('room:redirect', { roomId, ...guard.redirect }); return; }
-        if (guard?.error) { socket.emit('error', { message: guard.error }); return; }
+        if (guard?.error) { socket.emit('error', { message: guard.error, code: guard.code }); return; }
 
         cancelRoomClear(roomId);
         await restoreRuntime(roomId);

@@ -8,6 +8,7 @@ Run only against a **disposable server on this machine** (they create accounts a
 | `flows.mjs`, `call.mjs`, `features.mjs`, `journeys.mjs`, `crawl.mjs` | workflows and every control (journeys needs the server's SMTP pointed at port 12526 and `LEGAL_NAME="QA Operator"`) |
 | `webkit-call.mjs` | Safari's engine: live messages, receiving a call, desktop and iPhone-sized |
 | `nat-guest.mjs` + `device-host.mjs` | a call from another network namespace, and the other end of the on-device app test |
+| `late-join.mjs`, `no-capacity.mjs`, `redis-outage.mjs`, `two-node.mjs`, `turn.mjs` | joining a running call, joining while the server has no room, losing Redis, node failure, relay only: setup at the top of each |
 | `proxy.mjs` | the production shape: Apache over https in front of `serve` and the backend, as `https://meet.test:18443` |
 
 **WebKit** needs Ubuntu libraries; on other distributions use the Playwright container:

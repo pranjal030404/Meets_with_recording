@@ -29,3 +29,10 @@ seed them with `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` before `npm run migrat
 - `account.qa.js` data export, account deletion, refused upload types
 - `websession.qa.js` the web session cookie, its forgery protection and socket tickets
 - `lockout.qa.js` strangers guessing a password cannot lock the owner out
+
+## Redis, two nodes and object storage
+- `cluster.qa.js` needs a second server on the same database and Redis (`QA_NODE_B_URL`, each with its own `PORT`, `NODE_ID`, `NODE_PUBLIC_URL`, media port range and `METRICS_PORT`); skipped otherwise
+- `objectstore.qa.js` needs the server started with `STORAGE_DRIVER=s3` against a local bucket (`adobe/s3mock` works) and the same `S3_*` values; skipped otherwise
+- `transcript.qa.js` writes to the disposable database directly, so it needs the server's `DB_*` values
+- browser call on two nodes and its failover: `tests/e2e/two-node.mjs`
+- With Redis on, start only one app server for the other suites: servers sharing a Redis form a cluster, and `crash.qa.js` starts one of its own, which can make an unrelated test fail with "Meeting is on another node".

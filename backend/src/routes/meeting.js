@@ -12,7 +12,7 @@ import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
 import { enforceMeetingQuota, enforceRecordingAllowed, enforceTranscriptionAllowed } from '../middleware/subscription.js';
 import { recordUsage, assertCanRecord, assertCanCreateMeeting } from '../services/subscriptionService.js';
-import { saveMeetingRecording, appendRecording, enqueueTranscription, retryTranscription } from '../services/recordingService.js';
+import { saveMeetingRecording, appendRecording, enqueueTranscription, retryTranscription, mirrorFile } from '../services/recordingService.js';
 import { buildCompleteTranscriptArtifacts } from '../services/transcriptionService.js';
 import { canManageMeeting, canAccessMeeting, hostHasJoined } from '../lib/meetingPermissions.js';
 import { requirePermission } from '../lib/permissions.js';
@@ -1185,9 +1185,11 @@ router.post('/:roomId/complete-transcript', protect, requirePermission('meetings
       }
     };
 
+    for (const artifact of Object.values(result.files)) await mirrorFile(artifact, 'text/plain'); // other nodes serve it from object storage
+
     await meeting.update({ completeTranscript });
 
-    res.json({ success: true, data: { completeTranscript, cached: false } });
+    res.json({ success: true, data: { completeTranscript: withoutServerPaths(completeTranscript), cached: false } });
   } catch (error) {
     console.error('Generate complete transcript error:', error);
     res.status(500).json({ success: false, message: 'Error generating complete transcript', error: error.message });

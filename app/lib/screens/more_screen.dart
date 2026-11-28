@@ -76,6 +76,7 @@ class MoreScreen extends StatelessWidget {
             onTap: () => _deleteAccount(context),
           ),
           const SizedBox(height: 24),
+          const Center(child: LegalLinks()),
           Center(child: Text('Minutes mobile 1.0.0', style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12))),
         ]);
       },

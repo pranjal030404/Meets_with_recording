@@ -38,13 +38,13 @@ export class AccountError extends Error {
 /** `column LIKE '%text%'` for a JSON column, with the text safely quoted. */
 const contains = (column, text) => sequelize.literal(`\`${column}\` LIKE ${sequelize.escape(`%${String(text).replace(/[\\%_]/g, '\\$&')}%`)}`);
 
-const removeStored = async (key) => {
-  const storage = getStorage();
-  if (storage.name === 's3') await storage.deleteObject(key).catch((e) => console.error(`[erase] could not delete ${key}: ${e.message}`));
-};
-const removeDir = (...parts) => {
+/** Removes one upload folder from this disk and, when object storage is used, from the bucket. */
+const removeDir = async (...parts) => {
   const dir = path.resolve(UPLOADS, ...parts);
-  if (dir.startsWith(UPLOADS + path.sep)) fs.rmSync(dir, { recursive: true, force: true });
+  if (!dir.startsWith(UPLOADS + path.sep)) return;
+  fs.rmSync(dir, { recursive: true, force: true });
+  const storage = getStorage();
+  if (storage.name === 's3') await storage.deleteFolder(parts.join('/')).catch((e) => console.error(`[erase] could not delete ${parts.join('/')} from object storage: ${e.message}`));
 };
 
 const meetingsOf = (user) => Meeting.findAll({
@@ -78,11 +78,6 @@ export const exportAccount = async (userId) => {
 const eraseMeetings = async (user) => {
   for (const meeting of await meetingsOf(user)) {
     const hosted = meeting.hostId === user.id;
-    if (hosted) {
-      for (const r of meeting.recordings || []) if (r.filename) await removeStored(`recordings/${meeting.roomId}/${r.filename}`);
-      removeDir('recordings', meeting.roomId);
-      removeDir('transcripts', meeting.roomId);
-    }
     await updateLocked(Meeting, meeting.id, (row) => {
       row.participants = (row.participants || []).map((p) => (p.userId === user.id
         ? { ...p, user: { id: user.id, name: GONE, email: null, avatar: null } } : p));
@@ -96,6 +91,11 @@ const eraseMeetings = async (user) => {
       row.aiSummary = null;
       row.completeTranscript = null;
     });
+    // after the meeting forgot them: a transcription still running sees that and removes whatever it writes later
+    if (hosted) {
+      await removeDir('recordings', meeting.roomId);
+      await removeDir('transcripts', meeting.roomId);
+    }
   }
 };
 
@@ -136,10 +136,9 @@ export const eraseAccount = async (userId, io) => {
   await eraseMeetings(user);
   await eraseMessages(userId);
 
-  for (const file of await FileEntry.findAll({ where: { ownerId: userId } })) await removeStored(String(file.url || '').replace(/^\/uploads\//, ''));
   await FileEntry.destroy({ where: { ownerId: userId } });
-  removeDir('files', userId);
-  removeDir('avatars', userId);
+  await removeDir('files', userId);
+  await removeDir('avatars', userId);
 
   await Task.destroy({ where: { createdById: userId, teamId: null, [Op.or]: [{ assigneeId: null }, { assigneeId: userId }] } });
   await Task.update({ assigneeId: null }, { where: { assigneeId: userId } });

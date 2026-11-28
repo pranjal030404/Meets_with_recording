@@ -410,10 +410,11 @@ export default function Meeting() {
     })
 
     // Existing mediasoup producers — consume them
-    socket.on('mediasoup:existingProducers', async ({ producers }) => {
+    // All announced at once: waiting for one before naming the next would let a single stuck stream hide the others
+    socket.on('mediasoup:existingProducers', ({ producers }) => {
       for (const p of producers) {
         producerMapRef.current.set(p.producerId, { peerId: p.userId, mediaType: p.mediaType })
-        await consumeProducer(p.producerId, p.userId, { _id: p.userId, name: p.userName }, p.mediaType)
+        consumeProducer(p.producerId, p.userId, { _id: p.userId, name: p.userName }, p.mediaType)
       }
     })
 
@@ -669,7 +670,10 @@ export default function Meeting() {
       }
     })
 
-    socket.on('error', ({ message }) => {
+    socket.on('error', ({ message, code }) => {
+      // Nobody can take the meeting this moment (a restart, Redis only just back): keep trying rather than
+      // leaving the person on a meeting screen that is dead until they reload
+      if (code === 'NO_CAPACITY') return useMeetingStore.getState().recoverMedia('no-capacity')
       toast.error(message)
     })
 

@@ -234,3 +234,36 @@ test('TC-INT-012 with verification on, signup does not reveal that an address al
     await setVerification(false);
   }
 });
+
+// strangers fail to sign in until a device that is new to the account is refused
+const attackFrom = (n, extra = {}) => ({ 'X-Forwarded-For': `203.0.113.${n}`, ...extra });
+const signIn = (email, password, headers) => call('POST', '/api/auth/login', { headers, body: { email, password } });
+const resetFrom = async (u, headers, newPassword) => {
+  assert.equal((await call('POST', '/api/auth/forgot-password', { headers, body: { email: u.email } })).status, 200);
+  const code = (await mailTo(u.email, /password reset code/i)).match(/password is (\d{6})/)[1];
+  return call('POST', '/api/auth/reset-password', { headers, body: { email: u.email, code, newPassword } });
+};
+
+test('TC-INT-013 somebody refused during an attack is told about the reset, and gets in with it', { skip }, async () => {
+  await setVerification(false);
+  const u = await newUser('attacked', { base });
+  for (const n of [111, 112, 113]) for (let i = 0; i < 10; i++) await signIn(u.email, 'wrong-password', attackFrom(n));
+  const refused = await signIn(u.email, PASSWORD, attackFrom(114));
+  assert.equal(refused.status, 429);
+  assert.match(refused.body.message, /Forgot password/);
+  const reset = await resetFrom(u, attackFrom(114), 'Reset-pass-42');
+  assert.equal(reset.status, 200, reset.text);
+  assert.equal((await signIn(u.email, 'Reset-pass-42', attackFrom(114, { 'X-Device-Token': reset.body.data.deviceToken }))).status, 200);
+});
+
+test('TC-INT-014 a reset also lifts the limit on a device the owner has used up themselves', { skip }, async () => {
+  await setVerification(false);
+  const u = await newUser('forgetful', { base });
+  const mark = (await signIn(u.email, PASSWORD, attackFrom(115))).body.data.deviceToken;
+  const headers = attackFrom(115, { 'X-Device-Token': mark });
+  for (let i = 0; i < 10; i++) await signIn(u.email, 'wrong-password', headers);
+  assert.equal((await signIn(u.email, PASSWORD, headers)).status, 429);
+  const reset = await resetFrom(u, headers, 'Reset-pass-42');
+  assert.equal(reset.status, 200, reset.text);
+  assert.equal((await signIn(u.email, 'Reset-pass-42', headers)).status, 200);
+});
