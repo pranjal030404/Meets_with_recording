@@ -1,3 +1,4 @@
+import './membership.js';
 import User from './User.js';
 import Role from './Role.js';
 import Meeting from './Meeting.js';

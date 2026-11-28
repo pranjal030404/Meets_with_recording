@@ -5,6 +5,8 @@ import BreakoutRoom from '../models/BreakoutRoom.js';
 import Meeting from '../models/Meeting.js';
 import { canManageMeeting } from '../lib/meetingPermissions.js';
 import { makeBreakoutRoomId } from '../lib/breakoutRoomId.js';
+import { updateLocked } from '../lib/locked.js';
+import { assertFeature } from '../services/subscriptionService.js';
 
 const router = express.Router();
 
@@ -32,6 +34,9 @@ router.post('/', protect, async (req, res) => {
     if (!canManageMeeting(meeting, req.user.id)) {
       return res.status(403).json({ message: 'Only host can create breakout rooms' });
     }
+
+    const allowed = await assertFeature(meeting.hostId, 'canBreakout', 'Breakout rooms');
+    if (!allowed.allowed) return res.status(403).json({ message: allowed.reason, code: 'PLAN_LIMIT_REACHED' });
 
     if (!Array.isArray(rooms) || rooms.length === 0 || rooms.length > 50) {
       return res.status(400).json({ message: 'Provide between 1 and 50 rooms' });
@@ -111,16 +116,15 @@ router.put('/:breakoutRoomId/assign', protect, async (req, res) => {
       return res.status(403).json({ message: 'Only host can assign participants' });
     }
 
-    const assignedParticipants = [...(breakoutRoom.assignedParticipants || [])];
-
-    participantIds.forEach(userId => {
-      if (!assignedParticipants.some(p => p.userId === userId)) {
-        assignedParticipants.push({ id: uuidv4(), userId });
-      }
+    if (!Array.isArray(participantIds) || participantIds.some((id) => typeof id !== 'string')) {
+      return res.status(400).json({ message: 'participantIds must be a list' });
+    }
+    await updateLocked(BreakoutRoom, breakoutRoom.id, (row) => {
+      const list = [...(row.assignedParticipants || [])];
+      for (const userId of participantIds) if (!list.some(p => p.userId === userId)) list.push({ id: uuidv4(), userId });
+      row.assignedParticipants = list;
     });
-
-    breakoutRoom.assignedParticipants = assignedParticipants;
-    await breakoutRoom.save();
+    await breakoutRoom.reload();
 
     notify(req, meeting, 'breakout:changed');
 
@@ -152,16 +156,12 @@ router.post('/:breakoutRoomId/join', protect, async (req, res) => {
       return res.status(403).json({ message: 'You are not assigned to this room' });
     }
 
-    const participant = assignedParticipants.find(
-      p => p.userId === req.user.id
-    );
-    if (participant) {
-      participant.joinedAt = new Date().toISOString();
-      participant.leftAt = null;
-    }
-
-    breakoutRoom.assignedParticipants = assignedParticipants;
-    await breakoutRoom.save();
+    await updateLocked(BreakoutRoom, breakoutRoom.id, (row) => {
+      for (const p of row.assignedParticipants || []) {
+        if (p.userId === req.user.id) { p.joinedAt = new Date().toISOString(); p.leftAt = null; }
+      }
+    });
+    await breakoutRoom.reload();
 
     res.json({
       success: true,

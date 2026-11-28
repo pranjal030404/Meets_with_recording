@@ -35,11 +35,16 @@ const storage = multer.diskStorage({
   }
 });
 
+import { fixUploadName } from '../lib/validate.js';
+import { uploadRefusal } from '../lib/uploadSafety.js';
+import { assertWithin, withUserLock } from '../services/subscriptionService.js';
+
 const FILE_SIZE_LIMIT = parseInt(process.env.FILE_SIZE_LIMIT_MB) * 1024 * 1024 || 50 * 1024 * 1024;
 
 const upload = multer({
   storage,
-  limits: { fileSize: FILE_SIZE_LIMIT }
+  limits: { fileSize: FILE_SIZE_LIMIT },
+  fileFilter: fixUploadName
 });
 
 // Upload a file (optionally attached to a team channel or conversation)
@@ -47,6 +52,12 @@ router.post('/upload', protect, requirePermission('files.upload'), upload.single
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    const refusal = await uploadRefusal(req.file);
+    if (refusal) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(refusal.status).json({ success: false, message: refusal.message });
     }
 
     const { teamId, conversationId, meetingId, roomId } = req.body;
@@ -87,7 +98,13 @@ router.post('/upload', protect, requirePermission('files.upload'), upload.single
 
     const relativeUrl = `/uploads/files/${req.user.id}/${req.file.filename}`;
 
-    const fileEntry = await FileEntry.create({
+    // check and record under one lock, so parallel uploads cannot each pass against the same total
+    const { fileEntry, refused } = await withUserLock(req.user.id, async () => {
+    const used = Number(await FileEntry.sum('size', { where: { ownerId: req.user.id, isDeleted: false } })) || 0;
+    const gb = 1024 ** 3;
+    const quota = await assertWithin(req.user.id, 'storageGB', used / gb, req.file.size / gb, 'GB of storage');
+    if (!quota.allowed) return { refused: quota.reason };
+    return { fileEntry: await FileEntry.create({
       ownerId: req.user.id,
       teamId: teamId || null,
       conversationId: conversationId || null,
@@ -98,7 +115,12 @@ router.post('/upload', protect, requirePermission('files.upload'), upload.single
       size: req.file.size,
       url: relativeUrl,
       category: teamId ? 'team' : conversationId ? 'shared' : meetingId ? 'meeting' : 'personal'
+    }) };
     });
+    if (refused) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(403).json({ success: false, message: refused, code: 'PLAN_LIMIT_REACHED' });
+    }
 
     logAudit({
       actor: req.user,

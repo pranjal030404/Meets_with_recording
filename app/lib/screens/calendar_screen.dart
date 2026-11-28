@@ -29,7 +29,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Future<void> _load() async {
     try {
       final path = widget.teamId != null ? '/meetings/team/${widget.teamId}' : '/meetings';
-      final d = Api.unwrap(await Api.instance.get(path, query: {'limit': 200}));
+      final d = Api.unwrap(await Api.instance.get(path, query: {'limit': 2000}));
       var tasks = <Map<String, dynamic>>[];
       try {
         final t = Api.unwrap(await Api.instance.get('/tasks', query: {'scope': widget.teamId != null ? 'team' : 'mine', if (widget.teamId != null) 'teamId': widget.teamId}));

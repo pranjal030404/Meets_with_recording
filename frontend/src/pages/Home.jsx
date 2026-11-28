@@ -39,7 +39,7 @@ export default function Home() {
   // plain requests so these never toggle the store's isLoading used by "New meeting".
   // The API lists scheduled meetings before instant ones, so ask for enough to cover the week.
   useEffect(() => {
-    api.get('/meetings', { params: { limit: 200 } })
+    api.get('/meetings', { params: { limit: 200, series: 'next' } })
       .then((res) => setMeetings(res.data.data.meetings || []))
       .catch(() => { setMeetings([]); setLoadFailed(true) })
     api.get('/tasks', { params: { scope: 'mine' } })

@@ -17,6 +17,7 @@ module.exports = {
     },
     env_production: {
       NODE_ENV: 'production',
+      UV_THREADPOOL_SIZE: 16, // password hashing runs here
       CLUSTER_ENABLED: 'false',
     },
     error_file: './logs/err.log',

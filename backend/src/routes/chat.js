@@ -8,6 +8,9 @@ import User from '../models/User.js';
 import FileEntry from '../models/FileEntry.js';
 import { protect } from '../middleware/auth.js';
 import { parseBreakoutRoomId } from '../lib/breakoutRoomId.js';
+import { isInsider, canReadMessage } from '../lib/access.js';
+import { updateLocked } from '../lib/locked.js';
+import { requirePermission } from '../lib/permissions.js';
 
 const router = express.Router();
 
@@ -20,7 +23,7 @@ const senderInclude = () => ({
 const recipientInclude = () => ({
   model: User,
   as: 'recipient',
-  attributes: ['id', 'name', 'email', 'avatar']
+  attributes: ['id', 'name', 'avatar']
 });
 
 router.get('/:roomId/messages', protect, async (req, res) => {
@@ -39,6 +42,9 @@ router.get('/:roomId/messages', protect, async (req, res) => {
         success: false,
         message: 'Meeting not found'
       });
+    }
+    if (!(await isInsider(meeting, req.user))) {
+      return res.status(403).json({ success: false, message: 'Join the meeting to see its chat' });
     }
 
     const whereClause = {
@@ -78,7 +84,7 @@ router.get('/:roomId/messages', protect, async (req, res) => {
   }
 });
 
-router.post('/:roomId/messages', protect, async (req, res) => {
+router.post('/:roomId/messages', protect, requirePermission('chat.send'), async (req, res) => {
   try {
     const { content, recipientId, type = 'text', attachment } = req.body;
 
@@ -118,6 +124,13 @@ router.post('/:roomId/messages', protect, async (req, res) => {
       });
     }
 
+    if (!(await isInsider(meeting, req.user))) {
+      return res.status(403).json({ success: false, message: 'Join the meeting to send messages' });
+    }
+    if (recipientId && !(await isInsider(meeting, await User.findByPk(recipientId, { attributes: ['id', 'email'] })))) {
+      return res.status(400).json({ success: false, message: 'That person is not in this meeting' });
+    }
+
     if (meeting.settings?.allowChat === false) {
       return res.status(403).json({
         success: false,
@@ -129,7 +142,7 @@ router.post('/:roomId/messages', protect, async (req, res) => {
       meetingId: meeting.id,
       senderId: req.user.id,
       content: (content || '').trim() || (file ? file.originalName : ''),
-      type: file ? 'file' : type,
+      type: file ? 'file' : type === 'meeting_link' ? 'meeting_link' : 'text',
       isPrivate: !!recipientId
     };
 
@@ -221,32 +234,26 @@ router.post('/messages/:messageId/react', protect, async (req, res) => {
 
     const message = await Message.findByPk(req.params.messageId);
 
-    if (!message) {
+    if (!message || message.isDeleted) {
       return res.status(404).json({
         success: false,
         message: 'Message not found'
       });
     }
-
-    const reactions = message.reactions || [];
-    const existingReaction = reactions.find(
-      r => r.userId === req.user.id && r.emoji === emoji
-    );
-
-    if (existingReaction) {
-      message.reactions = reactions.filter(
-        r => !(r.userId === req.user.id && r.emoji === emoji)
-      );
-    } else {
-      reactions.push({
-        id: (reactions.length + 1).toString(),
-        emoji,
-        userId: req.user.id
-      });
-      message.reactions = reactions;
+    if (!(await canReadMessage(message, req.user))) {
+      return res.status(403).json({ success: false, message: 'No access to this message' });
+    }
+    if (typeof emoji !== 'string' || emoji.length > 16) {
+      return res.status(400).json({ success: false, message: 'Invalid emoji' });
     }
 
-    await message.save();
+    await updateLocked(Message, message.id, (row) => {
+      const reactions = row.reactions || [];
+      const mine = (r) => r.userId === req.user.id && r.emoji === emoji;
+      row.reactions = reactions.some(mine)
+        ? reactions.filter((r) => !mine(r))
+        : [...reactions, { id: String(reactions.length + 1), emoji, userId: req.user.id }];
+    });
 
     const fullMessage = await Message.findByPk(message.id, {
       include: [senderInclude(), { model: User, as: 'recipient', attributes: ['id', 'name', 'avatar'] }]
@@ -343,7 +350,7 @@ router.get('/team/:teamId/messages', protect, async (req, res) => {
   }
 });
 
-router.post('/team/:teamId/messages', protect, async (req, res) => {
+router.post('/team/:teamId/messages', protect, requirePermission('chat.send'), async (req, res) => {
   try {
     const { content, channelType = 'general', type = 'text', meetingId, attachment } = req.body;
 
@@ -403,7 +410,7 @@ router.post('/team/:teamId/messages', protect, async (req, res) => {
       ...(channel.channelName ? { channelName: channel.channelName } : {}),
       senderId: req.user.id,
       content: (content || '').trim() || (file ? file.originalName : ''),
-      type: file ? 'file' : type,
+      type: file ? 'file' : type === 'meeting_link' ? 'meeting_link' : 'text',
       mentions
     };
 

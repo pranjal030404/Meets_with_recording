@@ -98,5 +98,21 @@ export const useFileStore = create((set, get) => ({
     }
   },
 
-  downloadUrl: (fileId) => `${api.defaults.baseURL}/files/${fileId}/download`
+  // A plain link cannot send the sign-in token, so fetch the file with it and hand the browser the result
+  download: async (fileId, name) => {
+    try {
+      const res = await api.get(`/files/${fileId}/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name || 'file';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      return { success: true };
+    } catch {
+      return { success: false, message: 'Could not download the file' };
+    }
+  }
 }));

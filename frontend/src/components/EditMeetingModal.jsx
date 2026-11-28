@@ -32,7 +32,7 @@ export default function EditMeetingModal({ meeting, onClose, onSaved }) {
       let dates
       if (moved && scope === 'series') {
         const { data } = await api.get(`/meetings/${meeting.roomId}/series`)
-        dates = shiftDates(data.data.dates.map(d => new Date(d)), at).map(d => d.toISOString())
+        dates = shiftDates(data.data.dates.map(d => new Date(d)), at, meeting.recurrence?.frequency).map(d => d.toISOString())
       } else if (moved) {
         dates = [at.toISOString()]
       }

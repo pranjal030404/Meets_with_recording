@@ -1,6 +1,7 @@
 import { DataTypes } from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import { sequelize } from '../database/index.js';
+import { withoutServerPaths } from '../lib/publicJson.js';
 
 const Meeting = sequelize.define('Meeting', {
   id: {
@@ -59,8 +60,7 @@ const Meeting = sequelize.define('Meeting', {
       hostMustJoinFirst: false,
       accessType: 'trusted',
       allowLinkRequests: true,
-      isLocked: false,
-      maxParticipants: 50
+      isLocked: false
     }
   },
   isInstant: {
@@ -121,6 +121,8 @@ const Meeting = sequelize.define('Meeting', {
 Meeting.prototype.toJSON = function() {
   const values = { ...this.get() };
   values._id = values.id;
+  if (values.recordings) values.recordings = withoutServerPaths(values.recordings);
+  if (values.completeTranscript) values.completeTranscript = withoutServerPaths(values.completeTranscript);
   return values;
 };
 

@@ -1,3 +1,9 @@
+import { disconnectUser } from '../realtime/sessions.js';
+import { handOver, clearCookie, ADMIN_COOKIE } from '../lib/webSession.js';
+import { rememberDevice } from '../lib/knownDevice.js';
+import { revokeToken } from '../lib/sessionRevocation.js';
+import { eraseAccount, AccountError } from '../services/accountService.js';
+import { tooManyAttempts, recordFailure } from '../lib/loginThrottle.js';
 import express from 'express';
 import { Op, fn, col, literal } from 'sequelize';
 import User from '../models/User.js';
@@ -20,6 +26,14 @@ import { protectAdmin, generateAdminToken, requireAdminPermission as need } from
 
 const router = express.Router();
 
+// Nobody may hand out, or take over, more than they hold themselves
+const holds = async (admin, wanted) => {
+  if (admin.role === 'superadmin') return true;
+  const mine = await getAdminPermissions(admin);
+  return wanted.every((p) => mine.includes(p));
+};
+const refuse = (res, message) => res.status(403).json({ success: false, message });
+
 // Admin authentication (separate Admins table, separate token type)
 router.post('/auth/login', async (req, res) => {
   try {
@@ -31,12 +45,15 @@ router.post('/auth/login', async (req, res) => {
       where: { email: String(email).toLowerCase() },
       attributes: { include: ['password'] }
     });
+    const account = `admin:${String(email).toLowerCase()}`;
+    if (await tooManyAttempts(req, res, account)) return;
     if (!admin || !(await admin.comparePassword(password))) {
+      await recordFailure(req, account);
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
     admin.lastLoginAt = new Date();
     await admin.save();
-    res.json({ success: true, data: { admin: admin.toJSON(), permissions: await getAdminPermissions(admin), token: generateAdminToken(admin.id) } });
+    res.json({ success: true, data: { admin: admin.toJSON(), permissions: await getAdminPermissions(admin), ...handOver(req, res, generateAdminToken(admin), ADMIN_COOKIE), ...rememberDevice(req, res, account) } });
   } catch (error) {
     console.error('Admin login error:', error);
     res.status(500).json({ success: false, message: 'Login failed' });
@@ -44,6 +61,12 @@ router.post('/auth/login', async (req, res) => {
 });
 
 router.use(protectAdmin);
+
+router.post('/auth/logout', async (req, res) => {
+  clearCookie(req, res, ADMIN_COOKIE);
+  await revokeToken(req.sessionToken);
+  res.json({ success: true });
+});
 
 router.get('/auth/me', async (req, res) => {
   res.json({ success: true, data: { admin: req.admin.toJSON(), permissions: await getAdminPermissions(req.admin) } });
@@ -232,6 +255,9 @@ router.post('/roles', need('admin.roles.manage'), async (req, res) => {
     if (!name || !String(name).trim()) return res.status(400).json({ success: false, message: 'Role name is required' });
     const exists = await Role.findOne({ where: { name: String(name).trim() } });
     if (exists) return res.status(400).json({ success: false, message: 'A role with this name already exists' });
+    if (scope === 'admin' && !(await holds(req.admin, cleanPermissions(permissions, scope)))) {
+      return refuse(res, 'You can only grant permissions you have yourself');
+    }
     const role = await Role.create({ name: String(name).trim(), description, scope, permissions: cleanPermissions(permissions, scope) });
     audit(req, 'role.create', 'Role', role.id, { name: role.name, permissions: role.permissions });
     res.status(201).json({ success: true, data: { role } });
@@ -245,6 +271,12 @@ router.put('/roles/:id', need('admin.roles.manage'), async (req, res) => {
     const role = await Role.findByPk(req.params.id);
     if (!role) return res.status(404).json({ success: false, message: 'Role not found' });
     const { name, description, permissions } = req.body;
+    if (role.scope === 'admin' && req.admin.role !== 'superadmin') {
+      if (role.id === req.admin.roleId) return refuse(res, 'You cannot change your own role');
+      if (!(await holds(req.admin, [...(role.permissions || []), ...cleanPermissions(permissions, 'admin')]))) {
+        return refuse(res, 'You can only grant permissions you have yourself');
+      }
+    }
     if (name && !role.isSystem) role.name = String(name).trim();
     if (description !== undefined) role.description = description;
     if (permissions) role.permissions = cleanPermissions(permissions, role.scope);
@@ -261,6 +293,7 @@ router.delete('/roles/:id', need('admin.roles.manage'), async (req, res) => {
     const role = await Role.findByPk(req.params.id);
     if (!role) return res.status(404).json({ success: false, message: 'Role not found' });
     if (role.isSystem) return res.status(400).json({ success: false, message: 'System roles cannot be deleted' });
+    if (role.scope === 'admin' && !(await holds(req.admin, role.permissions || []))) return refuse(res, 'That role has permissions you do not have');
     await (role.scope === 'admin' ? Admin : User).update({ roleId: null }, { where: { roleId: role.id } });
     await role.destroy();
     audit(req, 'role.delete', 'Role', role.id, { name: role.name });
@@ -297,10 +330,26 @@ router.put('/users/:id/status', need('admin.users.manage'), async (req, res) => 
     user.isActive = !!req.body.isActive;
     if (!user.isActive) user.isOnline = false;
     await user.save();
+    if (!user.isActive) disconnectUser(req.app.get('io'), user.id);
     audit(req, user.isActive ? 'user.reactivate' : 'user.suspend', 'User', user.id, { email: user.email });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Error updating user status', error: error.message });
+  }
+});
+
+// Erase a user's account on their request (or for abuse). The same removal as self-service deletion.
+router.delete('/users/:id', need('admin.users.manage'), async (req, res) => {
+  try {
+    const user = await User.findByPk(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    await eraseAccount(user.id, req.app.get('io'));
+    audit(req, 'user.erase', 'User', user.id, {});
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof AccountError) return res.status(error.status).json({ success: false, message: error.message });
+    console.error('Admin erase error:', error);
+    res.status(500).json({ success: false, message: 'Error deleting user' });
   }
 });
 
@@ -443,8 +492,13 @@ async function validateAdminRole(req, res, { role, roleId }) {
     res.status(403).json({ success: false, message: 'Only a super admin can grant super admin' });
     return false;
   }
-  if (roleId && !(await Role.findOne({ where: { id: roleId, scope: 'admin' } }))) {
+  const wanted = roleId ? await Role.findOne({ where: { id: roleId, scope: 'admin' } }) : null;
+  if (roleId && !wanted) {
     res.status(400).json({ success: false, message: 'Admin role not found' });
+    return false;
+  }
+  if (wanted && !(await holds(req.admin, wanted.permissions || []))) {
+    refuse(res, 'You can only assign roles with permissions you have yourself');
     return false;
   }
   return true;
@@ -480,6 +534,12 @@ router.put('/admins/:id', need('admin.admins.manage'), async (req, res) => {
     if (admin.role === 'superadmin' && req.admin.role !== 'superadmin') {
       return res.status(403).json({ success: false, message: 'Only a super admin can modify a super admin' });
     }
+    if (admin.id === req.admin.id && req.admin.role !== 'superadmin' && (role !== admin.role || (roleId !== undefined && roleId !== admin.roleId))) {
+      return refuse(res, 'You cannot change your own role');
+    }
+    if (!(await holds(req.admin, await getAdminPermissions(admin)))) {
+      return refuse(res, 'That administrator has permissions you do not have');
+    }
     if (role !== admin.role || roleId) {
       if (!(await validateAdminRole(req, res, { role, roleId }))) return;
     }
@@ -511,6 +571,7 @@ router.delete('/admins/:id', need('admin.admins.manage'), async (req, res) => {
       if (req.admin.role !== 'superadmin') return res.status(403).json({ success: false, message: 'Only a super admin can delete a super admin' });
       if ((await Admin.count({ where: { role: 'superadmin' } })) <= 1) return res.status(400).json({ success: false, message: 'Cannot delete the last super admin' });
     }
+    if (!(await holds(req.admin, await getAdminPermissions(admin)))) return refuse(res, 'That administrator has permissions you do not have');
     await admin.destroy();
     audit(req, 'admin.delete', 'Admin', admin.id, { email: admin.email });
     res.json({ success: true });

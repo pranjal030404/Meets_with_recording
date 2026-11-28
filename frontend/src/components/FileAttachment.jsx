@@ -37,7 +37,8 @@ export default function FileAttachment({ fileUrl, fileName, fileType, fileSize }
   const mime = fileType || ''
   const [loaded, setLoaded] = useState(false)
 
-  if (!url) return null
+  // only files on this server or ordinary web addresses: never javascript: or data: links from old messages
+  if (!url || !/^(https?:\/\/|\/)/i.test(url)) return null
 
   const isImage = IMAGE_TYPES.test(mime) || /\.(png|jpe?g|gif|webp|svg)$/i.test(fileName || '')
   const isVideo = VIDEO_TYPES.test(mime) || /\.(mp4|webm|mov)$/i.test(fileName || '')

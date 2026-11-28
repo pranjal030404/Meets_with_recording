@@ -1,5 +1,5 @@
 import { DataTypes } from 'sequelize';
-import bcrypt from 'bcryptjs';
+import { hashPassword, checkPassword } from '../lib/password.js';
 import { sequelize } from '../database/index.js';
 
 // Administrators live in their own table, fully separate from regular Users.
@@ -17,7 +17,7 @@ const Admin = sequelize.define('Admin', {
   hooks: {
     beforeSave: async (admin) => {
       if (admin.changed('password')) {
-        admin.password = await bcrypt.hash(admin.password, await bcrypt.genSalt(12));
+        admin.password = await hashPassword(admin.password);
       }
     }
   },
@@ -25,7 +25,7 @@ const Admin = sequelize.define('Admin', {
 });
 
 Admin.prototype.comparePassword = function (candidate) {
-  return bcrypt.compare(candidate, this.password);
+  return checkPassword(candidate, this.password);
 };
 
 Admin.prototype.toJSON = function () {

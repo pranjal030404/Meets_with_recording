@@ -268,9 +268,9 @@ const TeamDetail = () => {
     const ch = channelToDelete;
     if (!ch) return;
     try {
+      if (activeChannel === channelKey(ch)) setActiveChannel('general');
       await deleteChannel(teamId, ch.id || ch._id);
       toast.success(`#${ch.name} deleted`);
-      if (activeChannel === channelKey(ch)) setActiveChannel('general');
       setChannelToDelete(null);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to delete channel');
@@ -502,7 +502,7 @@ const TeamDetail = () => {
                   <span className="text-xs text-primary-300 flex items-center gap-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</span>
                 ) : (
                   <>
-                    <button type="button" onClick={clearPending} className="text-gray-500 hover:text-red-400"><X className="w-4 h-4" /></button>
+                    <button aria-label="Remove attachment" type="button" onClick={clearPending} className="text-gray-500 hover:text-red-400"><X className="w-4 h-4" /></button>
                     <button type="button" onClick={handleSendMessage} className="btn btn-primary !px-3 !py-1.5 text-xs">Send file</button>
                   </>
                 )}

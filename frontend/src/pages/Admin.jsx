@@ -366,7 +366,7 @@ function UsersTab() {
           <div className="w-full max-w-4xl mt-10 rounded-2xl bg-dark-100 border border-white/10 p-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold">History · {historyUser.name}</h3>
-              <button onClick={() => setHistoryUser(null)}><X className="w-5 h-5 text-gray-400" /></button>
+              <button aria-label="Close" onClick={() => setHistoryUser(null)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <AuditTab userId={historyUser.id} compact />
           </div>
@@ -658,7 +658,7 @@ function AccountForm({ title, roles, defaultRoleName, onClose, onSubmit, isAdmin
       <form onSubmit={submit} autoComplete="off" className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl bg-dark-100 border border-white/10 p-4 sm:p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold">{title}</h3>
-          <button type="button" onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+          <button aria-label="Close" type="button" onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         <input className="input" placeholder="Full name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} required />
         <input className="input" type="email" placeholder="Email" autoComplete="off" value={f.email} disabled={editing} onChange={e => setF({ ...f, email: e.target.value })} required />

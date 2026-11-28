@@ -64,7 +64,7 @@ export default function MeetingSettingsPanel({ meeting, isHost, isCoHost, canMan
         <h2 className="font-semibold flex items-center gap-2.5">
           <span className="w-8 h-8 rounded-lg bg-primary-500/15 text-primary-400 flex items-center justify-center"><Shield className="w-4 h-4" /></span> Host controls
         </h2>
-        <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
+        <button aria-label="Close" onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
           <X className="w-5 h-5" />
         </button>
       </div>

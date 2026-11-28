@@ -60,12 +60,10 @@ const NotificationBell = ({ placement = 'header' }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Request notification permission
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
+  // Browsers only allow asking in response to a click, and people refuse prompts they did not invite
+  const askPermission = () => {
+    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  };
 
   const handleNotificationClick = async (notification) => {
     // Mark as read
@@ -138,7 +136,8 @@ const NotificationBell = ({ placement = 'header' }) => {
     <div className="relative" ref={dropdownRef}>
       {/* Bell Icon */}
       <button
-        onClick={() => setShowDropdown(!showDropdown)}
+        aria-label="Notifications"
+        onClick={() => { askPermission(); setShowDropdown(!showDropdown) }}
         className="relative p-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-dark-400/70 border border-transparent hover:border-white/[0.06] transition-colors"
       >
         <Bell className={`w-[18px] h-[18px] transition-transform ${showDropdown ? 'rotate-[15deg] scale-110 text-primary-300' : ''}`} />
@@ -169,7 +168,7 @@ const NotificationBell = ({ placement = 'header' }) => {
                   Clear read
                 </button>
               )}
-              <button
+              <button aria-label="Close"
                 onClick={() => setShowDropdown(false)}
                 className="p-1.5 hover:bg-dark-400/70 rounded-lg transition-colors"
               >

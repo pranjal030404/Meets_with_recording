@@ -6,7 +6,7 @@ Rule: "actual" is filled only from something that was really executed. WebRTC se
 |---|---|---|
 | mediasoup worker crash (also a non-primary shard of a sharded room) | rooms on it reported lost (`media:reconnect-required`), worker replaced, other workers unaffected | **Tested** with a real worker + SIGKILL (`tests/mediasoup.real.test.js`): lost rooms reported, replacement spawned. Client rebuild not tested in a browser |
 | API/socket node termination | SIGTERM: `/readyz` 503, drain, ordered close; SIGKILL: meetings re-placed after TTL+sweep | SIGTERM ordering **tested on real boots** (all stages ran; stuck stage bounded at 8 s). SIGKILL: **verified live with two real processes on a real Redis** (survivor's sweep removed the dead node); re-placement logic also tested against real Redis (`tests/media.test.js`) |
-| SFU node failure | placement skips it, meetings released and re-assigned, clients rebuild media | logic tested (mock Redis); end-to-end not run |
+| SFU node failure | placement skips it, meetings released and re-assigned, clients rebuild media | logic tested (mock Redis); end-to-end run on one machine with 2 nodes and real browsers (`tests/e2e/two-node.mjs`): recovered in about 20 s. Not run across hosts |
 | Redis failure | app stays up, degrades to per-instance, `/readyz` reports redis not ok (fatal only if REDIS_REQUIRED) | **Observed**: boots and serves with Redis unreachable; shutdown completes; adapter/presence/rate-limit fallbacks unit-tested. Mid-flight Redis loss not run |
 | Redis → queue unreachable | enqueue fails fast (3 s) and falls back to inline | code path written; not exercised |
 | MariaDB primary failover | manual (see DISASTER_RECOVERY) | not run |

@@ -1,0 +1,10 @@
+{
+  "name": "meetclone-e2e-qa",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node ui.qa.mjs" },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "playwright": "^1.49.0"
+  }
+}

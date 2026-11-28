@@ -64,6 +64,9 @@ export default function Login() {
         <Field id="password" label="Password" icon={Lock} type="password" autoComplete="current-password" placeholder="Your password"
           reveal={showPassword} onReveal={() => setShowPassword(!showPassword)}
           value={password} onChange={(e) => setPassword(e.target.value)} disabled={isLoading} />
+        <p className="-mt-2 text-right text-sm">
+          <Link to="/forgot-password" className="font-medium text-primary-300 underline-offset-4 hover:underline">Forgot password?</Link>
+        </p>
         <SubmitButton busy={isLoading} busyLabel="Signing in…">Sign in</SubmitButton>
         <p className="text-center text-sm text-gray-400">
           No account yet?{' '}

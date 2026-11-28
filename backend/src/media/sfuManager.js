@@ -23,7 +23,7 @@ export const getMonitor = () => monitor;
  */
 export const ownershipGuard = async (roomId, { region } = {}) => {
   const owner = await resolveOwner(roomId, { region });
-  if (!owner) return { error: 'No media capacity available' };
+  if (!owner) return { error: 'No media capacity available', code: 'NO_CAPACITY' };
   if (owner.self) return null;
   if (!owner.url) return { error: 'Meeting is on another node that has no NODE_PUBLIC_URL configured' };
   return { redirect: { nodeId: owner.nodeId, url: owner.url } };

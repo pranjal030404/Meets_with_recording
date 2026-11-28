@@ -4,6 +4,12 @@ import Meeting from '../models/Meeting.js';
 import Notification from '../models/Notification.js';
 import Team from '../models/Team.js';
 import { runExclusive } from '../infrastructure/redis/lock.js';
+import { updateLocked } from '../lib/locked.js';
+import { emailMeetingPeople } from './meetingMail.js';
+import { ensureSubscription, UNLOCK_ALL_FEATURES } from './subscriptionService.js';
+import { endMeeting } from './meetingLifecycle.js';
+
+const MAX_REMINDER_MS = 370 * 24 * 60 * 60 * 1000;
 
 class ReminderService {
   constructor(io) {
@@ -26,7 +32,29 @@ class ReminderService {
 
     this.cronJobs.push(startJob);
 
+    this.cronJobs.push(cron.schedule('* * * * *', async () => {
+      await runExclusive('job:meeting-length', 55000, () => this.enforceDurationLimits());
+    }));
+
     console.log('Reminder service started');
+  }
+
+  // Plans with a meeting length limit: close meetings that have run past it
+  async enforceDurationLimits() {
+    if (UNLOCK_ALL_FEATURES) return; // no limits: do not walk every live meeting each minute
+    try {
+      const live = await Meeting.findAll({ where: { status: 'active', startedAt: { [Op.lt]: new Date(Date.now() - 60 * 1000) } } });
+      for (const meeting of live) {
+        const { plan } = await ensureSubscription(meeting.hostId);
+        const minutes = plan?.limits?.meetingDurationMinutes;
+        if (!(minutes > 0) || Date.now() - new Date(meeting.startedAt) < minutes * 60 * 1000) continue;
+        if ((await endMeeting(meeting)).changed) {
+          this.io.to(meeting.roomId).emit('meeting:ended', { roomId: meeting.roomId, reason: 'time-limit' });
+        }
+      }
+    } catch (error) {
+      console.error('Error enforcing meeting length:', error);
+    }
   }
 
   stop() {
@@ -38,10 +66,11 @@ class ReminderService {
     try {
       const now = new Date();
 
+      // only meetings near enough for any reminder to be due, not every scheduled meeting every minute
       const meetings = await Meeting.findAll({
         where: {
           status: 'scheduled',
-          scheduledAt: { [Op.ne]: null }
+          scheduledAt: { [Op.gte]: new Date(now - 5 * 60 * 1000), [Op.lte]: new Date(now.getTime() + MAX_REMINDER_MS) }
         }
       });
 
@@ -54,31 +83,20 @@ class ReminderService {
         const timeDiff = scheduledTime - now;
         const minutesDiff = Math.floor(timeDiff / (1000 * 60));
 
-        let changed = false;
+        const due = (r) => {
+          const minutes = r.time * (r.unit === 'days' ? 24 * 60 : r.unit === 'hours' ? 60 : 1);
+          return !r.sent && minutesDiff <= minutes && minutesDiff >= minutes - 1;
+        };
+        if (!reminders.some(due)) continue;
 
-        for (const reminder of reminders) {
-          if (reminder.sent) continue;
-
-          let reminderMinutes = reminder.time;
-
-          if (reminder.unit === 'hours') {
-            reminderMinutes *= 60;
-          } else if (reminder.unit === 'days') {
-            reminderMinutes *= 60 * 24;
-          }
-
-          if (minutesDiff <= reminderMinutes && minutesDiff >= (reminderMinutes - 1)) {
-            await this.sendReminder(meeting, reminder);
-            reminder.sent = true;
-            reminder.sentAt = new Date().toISOString();
-            changed = true;
-          }
-        }
-
-        if (changed) {
-          meeting.reminders = reminders;
-          await meeting.save();
-        }
+        // Marked as sent first, on the locked row: a second instance or the next tick finds nothing to do
+        const claimed = await updateLocked(Meeting, meeting.id, (row) => {
+          const mine = (row.reminders || []).filter(due);
+          if (!mine.length) return false;
+          for (const r of mine) { r.sent = true; r.sentAt = new Date().toISOString(); }
+          return mine;
+        });
+        for (const reminder of claimed?.result || []) await this.sendReminder(meeting, reminder);
       }
     } catch (error) {
       console.error('Error checking reminders:', error);
@@ -129,6 +147,7 @@ class ReminderService {
       );
 
       await Promise.all(notificationPromises);
+      emailMeetingPeople(meeting, { kind: 'reminder', userIds: [...recipients], when: timeString });
 
       recipients.forEach(recipientId => {
         this.io.to(`user:${recipientId}`).emit('notification:new', {
@@ -165,11 +184,12 @@ class ReminderService {
         const notificationsSent = meeting.notificationsSent || {};
         if (notificationsSent.started) continue;
 
-        await this.notifyMeetingStart(meeting);
-
-        notificationsSent.started = true;
-        meeting.notificationsSent = notificationsSent;
-        await meeting.save();
+        const claimed = await updateLocked(Meeting, meeting.id, (row) => {
+          if (row.notificationsSent?.started) return false;
+          row.notificationsSent = { ...(row.notificationsSent || {}), started: true };
+          return true;
+        });
+        if (claimed?.result) await this.notifyMeetingStart(meeting);
       }
     } catch (error) {
       console.error('Error checking meeting starts:', error);

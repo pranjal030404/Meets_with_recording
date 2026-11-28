@@ -1,5 +1,5 @@
 import express from 'express';
-import { Op, fn, col, where as seqWhere } from 'sequelize';
+import { Op } from 'sequelize';
 import Message from '../models/Message.js';
 import Meeting from '../models/Meeting.js';
 import Team from '../models/Team.js';
@@ -8,13 +8,12 @@ import FileEntry from '../models/FileEntry.js';
 import User from '../models/User.js';
 import ConversationMember from '../models/ConversationMember.js';
 import { protect } from '../middleware/auth.js';
+import { meetingIdsOf, myTeams } from '../models/membership.js';
+import { contactIdsOf } from '../lib/access.js';
 
 const router = express.Router();
 
-const getMyTeamIds = async (user) => {
-  const teams = await Team.findAll({ where: { isActive: true } });
-  return teams.filter(t => t.isMember(user.id)).map(t => t.id);
-};
+const getMyTeamIds = async (user) => (await myTeams(user.id)).map(t => t.id);
 
 const getMyConversationIds = async (userId) => {
   const memberships = await ConversationMember.findAll({ where: { userId }, attributes: ['conversationId'] });
@@ -22,23 +21,13 @@ const getMyConversationIds = async (userId) => {
 };
 
 const getMyMeetingIds = async (userId) => {
-  const meetings = await Meeting.findAll({
-    where: {
-      [Op.or]: [
-        { hostId: userId },
-        seqWhere(fn('JSON_CONTAINS', col('participantIds'), JSON.stringify(userId)), 1),
-        seqWhere(fn('JSON_CONTAINS', col('inviteeIds'), JSON.stringify(userId)), 1)
-      ]
-    },
-    attributes: ['id']
-  });
+  const meetings = await Meeting.findAll({ where: { id: { [Op.in]: meetingIdsOf(userId) } }, attributes: ['id'] });
   return meetings.map(m => m.id);
 };
 
 const getUsersInMyTeams = async (userId) => {
-  const teams = await Team.findAll({ where: { isActive: true } });
   const ids = new Set();
-  teams.filter(t => t.isMember(userId)).forEach(team => {
+  (await myTeams(userId)).forEach(team => {
     (team.members || []).forEach(m => {
       const id = m.userId || m.id;
       if (id) ids.add(id);
@@ -57,7 +46,7 @@ router.get('/', protect, async (req, res) => {
     if (q.length < 2) {
       return res.status(400).json({ success: false, message: 'Query must be at least 2 characters' });
     }
-    const like = `%${q}%`;
+    const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
     const results = {};
 
     const want = (t) => type === 'all' || type === t;
@@ -79,7 +68,9 @@ router.get('/', protect, async (req, res) => {
           where: {
             [Op.and]: [
               { [Op.or]: contexts },
-              { [Op.or]: [{ content: { [Op.like]: like } }, { fileName: { [Op.like]: like } }] }
+              { [Op.or]: [{ content: { [Op.like]: like } }, { fileName: { [Op.like]: like } }] },
+              // someone else's private meeting chat stays theirs
+              { [Op.or]: [{ isPrivate: false }, { isPrivate: null }, { senderId: req.user.id }, { recipientId: req.user.id }] }
             ],
             isDeleted: false
           },

@@ -604,7 +604,7 @@ function ConversationView({
               <span className="text-xs text-primary-300 flex items-center gap-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</span>
             ) : (
               <>
-                <button onClick={clearPending} className="text-gray-500 hover:text-red-400"><X className="w-4 h-4" /></button>
+                <button aria-label="Remove attachment" onClick={clearPending} className="text-gray-500 hover:text-red-400"><X className="w-4 h-4" /></button>
                 <button onClick={handleSendFile} className="btn btn-primary !px-3 !py-1.5 text-xs">Send file</button>
               </>
             )}
@@ -816,7 +816,8 @@ function MessageRow({
 function ActionButton({ icon: Icon, title, onClick, danger = false }) {
   return (
     <button
-      onClick={onClick}
+      // keep the click away from the page-wide "close menus" listener, which would shut what it just opened
+      onClick={(e) => { e.stopPropagation(); onClick(e) }}
       title={title}
       className={`p-1.5 rounded-lg transition-colors ${danger ? 'hover:bg-red-500/10 hover:text-red-400 text-gray-500' : 'text-gray-500 hover:bg-white/[0.08] hover:text-gray-200'}`}
     >
@@ -878,7 +879,7 @@ function ThreadPanel({ thread, user, onClose, onReply, onReact }) {
           <h3 className="font-semibold font-display text-sm">Thread</h3>
           <p className="text-[11px] text-gray-500">{thread.replies.length} {thread.replies.length === 1 ? 'reply' : 'replies'}</p>
         </div>
-        <button onClick={onClose} className="p-2 rounded-xl text-gray-400 hover:bg-white/[0.06]"><X className="w-4 h-4" /></button>
+        <button aria-label="Close" onClick={onClose} className="p-2 rounded-xl text-gray-400 hover:bg-white/[0.06]"><X className="w-4 h-4" /></button>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-1">
@@ -955,7 +956,7 @@ function Modal({ title, onClose, children }) {
       <div className="relative glass-strong rounded-2xl border border-white/10 w-full max-w-md p-6 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold font-display">{title}</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06]"><X className="w-5 h-5" /></button>
+          <button aria-label="Close" onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06]"><X className="w-5 h-5" /></button>
         </div>
         {children}
       </div>

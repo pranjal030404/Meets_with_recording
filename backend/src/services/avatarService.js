@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import { UPLOADS_ROOT } from '../routes/uploads.js';
+import { getStorage } from '../storage/index.js';
 
 export const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -34,6 +35,12 @@ export async function saveAvatar(user, file) {
   fs.mkdirSync(dir, { recursive: true });
   const name = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
   fs.writeFileSync(path.join(dir, name), file.buffer);
+  // with object storage, a copy so that the other app servers can show it too
+  const storage = getStorage();
+  if (storage.name === 's3') {
+    await storage.putObject(`avatars/${user.id}/${name}`, file.buffer, { contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}` })
+      .catch((e) => console.error(`[storage] avatar upload failed, it stays on this server only: ${e.message}`));
+  }
   removeAvatarFile(user.avatar);
   user.avatar = `/uploads/avatars/${user.id}/${name}`;
   await user.save();
@@ -44,7 +51,12 @@ export function removeAvatarFile(url) {
   const f = urlToFile(url);
   if (!f) return;
   const abs = path.resolve(f);
-  if (abs.startsWith(path.resolve(UPLOADS_ROOT, 'avatars') + path.sep)) fs.unlink(abs, () => {});
+  if (!abs.startsWith(path.resolve(UPLOADS_ROOT, 'avatars') + path.sep)) return;
+  fs.unlink(abs, () => {});
+  const storage = getStorage();
+  if (storage.name === 's3') {
+    storage.deleteObject(url.replace('/uploads/', '')).catch((e) => console.error(`[storage] could not delete old avatar: ${e.message}`));
+  }
 }
 
 export async function clearAvatar(user) {

@@ -47,6 +47,7 @@ function buildApps(env = process.env) {
       env: { NODE_ENV: 'development' },
       env_production: {
         NODE_ENV: 'production',
+        UV_THREADPOOL_SIZE: 16, // password hashing runs here
         PORT: basePort + i,
         NODE_ID: `${host}-${i + 1}`,
         NODE_PUBLIC_URL: url,

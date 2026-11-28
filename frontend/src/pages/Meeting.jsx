@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useMeetingStore } from '../store/meetingStore'
@@ -39,7 +39,7 @@ export default function Meeting() {
   const viewOnly = searchParams.get('viewOnly') === '1'
   const inBreakout = isBreakoutRoomId(roomId)
   const parentRoomId = parentRoomIdOf(roomId)
-  const { user, token } = useAuthStore()
+  const { user } = useAuthStore()
   const {
     currentMeeting, participants, localStream, isHost, isCoHost,
     setIsCoHost, setMyRole,
@@ -65,17 +65,29 @@ export default function Meeting() {
   } = useMeetingStore()
   const { addMessage, loadMessages, clearMessages, setTypingUser } = useChatStore()
 
-  const [showChat, setShowChat] = useState(false)
-  const [showParticipants, setShowParticipants] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showDeviceSettings, setShowDeviceSettings] = useState(false)
-  const [showMeetingSettings, setShowMeetingSettings] = useState(false)
   const [showWhiteboard, setShowWhiteboard] = useState(false)
   const [activitiesTab, setActivitiesTab] = useState(null) // 'polls' | 'qa' | null
   const [showShortcuts, setShowShortcuts] = useState(false)
-  const [showNotes, setShowNotes] = useState(false)
-  const [showMeetingDetails, setShowMeetingDetails] = useState(false)
-  const [showTools, setShowTools] = useState(false)
+  // One side panel at a time: stacked panels used to squeeze the video to slivers
+  const [sidePanel, setSidePanel] = useState(null)
+  const panelSetter = useCallback((name) => (next) => setSidePanel((current) => {
+    const open = typeof next === 'function' ? next(current === name) : next
+    return open ? name : current === name ? null : current
+  }), [])
+  const showChat = sidePanel === 'chat'
+  const setShowChat = useMemo(() => panelSetter('chat'), [panelSetter])
+  const showParticipants = sidePanel === 'participants'
+  const setShowParticipants = useMemo(() => panelSetter('participants'), [panelSetter])
+  const showMeetingSettings = sidePanel === 'settings'
+  const setShowMeetingSettings = useMemo(() => panelSetter('settings'), [panelSetter])
+  const showMeetingDetails = sidePanel === 'details'
+  const setShowMeetingDetails = useMemo(() => panelSetter('details'), [panelSetter])
+  const showNotes = sidePanel === 'notes'
+  const setShowNotes = useMemo(() => panelSetter('notes'), [panelSetter])
+  const showTools = sidePanel === 'tools'
+  const setShowTools = useMemo(() => panelSetter('tools'), [panelSetter])
   const [isJoining, setIsJoining] = useState(true)
   const [screenShareUser, setScreenShareUser] = useState(null)
   const [showLeaveDialog, setShowLeaveDialog] = useState(false)
@@ -141,15 +153,6 @@ export default function Meeting() {
   }, [isScreenSharing])
 
   // =============================================
-  // SET LOCAL VIDEO REF WHEN STREAM IS AVAILABLE
-  // =============================================
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream
-    }
-  }, [localStream])
-
-  // =============================================
   // ACTIVE SPEAKER DETECTION
   // =============================================
   useEffect(() => {
@@ -194,7 +197,7 @@ export default function Meeting() {
         } catch (placementError) {
           console.warn('Placement lookup failed, using default node:', placementError?.message)
         }
-        let socket = initSocket(token, nodeUrl)
+        let socket = initSocket(user.id, nodeUrl)
         socketRef.current = socket
 
         // The socket handshake and the REST join don't depend on each other: run them together
@@ -264,6 +267,10 @@ export default function Meeting() {
         const joinResult = await joinPromise
         if (!joinResult.success) {
           useMeetingStore.getState().setSessionPhase('idle')
+          if (joinResult.code === 'BREAKOUT_CLOSED') { // closed on the way in: back to the main meeting
+            goToRoom(parentRoomIdOf(roomId))
+            return
+          }
           // Not open (yet, or any more): the join page explains that better than a toast on the home page
           if (['MEETING_ENDED', 'MEETING_NOT_STARTED', 'HOST_NOT_JOINED'].includes(joinResult.code)) {
             navigate(`/join/${roomId}`, { replace: true })
@@ -393,6 +400,8 @@ export default function Meeting() {
 
     // Room participants (on join)
     socket.on('room:participants', ({ participants: existingParticipants, isHost: hostStatus, isCoHost: coHostStatus, role }) => {
+      // someone let in from the waiting room could not read the history until now
+      if (useMeetingStore.getState().sessionPhase === 'waiting') loadMessages(roomId)
       useMeetingStore.getState().setSessionPhase('connected')
       setParticipants(existingParticipants)
       setIsHost(hostStatus)
@@ -401,10 +410,11 @@ export default function Meeting() {
     })
 
     // Existing mediasoup producers — consume them
-    socket.on('mediasoup:existingProducers', async ({ producers }) => {
+    // All announced at once: waiting for one before naming the next would let a single stuck stream hide the others
+    socket.on('mediasoup:existingProducers', ({ producers }) => {
       for (const p of producers) {
         producerMapRef.current.set(p.producerId, { peerId: p.userId, mediaType: p.mediaType })
-        await consumeProducer(p.producerId, p.userId, { _id: p.userId, name: p.userName }, p.mediaType)
+        consumeProducer(p.producerId, p.userId, { _id: p.userId, name: p.userName }, p.mediaType)
       }
     })
 
@@ -660,7 +670,10 @@ export default function Meeting() {
       }
     })
 
-    socket.on('error', ({ message }) => {
+    socket.on('error', ({ message, code }) => {
+      // Nobody can take the meeting this moment (a restart, Redis only just back): keep trying rather than
+      // leaving the person on a meeting screen that is dead until they reload
+      if (code === 'NO_CAPACITY') return useMeetingStore.getState().recoverMedia('no-capacity')
       toast.error(message)
     })
 
@@ -743,8 +756,7 @@ export default function Meeting() {
   // Recording toggle
   const handleRecording = useCallback((options) => {
     if (isRecording) {
-      stopRecording()
-      toast.success('Recording stopped. Upload and transcription are processing.')
+      stopRecording() // the store reports what actually happened to the file
     } else {
       const result = startRecording(options)
       if (result.success) toast.success('Recording started')
@@ -876,6 +888,7 @@ export default function Meeting() {
             isHost={(isHost || isCoHost)}
             onPinUser={pinUser}
             onSpotlightUser={spotlightUser}
+            onClearSpotlight={clearSpotlight}
           />
 
           {/* Emoji Reactions Overlay */}

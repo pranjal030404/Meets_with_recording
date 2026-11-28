@@ -156,3 +156,50 @@ export async function sendTestEmail(to) {
     html: `<p>This is a test email from <b>${esc(name)}</b>. Your SMTP settings work.</p>`
   });
 }
+
+/** Meeting invitation or reminder. */
+export async function sendMeetingEmail({ to, name, kind, from, meeting, when }) {
+  const app = APP_NAME();
+  const title = meeting.title || 'Meeting';
+  const link = meeting.meetingLink || appUrl();
+  const starts = meeting.scheduledAt ? new Date(meeting.scheduledAt).toUTCString() : '';
+  const subject = kind === 'reminder' ? `Reminder: ${title} starts in ${when}` : `${from} invited you to ${title}`;
+  const lead = kind === 'reminder' ? `"${title}" starts in ${when}.` : `${from} invited you to "${title}" on ${app}.`;
+  return deliver({
+    to,
+    subject: subject.replace(/[\r\n]+/g, ' ').slice(0, 200),
+    text: `${name ? `Hi ${name},\n\n` : ''}${lead}\n${starts ? `When: ${starts}\n` : ''}Join: ${link}\n`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#111">
+      ${name ? `<p>Hi ${esc(name)},</p>` : ''}
+      <p>${esc(lead)}</p>
+      ${starts ? `<p style="color:#555">When: ${esc(starts)}</p>` : ''}
+      <p style="margin:24px 0"><a href="${esc(link)}" style="background:#2563eb;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600">Open meeting</a></p>
+    </div>`
+  });
+}
+
+export async function sendAccountExistsEmail(user) {
+  const url = `${appUrl()}/login`;
+  return sendMail({
+    to: user.email,
+    subject: 'You already have an account',
+    text: `Someone tried to create an account with this address. You already have one: sign in at ${url}, or use "Forgot password?" there. If it was not you, nothing has changed.`,
+    html: `<p>Someone tried to create an account with this address. You already have one: <a href="${esc(url)}">sign in</a>, or use &quot;Forgot password?&quot; there.</p><p>If it was not you, nothing has changed.</p>`,
+  });
+}
+
+export async function sendPasswordResetEmail(user, code) {
+  const app = APP_NAME();
+  return sendMail({
+    to: user.email,
+    subject: `${code} is your ${app} password reset code`,
+    text: `Hi ${user.name},\n\nYour code to reset your ${app} password is ${code}. It expires in 10 minutes.\n\nIf you didn't ask for this you can ignore this email.`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#111">
+      <h2 style="margin:0 0 12px">Reset your password</h2>
+      <p>Hi ${esc(user.name)},</p>
+      <p style="font-size:28px;letter-spacing:6px;font-weight:700;margin:20px 0">${code}</p>
+      <p>Enter it on the reset page. It expires in 10 minutes.</p>
+      <p style="font-size:12px;color:#888">If you didn't ask for this you can ignore this email.</p>
+    </div>`
+  });
+}

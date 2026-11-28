@@ -117,6 +117,7 @@ class _HomeShellState extends State<HomeShell> {
       Expanded(
         child: ListView(padding: const EdgeInsets.symmetric(horizontal: 12), children: [
           for (var i = 0; i < _nav.length; i++)
+            if (_nav[i].$1 != 'Billing' || Session.instance.billingEnabled)
             ListTile(
               dense: true,
               selected: i == _page,

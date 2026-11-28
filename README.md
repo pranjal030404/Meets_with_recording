@@ -538,7 +538,7 @@ Deployed on a single $40/month VPS server:
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20.19+ or 22.12+
 - MySQL 8+
 - Modern browser with WebRTC support
 
@@ -635,8 +635,8 @@ npm run dev
 Open [http://localhost:5173](http://localhost:5173)
 
 **SuperAdmin Credentials** (after running `create-admin`):
-- Email: `admin@meetclone.com`
-- Password: `SuperAdmin@2026`
+- Email: the `SUPERADMIN_EMAIL` in `backend/.env`
+- Password: the `SUPERADMIN_PASSWORD` you chose there (required, at least 10 characters; there is no default)
 
 ### Docker (Alternative)
 
@@ -955,3 +955,13 @@ MIT — free to use, modify, and distribute.
 *Minutes was built with React 18, Node.js/Express, mediasoup SFU, Socket.IO, MySQL (Sequelize), and Tailwind CSS.*
 
 *For questions, deployment assistance, or custom development, please reach out.*
+
+## Backups
+
+```bash
+bash deploy/scripts/backup.sh /path/off-the-app-disk          # database + uploads, keeps 7
+MARIADB_ARGS="-uroot -p" bash deploy/scripts/restore-check.sh /path/off-the-app-disk/<stamp> restore_check
+```
+
+Schedule the first daily (cron or a systemd timer), copy the result to another machine, and run the second regularly:
+a backup that has never been restored is not known to work.

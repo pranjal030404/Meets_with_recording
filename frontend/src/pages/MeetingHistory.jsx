@@ -22,7 +22,6 @@ import { useTaskStore } from '../store/taskStore'
 import AppShell from '../components/AppShell'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
-import { collapseSeries } from '../lib/recurrence'
 import EditMeetingModal from '../components/EditMeetingModal'
 
 export default function MeetingHistory() {
@@ -47,7 +46,7 @@ export default function MeetingHistory() {
     if (!hasPendingTranscript) return
     const timer = setInterval(async () => {
       try {
-        const params = { limit: 200, ...(filter !== 'all' && { status: filter }) }
+        const params = { limit: 200, series: 'next', ...(filter !== 'all' && { status: filter }) }
         const response = await api.get('/meetings', { params })
         useMeetingStore.setState({ meetings: response.data.data.meetings })
       } catch { /* try again next tick */ }
@@ -128,7 +127,7 @@ export default function MeetingHistory() {
           </div>
         ) : (
           <div className="space-y-5">
-            {collapseSeries(meetings).map((meeting, i) => (
+            {meetings.map((meeting, i) => (
               <MeetingCard
                 key={meeting._id}
                 meeting={meeting}
@@ -207,10 +206,10 @@ function InviteActions({ meeting, currentUserId }) {
   if (!open) return null
   return (
     <>
-      {!isHost && mine?.status === 'pending' && (
+      {!isHost && mine && (meeting.status === 'scheduled' || meeting.status === 'active') && (
         <>
-          <button disabled={busy} className="btn btn-primary" onClick={() => run(() => api.put(`/meetings/${meeting.roomId}/respond`, { status: 'accepted' }), 'Invitation accepted')}>Accept</button>
-          <button disabled={busy} className="btn btn-secondary" onClick={() => run(() => api.put(`/meetings/${meeting.roomId}/respond`, { status: 'declined' }), 'Invitation declined')}>Decline</button>
+          {mine.status !== 'accepted' && <button disabled={busy} className="btn btn-primary" onClick={() => run(() => api.put(`/meetings/${meeting.roomId}/respond`, { status: 'accepted' }), 'Invitation accepted')}>Accept</button>}
+          {mine.status !== 'declined' && <button disabled={busy} className="btn btn-secondary" onClick={() => run(() => api.put(`/meetings/${meeting.roomId}/respond`, { status: 'declined' }), 'Invitation declined')}>Decline</button>}
         </>
       )}
       {!isHost && mine && mine.status !== 'pending' && <span className="text-xs text-gray-400">You {mine.status}</span>}
@@ -417,14 +416,17 @@ function MeetingCard({ meeting, currentUserId, navigate, formatDate, getDuration
         )}
       </div>
 
-      {/* Complete Meeting Transcript */}
-      <CompleteTranscriptPanel meeting={meeting} navigate={navigate} />
+      {/* Complete Meeting Transcript: only once a recording has text, or one was already made */}
+      {(meeting.completeTranscript || hasTranscript(recordings)) && <CompleteTranscriptPanel meeting={meeting} navigate={navigate} />}
 
       {/* AI Summary */}
-      <AiSummaryPanel meeting={meeting} navigate={navigate} />
+      {(meeting.aiSummary || meeting.completeTranscript || hasTranscript(recordings)) && <AiSummaryPanel meeting={meeting} navigate={navigate} />}
     </div>
   )
 }
+
+const hasTranscript = (recordings) => recordings.some(({ transcription: t }) =>
+  t && !['none', 'error'].includes(t.provider) && (t.segments?.length || t.text || t.txtUrl || t.files?.txt))
 
 function CompleteTranscriptPanel({ meeting, navigate }) {
   const [complete, setComplete] = useState(meeting.completeTranscript || null)

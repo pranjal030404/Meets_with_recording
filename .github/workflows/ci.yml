@@ -1,0 +1,99 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=5s --health-retries=20
+    env:
+      REDIS_TEST_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+      - run: npm audit --audit-level=high
+        working-directory: backend
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm audit --audit-level=high
+        working-directory: frontend
+  api:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: mariadb:11
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: '1'
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-retries=20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_NAME: ci
+      DB_USER: root
+      DB_PASSWORD: ''
+      # throw-away values for a database that exists only for this job
+      JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef
+      SUPERADMIN_EMAIL: qa-admin@example.test
+      SUPERADMIN_PASSWORD: 'QaAdmin!2026'
+      RATE_LIMIT_MAX: '100000'
+      MEDIASOUP_ANNOUNCED_IP: 127.0.0.1
+      MEDIASOUP_NUM_WORKERS: '1'
+      CLIENT_URL: http://127.0.0.1:15000
+      QA_BASE_URL: http://127.0.0.1:15000
+      QA_BILLING_URL: http://127.0.0.1:15002
+      QA_BILLING_DEMO_URL: http://127.0.0.1:15003
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      # the servers under test serve the built web app, as in production
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - run: npm run db:setup
+      - name: Start the servers under test
+        env:
+          NODE_ENV: production
+        run: |
+          PORT=15000 node src/index.js > main.log 2>&1 &
+          PORT=15002 UNLOCK_ALL_FEATURES=false node src/index.js > billing.log 2>&1 &
+          PORT=15003 UNLOCK_ALL_FEATURES=false BILLING_DEMO_MODE=true node src/index.js > demo.log 2>&1 &
+          for p in 15000 15002 15003; do curl -fsS --retry 30 --retry-delay 1 --retry-all-errors "http://127.0.0.1:$p/api/health" > /dev/null; done
+      - name: API and realtime suites
+        env:
+          NODE_ENV: production
+        run: |
+          export QA_APP_DIR="$PWD"
+          node --test --test-concurrency=1 --test-force-exit $(ls tests/qa/*.qa.js | grep -v integration)
+      - name: Mail and job suite (runs alone)
+        env:
+          NODE_ENV: production
+        run: |
+          pkill -f 'node src/index.js' || true
+          sleep 5
+          QA_APP_DIR="$PWD" node --test --test-concurrency=1 --test-force-exit tests/qa/integration.qa.js
+      - if: failure()
+        run: tail -n 80 *.log

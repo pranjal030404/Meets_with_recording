@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { KeyRound, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../lib/api'
-import { useAuthStore } from '../store/authStore'
 import { getSocket } from '../lib/socket'
 
 const EMPTY = { currentPassword: '', newPassword: '', confirm: '' }
@@ -38,13 +37,12 @@ export default function ChangePassword() {
         setSentTo(sent.data.data.email)
         return
       }
-      const res = await api.post('/auth/change-password', { currentPassword, newPassword, code })
-      // Every older session is now signed out, including this one: carry on with the new token
-      const { token } = res.data.data
-      localStorage.setItem('token', token)
-      useAuthStore.setState({ token })
+      // Every older session is now signed out, including this one: the answer sets a new session cookie
+      await api.post('/auth/change-password', { currentPassword, newPassword, code })
       const socket = getSocket()
-      if (socket) socket.auth = { token } // used on the next reconnect
+      // the server closed every connection of this account: reopen this one
+      // disconnect first: if the server's disconnect has not arrived yet, connect() alone would do nothing
+      if (socket) socket.disconnect().connect()
       toast.success('Password changed. Other devices have been signed out.')
       close()
     } catch (err) {

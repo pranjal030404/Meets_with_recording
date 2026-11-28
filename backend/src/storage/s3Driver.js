@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { pipeline } from 'stream/promises';
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, ListObjectsV2Command, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import { assertSafeKey } from './keys.js';
@@ -34,6 +34,16 @@ export const createS3Driver = ({ bucket, region, endpoint, forcePathStyle, prefi
       await pipeline(r.Body, fs.createWriteStream(dest));
     },
     async deleteObject(key) { await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: k(key) })); },
+    /** Everything stored under one folder, including copies the database no longer points at. */
+    async deleteFolder(folder) {
+      const Prefix = `${k(folder)}/`;
+      let ContinuationToken;
+      do {
+        const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix, ContinuationToken }));
+        for (const { Key } of page.Contents || []) await client.send(new DeleteObjectCommand({ Bucket: bucket, Key }));
+        ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+      } while (ContinuationToken);
+    },
     getSignedDownloadUrl(key, { expiresSec = 300, filename } = {}) {
       return getSignedUrl(client, new GetObjectCommand({
         Bucket: bucket, Key: k(key),

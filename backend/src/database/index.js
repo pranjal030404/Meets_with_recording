@@ -93,6 +93,28 @@ sequelize.addHook('afterFind', (result) => {
   }
 });
 
+// Sequelize compares JSON values by reference, so `row.list.push(x); row.save()` (or re-assigning the same
+// array) silently saved nothing. Remember what was loaded and flag the column when its content differs.
+const jsonColumns = (model) => Object.entries(model?.rawAttributes || {}).filter(([, a]) => a.type?.key === 'JSON').map(([name]) => name);
+const loadedJson = new WeakMap();
+const remember = (row) => {
+  const names = jsonColumns(row?.constructor);
+  if (!names.length) return;
+  const snapshot = {};
+  for (const name of names) if (row.dataValues[name] !== undefined) snapshot[name] = JSON.stringify(row.dataValues[name]);
+  loadedJson.set(row, snapshot);
+};
+const rememberAll = (result) => { for (const row of Array.isArray(result) ? result : [result]) if (row) remember(row); };
+sequelize.addHook('afterFind', rememberAll); // registered after the MariaDB parse hook above
+sequelize.addHook('afterSave', remember);
+sequelize.addHook('beforeSave', (row) => {
+  const snapshot = loadedJson.get(row);
+  if (!snapshot) return;
+  for (const [name, before] of Object.entries(snapshot)) {
+    if (JSON.stringify(row.dataValues[name]) !== before) row.changed(name, true);
+  }
+});
+
 const connectDB = async () => {
   try {
     await sequelize.authenticate();

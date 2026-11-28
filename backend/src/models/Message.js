@@ -93,6 +93,7 @@ const Message = sequelize.define('Message', {
   }
 }, {
   tableName: 'Messages'
+  // index messages_conv_sender is created by migration 021 (adding it here would make sync() race on start)
 });
 
 Message.prototype.toJSON = function() {

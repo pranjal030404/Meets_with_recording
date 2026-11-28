@@ -1,4 +1,4 @@
-import { verifySocketToken } from '../middleware/auth.js';
+import { verifySocketCredential } from '../middleware/auth.js';
 import Meeting from '../models/Meeting.js';
 import Message from '../models/Message.js';
 import Team from '../models/Team.js';
@@ -21,6 +21,12 @@ import { trackState } from '../lib/stateRegistry.js';
 import { ownershipGuard, releaseMeeting } from '../media/sfuManager.js';
 import * as presence from '../realtime/presenceManager.js';
 import { parseBreakoutRoomId, resolveBreakoutAccess } from '../lib/breakoutRoomId.js';
+import { guardSocket } from '../lib/socketGuard.js';
+import { admissionError } from '../lib/access.js';
+import { updateLocked } from '../lib/locked.js';
+import { addAttendee } from '../services/attendance.js';
+import { capParticipants } from '../services/subscriptionService.js';
+import { roomOfSessionHash, listenForAuthChanges } from '../realtime/sessions.js';
 
 const roomParticipants = new Map();
 const meetingNotes = new Map(); // roomId -> shared notes text
@@ -36,6 +42,7 @@ const roomStreams = new Map(); // roomId -> { startedAt, startedBy }
 const roomRecorders = new Map(); // roomId -> Map<userId, userName> currently recording locally
 const roomWaiting = new Map(); // roomId -> Map<socketId, { user }>
 const roomAdmitted = new Map(); // roomId -> Set<userId>
+const roomRemoved = new Map(); // roomId -> Set<userId> a host removed: they must knock to come back
 
 const MAX_TIMER_SECONDS = 12 * 60 * 60;
 const MAX_TRANSCRIPT_LINES = 2000;
@@ -50,7 +57,8 @@ const runtimeSnapshot = (roomId) => ({
   notes: meetingNotes.get(roomId) ?? null,
   stream: roomStreams.get(roomId) || null,
   transcript: (roomTranscripts.get(roomId) || []).slice(-RUNTIME_TRANSCRIPT_LINES),
-  admitted: [...(roomAdmitted.get(roomId) || [])]
+  admitted: [...(roomAdmitted.get(roomId) || [])],
+  removed: [...(roomRemoved.get(roomId) || [])]
 });
 const persistRuntime = (roomId) => {
   if (!parseBreakoutRoomId(roomId)) saveRuntime(roomId, () => runtimeSnapshot(roomId));
@@ -71,6 +79,7 @@ const applyRestore = async (roomId) => {
   if (typeof saved.notes === 'string' && !meetingNotes.has(roomId)) meetingNotes.set(roomId, saved.notes);
   if (saved.stream && !roomStreams.has(roomId)) roomStreams.set(roomId, saved.stream);
   if (Array.isArray(saved.admitted) && saved.admitted.length && !roomAdmitted.has(roomId)) roomAdmitted.set(roomId, new Set(saved.admitted));
+  if (Array.isArray(saved.removed) && saved.removed.length && !roomRemoved.has(roomId)) roomRemoved.set(roomId, new Set(saved.removed));
 };
 
 // An empty room keeps its tools/admissions for a grace period: a server blip or everyone reloading
@@ -113,6 +122,7 @@ const clearRoomTools = (roomId) => {
   roomStreams.delete(roomId);
   roomWaiting.delete(roomId);
   roomAdmitted.delete(roomId);
+  roomRemoved.delete(roomId);
   roomRecorders.delete(roomId);
   roomWebinar.delete(roomId);
   roomMode.delete(roomId);
@@ -125,6 +135,13 @@ const emitToolsState = (socket, roomId) => {
   socket.emit('timer:state', { timer: roomTimers.get(roomId) || null, serverNow: Date.now() });
   socket.emit('transcribe:state', roomTranscription.get(roomId) || { enabled: false, by: null });
   socket.emit('stream:state', { stream: roomStreams.get(roomId) || null });
+};
+
+const sendBackIfClosed = async (socket, roomId) => {
+  const breakout = parseBreakoutRoomId(roomId);
+  if (!breakout || await resolveBreakoutAccess(roomId, socket.user.id)) return false;
+  socket.emit('breakout:closed', { returnRoomId: breakout.parentRoomId });
+  return true;
 };
 
 // Breakout rooms authorize against their parent meeting
@@ -170,12 +187,21 @@ const userProducers = new Map();
 // Every per-process collection, named and scoped, exported as a gauge (see lib/stateRegistry.js).
 [['roomParticipants', roomParticipants, 'room'], ['meetingNotes', meetingNotes, 'room'], ['roomTimers', roomTimers, 'room'],
  ['roomTranscription', roomTranscription, 'room'], ['roomTranscripts', roomTranscripts, 'room'], ['roomStreams', roomStreams, 'room'],
- ['roomRecorders', roomRecorders, 'room'], ['roomWaiting', roomWaiting, 'room'], ['roomAdmitted', roomAdmitted, 'room'],
+ ['roomRecorders', roomRecorders, 'room'], ['roomWaiting', roomWaiting, 'room'], ['roomAdmitted', roomAdmitted, 'room'], ['roomRemoved', roomRemoved, 'room'],
  ['restoredRooms', restoredRooms, 'room'], ['roomClearTimers', roomClearTimers, 'room'], ['roomWebinar', roomWebinar, 'room'], ['roomMode', roomMode, 'room'],
  ['userTransports', userTransports, 'socket'], ['userConsumers', userConsumers, 'socket'], ['userProducers', userProducers, 'socket']
 ].forEach(([n, c, sc]) => trackState(n, c, sc));
 
+const recordAttendance = async (meeting, user) => {
+  if ((meeting.participants || []).some((p) => p.userId === user.id && p.joinedAt && !p.leftAt)) return;
+  await updateLocked(Meeting, meeting.id, (row) => {
+    if (!addAttendee(row, user)) return false;
+  });
+  await meeting.reload();
+};
+
 export const initializeSocketHandlers = (io) => {
+  listenForAuthChanges(io);
   // A dead worker takes its routers' transports with it; they cannot migrate. Tell the room so clients rebuild media.
   mediasoupService.onActiveSpeakers = (roomId, speakers) => {
     io.to(roomId).emit('media:active-speakers', { roomId, userIds: speakers.map((x) => x.userId).filter(Boolean), producerIds: speakers.map((x) => x.producerId) });
@@ -191,13 +217,14 @@ export const initializeSocketHandlers = (io) => {
       return next(new Error('Authentication required'));
     }
 
-    const user = await verifySocketToken(token);
+    const verified = await verifySocketCredential(token);
 
-    if (!user) {
+    if (!verified) {
       return next(new Error('Invalid token'));
     }
 
-    socket.user = user;
+    socket.user = verified.user;
+    socket.data.sessionRoom = roomOfSessionHash(verified.session);
     next();
   });
 
@@ -208,8 +235,18 @@ export const initializeSocketHandlers = (io) => {
     return !!meeting && !contributorAllowed(meeting, userId, key);
   };
 
+  // People who are in the meeting: both ids must be socket ids sitting in this room
+  const inRoom = (socketId, roomId) => typeof socketId === 'string' && !!io.sockets.adapter.rooms.get(roomId)?.has(socketId);
+
   io.on('connection', (socket) => {
     socketConnections.inc();
+    guardSocket(socket); // must come before any socket.on below
+    // The host (or co-host) of the meeting whose room this socket is actually in, or null
+    const managedMeeting = async (roomId) => {
+      if (typeof roomId !== 'string' || !socket.rooms.has(roomId)) return null;
+      const meeting = await Meeting.findOne({ where: { roomId } });
+      return meeting && canManageMeeting(meeting, socket.user.id) ? meeting : null;
+    };
     const limiter = createSocketLimiter();
     socket.use(([event, ...args], next) => {
       socketEvents.inc({ event: typeof event === 'string' && event.length < 40 ? event : 'other' });
@@ -224,6 +261,7 @@ export const initializeSocketHandlers = (io) => {
     console.log(`User connected: ${socket.user.name} (${socket.id})`);
 
     socket.join(`user:${socket.user.id}`);
+    socket.join(socket.data.sessionRoom);
 
     // Cluster-wide presence (Redis, TTL'd, multi-tab aware). The DB flag is only a mirror, written on
     // transitions (first socket in / last socket out), not on every connect.
@@ -253,20 +291,22 @@ export const initializeSocketHandlers = (io) => {
           return;
         }
 
-        if (meeting.status === 'ended' || meeting.status === 'cancelled') {
-          socket.emit('error', { message: meeting.status === 'cancelled' ? 'This meeting was cancelled' : 'This meeting has ended' });
-          return;
-        }
-
-        if (meeting.status === 'scheduled' && isUpcoming(meeting) && !canManageMeeting(meeting, socket.user.id)) {
-          socket.emit('error', { message: 'This meeting has not started yet' });
+        if (!parseBreakoutRoomId(roomId)) {
+          const present = [...(roomParticipants.get(roomId)?.keys() || [])].filter((id) => id !== socket.user.id).length;
+          const refused = await admissionError(meeting, socket.user, { present });
+          if (refused) {
+            socket.emit('error', { message: refused.message, code: refused.code });
+            return;
+          }
+        } else if (meeting.status === 'ended' || meeting.status === 'cancelled') {
+          socket.emit('error', { message: 'This meeting has ended' });
           return;
         }
 
         // Meeting affinity: this meeting's state + media live on exactly one node. Anyone else is redirected.
         const guard = await ownershipGuard(roomId);
         if (guard?.redirect) { socket.emit('room:redirect', { roomId, ...guard.redirect }); return; }
-        if (guard?.error) { socket.emit('error', { message: guard.error }); return; }
+        if (guard?.error) { socket.emit('error', { message: guard.error, code: guard.code }); return; }
 
         cancelRoomClear(roomId);
         await restoreRuntime(roomId);
@@ -278,7 +318,7 @@ export const initializeSocketHandlers = (io) => {
             socket.emit('error', { message: 'This meeting is locked by the host' });
             return;
           }
-          if (meeting.settings?.waitingRoom) {
+          if (meeting.settings?.waitingRoom || roomRemoved.get(roomId)?.has(socket.user.id)) {
             if (!roomWaiting.has(roomId)) roomWaiting.set(roomId, new Map());
             const queue = roomWaiting.get(roomId);
             // waiting -> waiting is a no-op: a repeated knock (double click / reload) must not re-notify the hosts.
@@ -305,8 +345,13 @@ export const initializeSocketHandlers = (io) => {
           }
         }
 
+        // Attendance is recorded on whichever path actually let the person in
+        if (!parseBreakoutRoomId(roomId)) await recordAttendance(meeting, socket.user);
+
         socket.join(roomId);
         socket.roomId = roomId;
+        // closed while this person was on the way in: they were not in the room to hear it
+        await sendBackIfClosed(socket, roomId);
         if (socket.connected) {
           socket.data.inMeeting = true;
           syncMeetingStatus(io, socket.user.id);
@@ -445,6 +490,15 @@ export const initializeSocketHandlers = (io) => {
       if (typeof roomId !== 'string') return { error: 'roomId required' };
       const meeting = await loadRoomMeeting(roomId);
       if (!meeting || meeting.status === 'ended' || meeting.status === 'cancelled') return { error: 'Meeting not available' };
+      if (parseBreakoutRoomId(roomId)) {
+        if (!(await resolveBreakoutAccess(roomId, socket.user.id))) return { error: 'Breakout room is closed or not assigned to you' };
+      } else if (!socket.rooms.has(roomId)) {
+        const present = [...(roomParticipants.get(roomId)?.keys() || [])].filter((id) => id !== socket.user.id).length;
+        const refused = await admissionError(meeting, socket.user, { present });
+        if (refused) return { error: refused.message };
+        const let_in = canManageMeeting(meeting, socket.user.id) || roomAdmitted.get(roomId)?.has(socket.user.id);
+        if (meeting.settings?.isLocked && !let_in) return { error: 'This meeting is locked by the host' };
+      }
       return ownershipGuard(roomId);
     };
 
@@ -750,9 +804,9 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:mute-user', async ({ targetSocketId, roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
+        const meeting = await managedMeeting(roomId);
 
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+        if (meeting && inRoom(targetSocketId, roomId)) {
           io.to(targetSocketId).emit('host:force-mute');
           io.to(roomId).emit('host:user-muted', { targetSocketId });
         }
@@ -763,9 +817,9 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:remove-user', async ({ targetSocketId, roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
+        const meeting = await managedMeeting(roomId);
 
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+        if (meeting && inRoom(targetSocketId, roomId)) {
           const targetSocket = io.sockets.sockets.get(targetSocketId);
           const targetUserId = targetSocket?.user?.id;
           const callerIsHost = isMeetingHost(meeting, socket.user.id);
@@ -777,6 +831,13 @@ export const initializeSocketHandlers = (io) => {
             if (targetIsHost || (targetIsCoHost && !callerIsHost)) {
               return;
             }
+          }
+
+          if (targetUserId) {
+            if (!roomRemoved.has(roomId)) roomRemoved.set(roomId, new Set());
+            roomRemoved.get(roomId).add(targetUserId);
+            roomAdmitted.get(roomId)?.delete(targetUserId);
+            persistRuntime(roomId);
           }
 
           io.to(targetSocketId).emit('host:removed');
@@ -799,9 +860,9 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:end-meeting', async ({ roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
+        const meeting = await managedMeeting(roomId);
 
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+        if (meeting) {
           await endMeeting(meeting); // idempotent, bills minutes once
           io.to(roomId).emit('meeting:ended', {
             roomId,
@@ -853,6 +914,17 @@ export const initializeSocketHandlers = (io) => {
 
         if (!meeting) {
           socket.emit('error', { message: 'Meeting not found' });
+          return;
+        }
+
+        if (!socket.rooms.has(roomId)) {
+          socket.emit('error', { message: 'Join the meeting to send messages' });
+          return;
+        }
+
+        // A private message can only go to someone who is part of this meeting
+        if (recipientId && !(roomParticipants.get(roomId)?.has(recipientId) || (meeting.participantIds || []).includes(recipientId))) {
+          socket.emit('error', { message: 'That person is not in this meeting' });
           return;
         }
 
@@ -916,7 +988,7 @@ export const initializeSocketHandlers = (io) => {
 
         if (recipientId) {
           const recipient = await User.findByPk(recipientId, {
-            attributes: ['id', 'name', 'email', 'avatar']
+            attributes: ['id', 'name', 'avatar']
           });
           messageJson.recipient = recipient;
           io.to(`user:${socket.user.id}`).to(`user:${recipientId}`).emit('chat:message', messageJson);
@@ -979,6 +1051,7 @@ export const initializeSocketHandlers = (io) => {
     });
 
     socket.on('reaction:emoji', async ({ roomId, emoji }) => {
+      if (!socket.rooms.has(roomId)) return;
       if (await isBlocked(roomId, socket.user.id, 'allowReactions')) return;
       io.to(roomId).emit('reaction:emoji', {
         userId: socket.user.id,
@@ -989,8 +1062,8 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:force-video-off', async ({ targetSocketId, roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+        const meeting = await managedMeeting(roomId);
+        if (meeting && inRoom(targetSocketId, roomId)) {
           io.to(targetSocketId).emit('host:force-video-off');
         }
       } catch (error) {
@@ -1000,8 +1073,8 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:request-unmute', async ({ targetSocketId, roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+        const meeting = await managedMeeting(roomId);
+        if (meeting && inRoom(targetSocketId, roomId)) {
           io.to(targetSocketId).emit('host:request-unmute');
         }
       } catch (error) {
@@ -1011,8 +1084,8 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:mute-all', async ({ roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+        const meeting = await managedMeeting(roomId);
+        if (meeting) {
           socket.to(roomId).emit('host:force-mute');
         }
       } catch (error) {
@@ -1022,8 +1095,8 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:disable-all-video', async ({ roomId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+        const meeting = await managedMeeting(roomId);
+        if (meeting) {
           socket.to(roomId).emit('host:force-video-off');
         }
       } catch (error) {
@@ -1033,11 +1106,11 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:lock-meeting', async ({ roomId, isLocked }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
-          meeting.settings = { ...(meeting.settings || {}), isLocked };
+        const meeting = await managedMeeting(roomId);
+        if (meeting) {
+          meeting.settings = { ...(meeting.settings || {}), isLocked: !!isLocked };
           await meeting.save();
-          io.to(roomId).emit('host:meeting-locked', { isLocked });
+          io.to(roomId).emit('host:meeting-locked', { isLocked: !!isLocked });
         }
       } catch (error) {
         console.error('Host lock meeting error:', error);
@@ -1064,6 +1137,7 @@ export const initializeSocketHandlers = (io) => {
         if (!target) return; // they left while waiting: don't pre-admit them
         if (!roomAdmitted.has(roomId)) roomAdmitted.set(roomId, new Set());
         roomAdmitted.get(roomId).add(entry.user.id);
+        roomRemoved.get(roomId)?.delete(entry.user.id);
         persistRuntime(roomId);
         target.emit('room:admitted');
         await target.data.joinRoom?.({ roomId }, { admitted: true });
@@ -1082,8 +1156,8 @@ export const initializeSocketHandlers = (io) => {
 
     socket.on('host:spotlight', async ({ roomId, userId }) => {
       try {
-        const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+        const meeting = await managedMeeting(roomId);
+        if (meeting) {
           io.to(roomId).emit('host:spotlight', { userId });
         }
       } catch (error) {
@@ -1096,20 +1170,19 @@ export const initializeSocketHandlers = (io) => {
         const meeting = await Meeting.findOne({ where: { roomId } });
 
         // Only the actual host can promote co-hosts
-        if (meeting && isMeetingHost(meeting, socket.user.id)) {
+        if (meeting && socket.rooms.has(roomId) && inRoom(targetSocketId, roomId) && isMeetingHost(meeting, socket.user.id)) {
           const targetSocket = io.sockets.sockets.get(targetSocketId);
           if (targetSocket && targetSocket.user) {
             // Never promote the host itself
             if (isMeetingHost(meeting, targetSocket.user.id)) return;
 
-            const participants = meeting.participants || [];
-            const participant = participants.find(
-              p => p.userId === targetSocket.user.id
-            );
-            if (participant) {
-              participant.role = 'co-host';
-              meeting.participants = participants;
-              await meeting.save();
+            const changed = await updateLocked(Meeting, meeting.id, (row) => {
+              const entries = (row.participants || []).filter((p) => p.userId === targetSocket.user.id);
+              if (!entries.length) return false;
+              for (const entry of entries) entry.role = 'co-host';
+              return true;
+            });
+            if (changed?.result) {
 
               const roomUsers = roomParticipants.get(roomId);
               if (roomUsers && roomUsers.has(targetSocket.user.id)) {
@@ -1134,19 +1207,18 @@ export const initializeSocketHandlers = (io) => {
         const meeting = await Meeting.findOne({ where: { roomId } });
 
         // Only the actual host can demote co-hosts
-        if (meeting && isMeetingHost(meeting, socket.user.id)) {
+        if (meeting && socket.rooms.has(roomId) && inRoom(targetSocketId, roomId) && isMeetingHost(meeting, socket.user.id)) {
           const targetSocket = io.sockets.sockets.get(targetSocketId);
           if (targetSocket && targetSocket.user) {
             if (isMeetingHost(meeting, targetSocket.user.id)) return;
 
-            const participants = meeting.participants || [];
-            const participant = participants.find(
-              p => p.userId === targetSocket.user.id
-            );
-            if (participant && participant.role === 'co-host') {
-              participant.role = 'participant';
-              meeting.participants = participants;
-              await meeting.save();
+            const changed = await updateLocked(Meeting, meeting.id, (row) => {
+              const entries = (row.participants || []).filter((p) => p.userId === targetSocket.user.id && p.role === 'co-host');
+              if (!entries.length) return false;
+              for (const entry of entries) entry.role = 'participant';
+              return true;
+            });
+            if (changed?.result) {
 
               const roomUsers = roomParticipants.get(roomId);
               if (roomUsers && roomUsers.has(targetSocket.user.id)) {
@@ -1170,8 +1242,9 @@ export const initializeSocketHandlers = (io) => {
       try {
         const clean = sanitizeSettings(settings); // unknown keys / wrong types are dropped
         if (!Object.keys(clean).length) return;
-        const meeting = await Meeting.findOne({ where: { roomId } });
-        if (meeting && canManageMeeting(meeting, socket.user.id)) {
+        const meeting = await managedMeeting(roomId);
+        if (meeting) {
+          if ('maxParticipants' in clean) clean.maxParticipants = await capParticipants(meeting.hostId, clean.maxParticipants);
           meeting.settings = { ...(meeting.settings || {}), ...clean };
           await meeting.save();
           io.to(roomId).emit('meeting:settings-updated', { settings: clean });
@@ -1208,6 +1281,7 @@ export const initializeSocketHandlers = (io) => {
     });
 
     socket.on('caption:text', ({ roomId, text }) => {
+      if (!socket.rooms.has(roomId) || typeof text !== 'string') return;
       socket.to(roomId).emit('caption:text', {
         userId: socket.user.id,
         userName: socket.user.name,
@@ -1218,7 +1292,11 @@ export const initializeSocketHandlers = (io) => {
     // ---- Meeting tools: timer, live transcription, live streaming ----
 
     // Tools panel / badges ask for the current state when they mount
-    socket.on('tools:request', ({ roomId }) => emitToolsState(socket, roomId));
+    // A page asks for this once it is listening. For a breakout room that has closed meanwhile, the answer is
+    // "go back": the announcement itself may have been sent while the page was still loading.
+    socket.on('tools:request', async ({ roomId }) => {
+      if (!(await sendBackIfClosed(socket, roomId))) emitToolsState(socket, roomId);
+    });
 
     const requireManager = async (roomId) => {
       if (!socket.rooms.has(roomId)) return false;
@@ -1367,7 +1445,7 @@ export const initializeSocketHandlers = (io) => {
       try {
         const team = await Team.findByPk(teamId);
 
-        if (!team) {
+        if (!team || !team.isActive) {
           socket.emit('error', { message: 'Team not found' });
           return;
         }
@@ -1402,11 +1480,13 @@ export const initializeSocketHandlers = (io) => {
     });
 
     socket.on('team:leave', ({ teamId }) => {
+      if (!teamId) return;
       socket.leave(`team:${teamId}`);
       console.log(`${socket.user.name} left team: ${teamId}`);
     });
 
     socket.on('team:typing', ({ teamId, channelType, isTyping }) => {
+      if (!socket.rooms.has(`team:${teamId}`)) return;
       socket.to(`team:${teamId}`).emit('team:user-typing', {
         userId: socket.user.id,
         userName: socket.user.name,
@@ -1441,6 +1521,7 @@ export const initializeSocketHandlers = (io) => {
     });
 
     socket.on('conversation:typing', ({ conversationId, isTyping }) => {
+      if (!socket.rooms.has(`conversation:${conversationId}`)) return;
       socket.to(`conversation:${conversationId}`).emit('conversation:user-typing', {
         userId: socket.user.id,
         userName: socket.user.name,

@@ -9,10 +9,17 @@ import Notification from '../models/Notification.js';
 import Team from '../models/Team.js';
 import { protect } from '../middleware/auth.js';
 import logAudit from '../services/auditService.js';
+import { requirePermission } from '../lib/permissions.js';
+import { contactIdsOf, maskEmail } from '../lib/access.js';
+import { removeFromRoom } from '../realtime/sessions.js';
+import FileEntry from '../models/FileEntry.js';
+import { myTeams } from '../models/membership.js';
 
 const router = express.Router();
 
 const USER_ATTRS = ['id', 'name', 'email', 'avatar', 'customStatus', 'statusEmoji', 'statusExpiresAt', 'title', 'isOnline', 'lastSeen'];
+
+const SENDER_ATTRS = USER_ATTRS.filter((a) => a !== 'email');
 
 const memberInclude = () => ({
   model: ConversationMember,
@@ -30,8 +37,18 @@ const isMember = async (conversationId, userId) => {
   return membership;
 };
 
-const hydrateConversation = async (conversation, userId) => {
+const hydrateConversation = async (conversation, userId, knownContacts) => {
   const json = conversation.toJSON();
+  // Opening a chat with a stranger must not reveal their address
+  const contacts = knownContacts || await contactIdsOf(userId);
+  json.members = (json.members || []).map((m) => {
+    const member = typeof m.toJSON === 'function' ? m.toJSON() : { ...m };
+    if (member.user && member.userId !== userId && !contacts.has(member.userId)) {
+      const user = typeof member.user.toJSON === 'function' ? member.user.toJSON() : { ...member.user };
+      member.user = { ...user, email: maskEmail(user.email) };
+    }
+    return member;
+  });
   const me = (json.members || []).find(m => m.userId === userId);
   const others = (json.members || []).filter(m => m.userId !== userId);
   const unread = await Message.count({
@@ -69,7 +86,8 @@ router.get('/', protect, async (req, res) => {
       limit: 100
     });
 
-    const hydrated = await Promise.all(conversations.map(c => hydrateConversation(c, req.user.id)));
+    const contacts = await contactIdsOf(req.user.id);
+    const hydrated = await Promise.all(conversations.map(c => hydrateConversation(c, req.user.id, contacts)));
     res.json({ success: true, data: { conversations: hydrated } });
   } catch (error) {
     console.error('List conversations error:', error);
@@ -183,10 +201,8 @@ router.post('/', protect, async (req, res) => {
 // People I can chat with: users sharing a team with me
 router.get('/people/contacts', protect, async (req, res) => {
   try {
-    const teams = await Team.findAll({ where: { isActive: true } });
-    const myTeams = teams.filter(t => t.isMember(req.user.id));
     const contactIds = new Set();
-    myTeams.forEach(team => {
+    (await myTeams(req.user.id)).forEach(team => {
       (team.members || []).forEach(m => {
         const id = m.userId || m.id;
         if (id && id !== req.user.id) contactIds.add(id);
@@ -212,20 +228,13 @@ router.get('/people/contacts', protect, async (req, res) => {
 
 // Anyone on the platform, by name. "Contacts" (teammates and people I already chat with) come first.
 // Only contacts' addresses are shown in full; others are masked so the search can't harvest emails.
-const maskEmail = (email) => email.replace(/^(.{1,2})[^@]*/, '$1***');
 
 router.get('/people/search', protect, async (req, res) => {
   try {
     const q = String(req.query.q || '').trim().slice(0, 100);
     if (q.length < 2) return res.json({ success: true, data: { people: [] } });
 
-    const teams = await Team.findAll({ where: { isActive: true } });
-    const contactIds = new Set(teams.filter(t => t.isMember(req.user.id)).flatMap(t => (t.members || []).map(m => m.userId)));
-    const conversationIds = await getMyConversationIds(req.user.id);
-    if (conversationIds.length) {
-      const peers = await ConversationMember.findAll({ where: { conversationId: conversationIds }, attributes: ['userId'] });
-      peers.forEach(p => contactIds.add(p.userId));
-    }
+    const contactIds = await contactIdsOf(req.user.id);
 
     const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
     const matches = { isActive: true, id: { [Op.ne]: req.user.id }, [Op.or]: [{ name: { [Op.like]: like } }, { email: q.toLowerCase() }] };
@@ -282,7 +291,7 @@ router.get('/:conversationId/messages', protect, async (req, res) => {
         limit: clampLimit(limit),
         query: (extra, n) => Message.findAll({
           where: extra ? { [Op.and]: [whereClause, extra] } : whereClause,
-          include: [{ model: User, as: 'sender', attributes: USER_ATTRS }],
+          include: [{ model: User, as: 'sender', attributes: SENDER_ATTRS }],
           order: ORDER_NEWEST_FIRST,
           limit: n,
         }),
@@ -295,7 +304,7 @@ router.get('/:conversationId/messages', protect, async (req, res) => {
 
     const messages = await Message.findAll({
       where: whereClause,
-      include: [{ model: User, as: 'sender', attributes: USER_ATTRS }],
+      include: [{ model: User, as: 'sender', attributes: SENDER_ATTRS }],
       order: [['createdAt', 'DESC']],
       limit: parseInt(limit)
     });
@@ -309,7 +318,7 @@ router.get('/:conversationId/messages', protect, async (req, res) => {
 });
 
 // Send a message to a conversation
-router.post('/:conversationId/messages', protect, async (req, res) => {
+router.post('/:conversationId/messages', protect, requirePermission('chat.send'), async (req, res) => {
   try {
     const membership = await isMember(req.params.conversationId, req.user.id);
     if (!membership) {
@@ -321,7 +330,24 @@ router.post('/:conversationId/messages', protect, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Conversation not found' });
     }
 
-    const { content, type = 'text', fileUrl, fileName, fileType, fileSize, replyToId, mentions = [] } = req.body;
+    const { content, type = 'text', fileUrl, replyToId } = req.body;
+    let { fileName, fileType, fileSize } = req.body;
+    const mentions = Array.isArray(req.body.mentions) ? req.body.mentions.filter((id) => (conversation.members || []).some((m) => m.userId === id)) : [];
+    // "system" notices are written by the server only
+    if (!['text', 'file', 'meeting_link'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'Unknown message type' });
+    }
+    if (replyToId && !(await Message.findOne({ where: { id: replyToId, conversationId: conversation.id }, attributes: ['id'] }))) {
+      return res.status(400).json({ success: false, message: 'That message is not part of this conversation' });
+    }
+    // An attachment must be a file this person uploaded: never a URL of their choosing
+    if (type === 'file' || fileUrl) {
+      const file = typeof fileUrl === 'string' ? await FileEntry.findOne({ where: { url: fileUrl, ownerId: req.user.id, isDeleted: false } }) : null;
+      if (!file) return res.status(400).json({ success: false, message: 'Attach a file you have uploaded' });
+      fileName = file.originalName;
+      fileType = file.mimeType;
+      fileSize = file.size;
+    }
     if ((!content || content.trim() === '') && type !== 'file') {
       return res.status(400).json({ success: false, message: 'Message content is required' });
     }
@@ -348,7 +374,7 @@ router.post('/:conversationId/messages', protect, async (req, res) => {
     await membership.update({ lastReadAt: new Date() });
 
     const fullMessage = await Message.findByPk(message.id, {
-      include: [{ model: User, as: 'sender', attributes: USER_ATTRS }]
+      include: [{ model: User, as: 'sender', attributes: SENDER_ATTRS }]
     });
 
     const io = req.app.get('io');
@@ -479,6 +505,7 @@ router.delete('/:conversationId/members/:userId', protect, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Owner cannot leave; delete the group instead' });
     }
     await ConversationMember.destroy({ where: { conversationId: conversation.id, userId: req.params.userId } });
+    removeFromRoom(req.app.get('io'), req.params.userId, `conversation:${conversation.id}`);
     const io = req.app.get('io');
     io.to(`conversation:${conversation.id}`).emit('conversation:member-removed', { userId: req.params.userId });
     res.json({ success: true });

@@ -6,20 +6,16 @@ const API_URL = import.meta.env.DEV
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
-  // Cross-origin dev setups (VITE_API_URL) need this for the HttpOnly /uploads access cookie to be stored; same-origin is unaffected
-  withCredentials: !!API_URL
+  // Cross-origin dev setups (VITE_API_URL) need this for the HttpOnly cookies; same-origin is unaffected
+  withCredentials: !!API_URL,
+  // The session is an HttpOnly cookie the page cannot read; the server only accepts it with this header
+  headers: { 'X-Client': 'web' }
 })
 
-// Add token to requests
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
   const isFormData = typeof FormData !== 'undefined' && config.data instanceof FormData
 
   config.headers = config.headers || {}
-
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
 
   if (isFormData) {
     if (typeof config.headers.delete === 'function') {
@@ -45,7 +41,6 @@ api.interceptors.response.use(
     // login form is also a 401, and must stay on the page so the error can be shown.
     const suspended = status === 403 && /suspended/i.test(error.response?.data?.message || '')
     if ((status === 401 || suspended) && !isCredentialCall) {
-      localStorage.removeItem('token')
       localStorage.removeItem('user')
       if (window.location.pathname !== '/login') window.location.href = '/login'
     }

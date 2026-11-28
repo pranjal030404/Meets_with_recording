@@ -2,14 +2,24 @@ import express from 'express';
 import crypto from 'crypto';
 import { Op } from 'sequelize';
 import User from '../models/User.js';
-import { protect, generateToken, clearAssetCookie, revokeToken, syncAssetCookie } from '../middleware/auth.js';
-import { ensureSubscription, getSubscriptionDetails } from '../services/subscriptionService.js';
+import { protect, generateToken, generateSocketTicket, clearSessionCookies, revokeToken, syncAssetCookie } from '../middleware/auth.js';
+import { handOver } from '../lib/webSession.js';
+import { knownDevice, rememberDevice } from '../lib/knownDevice.js';
+import { getSubscriptionDetails, getPlanBySlug } from '../services/subscriptionService.js';
 import { getSetting } from '../services/settingsService.js';
 import { isSmtpConfigured, sendVerificationEmail, sendPasswordCodeEmail } from '../services/mailService.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { issueCode, consumeCode, clearCode } from '../services/otpService.js';
 import { revokeUserSessions } from '../lib/sessionRevocation.js';
+import { MIN_PASSWORD_LENGTH } from '../lib/password.js';
+import { tooManyAttempts, recordFailure, clearFailures } from '../lib/loginThrottle.js';
+import { disconnectSession, disconnectUser } from '../realtime/sessions.js';
+import { contactIdsOf, maskEmail } from '../lib/access.js';
+import { sendPasswordResetEmail } from '../services/mailService.js';
 import { handleAvatarUpload, saveAvatar, clearAvatar, pickProfileFields } from '../services/avatarService.js';
+import { exportAccount, eraseAccount, AccountError } from '../services/accountService.js';
+import { sendAccountExistsEmail } from '../services/mailService.js';
+import { hashPassword } from '../lib/password.js';
 
 const router = express.Router();
 
@@ -30,6 +40,10 @@ async function issueVerification(user) {
   await sendVerificationEmail(user, token);
 }
 
+// With verification off, signup has to say that an address is taken (the new account would sign in at once), so how
+// often one place may be told that is limited: it slows somebody listing accounts, it cannot stop them
+const takenAnswers = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, prefix: 'rl:signup-taken' });
+
 router.post('/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -41,15 +55,44 @@ router.post('/signup', async (req, res) => {
       });
     }
 
+    if (name.trim().length < 2) {
+      return res.status(400).json({ success: false, message: 'Name needs at least 2 characters' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid email address' });
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ success: false, message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+    }
+    // The server must be set up before it creates anyone, or the account is left half made
+    await getPlanBySlug('free');
+
+    const needsVerification = await verificationRequired();
+
+    // checked before the lookup, so that a refused caller learns nothing about the address
+    if (!needsVerification && await takenAnswers.count(req.ip) >= 10) {
+      return res.status(429).json({ success: false, message: 'Too many attempts. Try again in 15 minutes.' });
+    }
+
     const existingUser = await User.findOne({ where: { email: email.toLowerCase() } });
     if (existingUser) {
+      // With verification on, the answer is the same as for a new address, so it does not tell who has an account:
+      // the owner of the address is told by email instead. Without it a new account signs in at once, so it cannot be hidden.
+      if (needsVerification) {
+        await hashPassword(password); // costs what creating the account would
+        sendAccountExistsEmail(existingUser).catch((e) => console.error('Account notice failed:', e.message));
+        return res.status(201).json({
+          success: true,
+          message: 'Account created. Check your email to verify your address.',
+          data: { requiresVerification: true, emailSent: true, email: existingUser.email }
+        });
+      }
+      await takenAnswers.hit(req.ip);
       return res.status(400).json({
         success: false,
         message: 'User with this email already exists'
       });
     }
-
-    const needsVerification = await verificationRequired();
 
     // When verification is off, accounts are treated as verified so turning it on later never locks them out.
     const user = await User.create({
@@ -88,11 +131,18 @@ router.post('/signup', async (req, res) => {
       data: {
         user: user.toJSON(),
         subscription,
-        token
+        ...handOver(req, res, token),
+        ...rememberDevice(req, res, user.email)
       }
     });
   } catch (error) {
     console.error('Signup error:', error);
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).json({ success: false, message: 'User with this email already exists' });
+    }
+    if (error.code === 'PLAN_NOT_FOUND') {
+      return res.status(503).json({ success: false, message: 'The server is not set up yet. Ask the administrator to run the database migrations.' });
+    }
     res.status(500).json({
       success: false,
       message: 'Error creating account',
@@ -112,12 +162,18 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    const account = email.toLowerCase();
+    // an emailed reset code proves ownership, so it is the way in for an owner refused because of somebody else
+    const hint = isSmtpConfigured() ? ' Or use “Forgot password?” to get in now.' : '';
+    if (await tooManyAttempts(req, res, account, hint)) return;
+
     const user = await User.findOne({
-      where: { email: email.toLowerCase() },
+      where: { email: account },
       attributes: { include: ['password'] }
     });
 
     if (!user) {
+      await recordFailure(req, account);
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
@@ -127,6 +183,7 @@ router.post('/login', async (req, res) => {
     const isMatch = await user.comparePassword(password);
 
     if (!isMatch) {
+      await recordFailure(req, account);
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
@@ -148,6 +205,7 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    await clearFailures(req, account);
     // isOnline is owned by the socket connect/disconnect handlers, not by login
     const token = generateToken(user.id);
     syncAssetCookie(req, res, token);
@@ -157,7 +215,8 @@ router.post('/login', async (req, res) => {
       message: 'Login successful',
       data: {
         user: user.toJSON(),
-        token
+        ...handOver(req, res, token),
+        ...rememberDevice(req, res, user.email)
       }
     });
   } catch (error) {
@@ -202,16 +261,118 @@ router.post('/resend-verification', async (req, res) => {
     const user = await User.findOne({ where: { email: String(email).toLowerCase() } });
     if (user && !user.isEmailVerified && user.isActive !== false) {
       const last = user.emailVerifySentAt ? user.emailVerifySentAt.getTime() : 0;
-      if (Date.now() - last < RESEND_COOLDOWN_MS) {
-        return res.status(429).json({ success: false, message: 'Please wait a minute before requesting another email.' });
-      }
-      await issueVerification(user);
+      // inside the cooldown nothing is sent, and the answer does not change
+      if (Date.now() - last >= RESEND_COOLDOWN_MS) await issueVerification(user);
     }
     res.json(generic);
   } catch (error) {
     console.error('Resend verification error:', error);
     res.status(500).json({ success: false, message: 'Could not send the verification email. Try again later.' });
   }
+});
+
+// Forgotten password: a one-time code by email, then a new password. Never says whether an account exists.
+const RESET_SENT = { success: true, message: 'If that account exists, a reset code has been emailed to it.' };
+const resetKey = (userId) => `reset:${userId}`;
+// A six-digit code can be re-requested every minute, so the wrong guesses themselves are counted, whether or not an
+// account exists: 10 a day from one place and 50 for the address as a whole. A device that has signed in before has
+// its own 10, so strangers cannot use up the owner's chances.
+const DAY = 24 * 60 * 60 * 1000;
+const resetGuesses = createRateLimiter({ windowMs: DAY, max: 10, prefix: 'rl:reset', durable: true });
+const resetForAddress = createRateLimiter({ windowMs: DAY, max: 50, prefix: 'rl:reset-all', durable: true });
+const resetCounters = (req, email) => {
+  const device = knownDevice(req, email);
+  return device ? [[resetGuesses, `${email}|${device}`, 10]] : [[resetGuesses, `${email}|${req.ip}`, 10], [resetForAddress, email, 50]];
+};
+
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+    if (!isSmtpConfigured()) {
+      return res.status(503).json({ success: false, message: 'Password reset by email is not set up on this server. Ask your administrator.' });
+    }
+    const user = await User.findOne({ where: { email } });
+    if (user && user.isActive !== false) {
+      const code = await issueCode(resetKey(user.id)); // null inside the one-minute cooldown
+      if (code) sendPasswordResetEmail(user, code).catch((e) => console.error('Reset email failed:', e.message));
+    }
+    res.json(RESET_SENT);
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ success: false, message: 'Could not start the password reset' });
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const { code, newPassword } = req.body;
+    if (!email || !code || typeof newPassword !== 'string') {
+      return res.status(400).json({ success: false, message: 'Email, code and new password are required' });
+    }
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ success: false, message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+    }
+    const counters = resetCounters(req, email);
+    for (const [limiter, key, max] of counters) {
+      if (await limiter.count(key) >= max) {
+        return res.status(429).json({ success: false, message: 'Too many wrong codes. Try again tomorrow, or ask your administrator.' });
+      }
+    }
+    const user = await User.findOne({ where: { email }, attributes: { include: ['password'] } });
+    if (!user || user.isActive === false || !(await consumeCode(resetKey(user.id), code))) {
+      for (const [limiter, key] of counters) await limiter.hit(key);
+      return res.status(400).json({ success: false, message: 'That code is wrong or has expired' });
+    }
+    user.password = newPassword; // hashed by the model hook
+    user.isEmailVerified = true; // they have just shown they read this address
+    await user.save();
+    await revokeUserSessions(user.id);
+    disconnectUser(req.app.get('io'), user.id);
+    // reading the emailed code proves ownership: this device can sign in even while strangers are guessing,
+    // and wrong passwords typed on it before the reset no longer count
+    await clearFailures(req, email);
+    res.json({ success: true, message: 'Password changed. Sign in with your new password.', data: rememberDevice(req, res, email) });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ success: false, message: 'Could not reset the password' });
+  }
+});
+
+// Everything the service holds about the signed-in person, as one download
+router.get('/me/export', protect, async (req, res) => {
+  try {
+    res.setHeader('Content-Disposition', 'attachment; filename="my-data.json"');
+    res.json(await exportAccount(req.user.id));
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({ success: false, message: 'Could not export your data' });
+  }
+});
+
+// Delete the signed-in person's account. The password is asked again: a borrowed session must not be enough.
+router.delete('/me', protect, async (req, res) => {
+  try {
+    const account = `delete:${req.user.id}`;
+    if (await tooManyAttempts(req, res, account)) return;
+    if (!req.body?.password || !(await req.user.comparePassword(req.body.password))) {
+      await recordFailure(req, account);
+      return res.status(403).json({ success: false, message: 'The password is not correct' });
+    }
+    await eraseAccount(req.user.id, req.app.get('io'));
+    clearSessionCookies(req, res);
+    res.json({ success: true, message: 'Your account has been deleted' });
+  } catch (error) {
+    if (error instanceof AccountError) return res.status(error.status).json({ success: false, message: error.message });
+    console.error('Account deletion error:', error);
+    res.status(500).json({ success: false, message: 'Could not delete the account' });
+  }
+});
+
+// For the web app, which cannot read its session cookie, to open its live connection
+router.get('/socket-ticket', protect, (req, res) => {
+  res.json({ success: true, data: { ticket: generateSocketTicket(req.user.id, req.sessionToken) } });
 });
 
 router.get('/me', protect, async (req, res) => {
@@ -235,6 +396,9 @@ router.get('/me', protect, async (req, res) => {
 
 router.put('/profile', protect, async (req, res) => {
   try {
+    if (req.body.name !== undefined && String(req.body.name).trim().length < 2) {
+      return res.status(400).json({ success: false, message: 'Name needs at least 2 characters' });
+    }
     const updateData = pickProfileFields(req.body);
     if (Object.keys(updateData).length) await User.update(updateData, { where: { id: req.user.id } });
 
@@ -304,10 +468,11 @@ router.post('/change-password', protect, async (req, res) => {
     req.user.password = req.body.newPassword; // hashed by the model hook
     await req.user.save();
     await revokeUserSessions(req.user.id);
+    disconnectUser(req.app.get('io'), req.user.id);
 
     const token = generateToken(req.user.id);
     syncAssetCookie(req, res, token); // replaces the cookie holding the just-revoked token
-    res.json({ success: true, message: 'Password changed', data: { token } });
+    res.json({ success: true, message: 'Password changed', data: handOver(req, res, token) });
   } catch (error) {
     console.error('Change password error:', error);
     res.status(500).json({ success: false, message: 'Error changing password' });
@@ -345,7 +510,13 @@ router.get('/users/:id', protect, async (req, res) => {
         'customStatus', 'statusEmoji', 'statusExpiresAt', 'isOnline', 'lastSeen']
     });
     if (!u) return res.status(404).json({ success: false, message: 'User not found' });
-    res.json({ success: true, data: { user: u.toJSON() } });
+    const user = u.toJSON();
+    // the full address is for yourself, teammates and people who have written to you
+    if (u.id !== req.user.id && !(await contactIdsOf(req.user.id)).has(u.id)) {
+      user.email = maskEmail(user.email);
+      delete user.phone;
+    }
+    res.json({ success: true, data: { user } });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Error loading profile' });
   }
@@ -387,9 +558,9 @@ router.post('/logout', protect, async (req, res) => {
       { isOnline: false, lastSeen: new Date() },
       { where: { id: req.user.id } }
     );
-    clearAssetCookie(res);
-    const bearer = req.headers.authorization?.startsWith('Bearer') ? req.headers.authorization.split(' ')[1] : null;
-    if (bearer) await revokeToken(bearer); // logout now really ends the session on every node
+    clearSessionCookies(req, res);
+    await revokeToken(req.sessionToken); // logout now really ends the session on every node
+    disconnectSession(req.app.get('io'), req.sessionToken);
 
     res.json({
       success: true,

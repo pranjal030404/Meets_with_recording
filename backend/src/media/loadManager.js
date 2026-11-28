@@ -60,14 +60,14 @@ export const utilisation = (node, limits) => ({
  * @returns {number|null} score (lower = better) or null if the node must not receive new meetings
  * (unhealthy, draining, stale, or any limited dimension already >= 100%).
  */
-export const scoreNode = (node, { limits, weights, region, now = Date.now(), ttlMs }) => {
+export const scoreNode = (node, { limits, weights, region, now = Date.now(), ttlMs, lastResort = false }) => {
   if (node.status !== 'healthy' || node.draining) return null;
   if (ttlMs && now - node.ts > ttlMs) return null;
   const u = utilisation(node, limits);
   let sum = 0, wsum = 0;
   for (const [dim, ratio] of Object.entries(u)) {
     if (ratio == null) continue;
-    if (ratio >= 1) return null;
+    if (ratio >= 1 && !(lastResort && (dim === 'cpu' || dim === 'memory'))) return null;
     const w = weights[dim] ?? 0;
     sum += w * ratio; wsum += w;
   }
@@ -75,11 +75,18 @@ export const scoreNode = (node, { limits, weights, region, now = Date.now(), ttl
   return base + (region && node.region !== region ? weights.regionMismatch : 0);
 };
 
-export const pickBestNode = (nodes, ctx) => {
-  let best = null, bestScore = Infinity;
+const best = (nodes, ctx) => {
+  let node = null, score = Infinity;
   for (const n of nodes) {
     const s = scoreNode(n, ctx);
-    if (s != null && (s < bestScore || (s === bestScore && n.nodeId < best.nodeId))) { best = n; bestScore = s; }
+    if (s != null && (s < score || (s === score && n.nodeId < node.nodeId))) { node = n; score = s; }
   }
-  return best ? { node: best, score: bestScore } : null;
+  return node ? { node, score } : null;
 };
+
+/**
+ * CPU and memory are momentary readings: they steer new meetings to a calmer node, but when every node is over them
+ * (a single server during a spike, say) the least loaded one still takes the meeting rather than nobody being able to
+ * start one. Limits the operator set (SFU_MAX_CONSUMERS and the like), draining and ill health still refuse.
+ */
+export const pickBestNode = (nodes, ctx) => best(nodes, ctx) || best(nodes, { ...ctx, lastResort: true });

@@ -23,6 +23,12 @@ class Config {
 
   static String get apiUrl => '$serverUrl/api';
 
+  /// Marks this phone as one that has signed in before, so other people's wrong guesses cannot lock it out.
+  static String? get deviceToken => _prefs.getString('deviceToken');
+  static Future<void> rememberDevice(Object? token) async {
+    if (token is String) await _prefs.setString('deviceToken', token);
+  }
+
   static String? get token => _prefs.getString('token');
   static Future<void> setToken(String? t) async {
     if (t == null) {

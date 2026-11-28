@@ -6,17 +6,44 @@ import Notification from '../models/Notification.js';
 import { protect } from '../middleware/auth.js';
 
 import { requirePermission } from '../lib/permissions.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 import { isSmtpConfigured, sendTeamInviteEmail } from '../services/mailService.js';
+import { updateLocked } from '../lib/locked.js';
+import { removeFromRoom } from '../realtime/sessions.js';
+import { assertWithin, withUserLock } from '../services/subscriptionService.js';
+import { myTeams } from '../models/membership.js';
 
 const router = express.Router();
 
 router.use(protect);
 
+const addTeamMember = async (team, user, role) => {
+  await updateLocked(Team, team.id, (row) => {
+    if ((row.members || []).some((m) => m.userId === user.id)) return false;
+    row.members = [...(row.members || []), {
+      id: uuidv4(),
+      userId: user.id,
+      user: { id: user.id, name: user.name, email: user.email, avatar: user.avatar },
+      role,
+      joinedAt: new Date().toISOString(),
+      notifications: { meetings: true, chat: true, mentions: true }
+    }];
+  });
+  await team.reload();
+};
+
 router.post('/', requirePermission('teams.create'), async (req, res) => {
   try {
     const { name, description, settings } = req.body;
+    if (typeof name !== 'string' || name.trim().length < 2) {
+      return res.status(400).json({ message: 'Team name needs at least 2 characters' });
+    }
 
-    const team = await Team.create({
+    const { team, refused } = await withUserLock(req.user.id, async () => {
+    const owned = await Team.count({ where: { ownerId: req.user.id, isActive: true } });
+    const quota = await assertWithin(req.user.id, 'maxTeams', owned, 1, 'teams');
+    if (!quota.allowed) return { refused: quota.reason };
+    return { team: await Team.create({
       name,
       description,
       ownerId: req.user.id,
@@ -34,7 +61,9 @@ router.post('/', requirePermission('teams.create'), async (req, res) => {
         { id: uuidv4(), name: 'meetings', type: 'meetings', description: 'Meeting links and schedules' },
         { id: uuidv4(), name: 'announcements', type: 'announcements', description: 'Important team announcements' }
       ]
+    }) };
     });
+    if (refused) return res.status(403).json({ message: refused, code: 'PLAN_LIMIT_REACHED' });
 
     res.status(201).json(team.toJSON());
   } catch (error) {
@@ -45,11 +74,7 @@ router.post('/', requirePermission('teams.create'), async (req, res) => {
 
 router.get('/', async (req, res) => {
   try {
-    const teams = await Team.findAll({
-      where: { isActive: true }
-    });
-
-    const userTeams = teams.filter(t => t.isMember(req.user.id));
+    const userTeams = await myTeams(req.user.id);
 
     const usersMap = {};
     const ownerIds = [...new Set(userTeams.map(t => t.ownerId))];
@@ -123,7 +148,12 @@ router.put('/:teamId', async (req, res) => {
 
     if (name) team.name = name;
     if (description !== undefined) team.description = description;
-    if (settings) team.settings = { ...(team.settings || {}), ...settings };
+    if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+      const next = { ...(team.settings || {}) };
+      for (const key of ['allowMemberInvite', 'allowGuestJoin']) if (typeof settings[key] === 'boolean') next[key] = settings[key];
+      if (settings.defaultMeetingSettings && typeof settings.defaultMeetingSettings === 'object') next.defaultMeetingSettings = settings.defaultMeetingSettings;
+      team.settings = next;
+    }
 
     await team.save();
 
@@ -148,6 +178,7 @@ router.delete('/:teamId', async (req, res) => {
 
     team.isActive = false;
     await team.save();
+    req.app.get('io')?.socketsLeave(`team:${team.id}`);
 
     res.json({ message: 'Team deleted successfully' });
   } catch (error) {
@@ -167,7 +198,7 @@ router.post('/:teamId/invite', async (req, res) => {
     }
 
     const userRole = team.getMemberRole(req.user.id);
-    if (!team.settings || (!team.settings.allowMemberInvite && !['owner', 'admin'].includes(userRole))) {
+    if (!userRole || (!team.settings?.allowMemberInvite && !['owner', 'admin'].includes(userRole))) {
       return res.status(403).json({ message: 'You do not have permission to invite members' });
     }
 
@@ -209,17 +240,7 @@ router.post('/:teamId/invite', async (req, res) => {
       return res.status(400).json({ message: 'User is already a member of this team' });
     }
 
-    const members = [...(team.members || [])];
-    members.push({
-      id: uuidv4(),
-      userId: userToInvite.id,
-      user: { id: userToInvite.id, name: userToInvite.name, email: userToInvite.email, avatar: userToInvite.avatar },
-      role,
-      joinedAt: new Date().toISOString(),
-      notifications: { meetings: true, chat: true, mentions: true }
-    });
-    team.members = members;
-    await team.save();
+    await addTeamMember(team, userToInvite, role);
 
     await Notification.create({
       recipientId: userToInvite.id,
@@ -242,11 +263,19 @@ router.post('/:teamId/invite', async (req, res) => {
   }
 });
 
-router.post('/join/:inviteCode', async (req, res) => {
+// Wrong codes are counted per account, so codes cannot be tried one after another
+const wrongCodes = createRateLimiter({ windowMs: 60 * 60 * 1000, max: 20, prefix: 'rl:invite', durable: true });
+
+// one attempt at a time per account, so a burst cannot all pass the count before any failure is recorded
+router.post('/join/:inviteCode', (req, res) => withUserLock(`invite:${req.user.id}`, async () => {
   try {
+    if (await wrongCodes.count(req.user.id) >= 20) {
+      return res.status(429).json({ message: 'Too many wrong invite codes. Try again in an hour.' });
+    }
     const team = await Team.findOne({ where: { inviteCode: req.params.inviteCode, isActive: true } });
 
     if (!team) {
+      await wrongCodes.hit(req.user.id);
       return res.status(404).json({ message: 'Invalid invite code' });
     }
 
@@ -255,24 +284,14 @@ router.post('/join/:inviteCode', async (req, res) => {
     }
 
     const role = (team.settings && team.settings.allowGuestJoin) ? 'guest' : 'member';
-    const members = team.members || [];
-    members.push({
-      id: uuidv4(),
-      userId: req.user.id,
-      user: { id: req.user.id, name: req.user.name, email: req.user.email, avatar: req.user.avatar },
-      role,
-      joinedAt: new Date().toISOString(),
-      notifications: { meetings: true, chat: true, mentions: true }
-    });
-    team.members = members;
-    await team.save();
+    await addTeamMember(team, req.user, role);
 
     res.json({ message: 'Successfully joined team', team: team.toJSON() });
   } catch (error) {
     console.error('Error joining team:', error);
     res.status(500).json({ message: 'Failed to join team', error: error.message });
   }
-});
+}).catch((error) => res.status(500).json({ message: 'Failed to join team', error: error.message })));
 
 router.put('/:teamId/members/:userId/role', async (req, res) => {
   try {
@@ -286,6 +305,9 @@ router.put('/:teamId/members/:userId/role', async (req, res) => {
     if (!team.isOwnerOrAdmin(req.user.id)) {
       return res.status(403).json({ message: 'Only owners and admins can update member roles' });
     }
+    if (!['member', 'admin', 'guest'].includes(role)) {
+      return res.status(400).json({ message: 'Role must be member, admin or guest' });
+    }
 
     const members = team.members || [];
     const member = members.find(m => m.userId === req.params.userId);
@@ -297,9 +319,10 @@ router.put('/:teamId/members/:userId/role', async (req, res) => {
       return res.status(403).json({ message: 'Cannot change owner role' });
     }
 
-    member.role = role;
-    team.members = members;
-    await team.save();
+    await updateLocked(Team, team.id, (row) => {
+      for (const m of row.members || []) if (m.userId === req.params.userId && m.role !== 'owner') m.role = role;
+    });
+    await team.reload();
 
     res.json({ message: 'Member role updated successfully', team: team.toJSON() });
   } catch (error) {
@@ -328,8 +351,11 @@ router.delete('/:teamId/members/:userId', async (req, res) => {
       return res.status(403).json({ message: 'Cannot remove team owner' });
     }
 
-    team.members = members.filter(m => m.userId !== req.params.userId);
-    await team.save();
+    await updateLocked(Team, team.id, (row) => {
+      row.members = (row.members || []).filter(m => m.userId !== req.params.userId);
+    });
+    await team.reload();
+    removeFromRoom(req.app.get('io'), req.params.userId, `team:${team.id}`);
 
     res.json({ message: 'Member removed successfully', team: team.toJSON() });
   } catch (error) {
@@ -357,11 +383,15 @@ router.put('/:teamId/members/:userId/notifications', async (req, res) => {
       return res.status(404).json({ message: 'Member not found' });
     }
 
-    member.notifications = { ...(member.notifications || {}), ...notifications };
-    team.members = members;
-    await team.save();
+    const prefs = {};
+    for (const key of ['meetings', 'chat', 'mentions']) if (typeof notifications?.[key] === 'boolean') prefs[key] = notifications[key];
+    const updated = await updateLocked(Team, team.id, (row) => {
+      const mine = (row.members || []).find((m) => m.userId === req.user.id);
+      mine.notifications = { ...(mine.notifications || {}), ...prefs };
+      return mine.notifications;
+    });
 
-    res.json({ message: 'Notification preferences updated', notifications: member.notifications });
+    res.json({ message: 'Notification preferences updated', notifications: updated.result });
   } catch (error) {
     console.error('Error updating notifications:', error);
     res.status(500).json({ message: 'Failed to update notification preferences', error: error.message });
@@ -452,7 +482,7 @@ router.post('/:teamId/regenerate-code', async (req, res) => {
       return res.status(403).json({ message: 'Only owners and admins can regenerate invite code' });
     }
 
-    team.inviteCode = uuidv4().split('-')[0];
+    team.inviteCode = uuidv4().replace(/-/g, '').slice(0, 16);
     await team.save();
 
     res.json({ message: 'Invite code regenerated', inviteCode: team.inviteCode });

@@ -122,7 +122,7 @@ export default function ChatPanel({ roomId, onClose }) {
       {/* Header */}
       <div className="px-4 py-3.5 border-b border-white/[0.06] flex items-center justify-between">
         <h2 className="font-semibold flex items-center gap-2.5"><span className="w-8 h-8 rounded-lg bg-primary-500/15 text-primary-400 flex items-center justify-center"><MessageSquare className="w-4 h-4" /></span> Chat</h2>
-        <button onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
+        <button aria-label="Close" onClick={onClose} className="p-1 hover:bg-dark-400 rounded transition-colors">
           <X className="w-5 h-5" />
         </button>
       </div>
@@ -212,7 +212,7 @@ export default function ChatPanel({ roomId, onClose }) {
             </p>
             <p className="text-xs text-gray-400 truncate">{replyingTo.content}</p>
           </div>
-          <button onClick={() => setReplyingTo(null)} className="p-0.5 hover:bg-dark-400 rounded">
+          <button aria-label="Cancel reply" onClick={() => setReplyingTo(null)} className="p-0.5 hover:bg-dark-400 rounded">
             <X className="w-3 h-3" />
           </button>
         </div>
@@ -226,7 +226,7 @@ export default function ChatPanel({ roomId, onClose }) {
           {isUploading ? (
             <Loader2 className="w-4 h-4 text-primary-300 animate-spin" />
           ) : (
-            <button onClick={clearPending} className="p-0.5 hover:bg-dark-400 rounded">
+            <button aria-label="Remove attachment" onClick={clearPending} className="p-0.5 hover:bg-dark-400 rounded">
               <X className="w-3 h-3" />
             </button>
           )}

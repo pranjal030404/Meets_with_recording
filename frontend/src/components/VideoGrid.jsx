@@ -1,4 +1,5 @@
 import Avatar from './Avatar'
+import attachTracks, { trackKey } from '../lib/attachTracks'
 import { useRef, useEffect, useState } from 'react'
 import { useMeetingStore } from '../store/meetingStore'
 import { Mic, MicOff, VideoOff, Pin, PinOff, Hand, Maximize2, Star } from 'lucide-react'
@@ -23,7 +24,8 @@ export default function VideoGrid({
   isHandRaised,
   isHost,
   onPinUser,
-  onSpotlightUser
+  onSpotlightUser,
+  onClearSpotlight
 }) {
   // Build entries from remoteStreams Map
   const mediaEntries = Array.from((remoteStreams || new Map()).entries())
@@ -89,6 +91,7 @@ export default function VideoGrid({
               isPinned={pinnedUserId === focusedRemote[0]}
               onPin={() => onPinUser?.(focusedRemote[0])}
               isHost={isHost} onSpotlight={() => onSpotlightUser?.(focusedRemote[0])}
+              isSpotlit={spotlightUserId === focusedRemote[0]} onClearSpotlight={onClearSpotlight}
             />
           ) : null}
         </div>
@@ -170,6 +173,7 @@ export default function VideoGrid({
             isPinned={pinnedUserId === peerId}
             onPin={() => onPinUser?.(peerId)}
             isHost={isHost} onSpotlight={() => onSpotlightUser?.(peerId)}
+            isSpotlit={spotlightUserId === peerId} onClearSpotlight={onClearSpotlight}
           />
         )
       })}
@@ -178,18 +182,13 @@ export default function VideoGrid({
 }
 
 function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small,
-  isHandRaised, isActiveSpeaker, isPinned, onPin, isHost: tileIsHost, onSpotlight }) {
+  isHandRaised, isActiveSpeaker, isPinned, onPin, isHost: tileIsHost, onSpotlight, isSpotlit, onClearSpotlight }) {
   const internalVideoRef = useRef(null)
   const ref = videoRef || internalVideoRef
   const [isHovered, setIsHovered] = useState(false)
   const mirrorSelf = useMeetingStore((s) => s.mirrorSelf)
   const hideSelf = useMeetingStore((s) => s.hideSelf)
 
-  useEffect(() => {
-    if (ref.current && stream) {
-      ref.current.srcObject = stream
-    }
-  }, [stream, isVideoOff, stream?.getVideoTracks().length])
 
   // A remote tile with no live video track (camera off / nothing received) shows the avatar, not a black box
   const [, forceRender] = useState(0)
@@ -201,6 +200,8 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
     return () => { stream.removeEventListener('addtrack', bump); stream.removeEventListener('removetrack', bump) }
   }, [stream, isLocal])
   const hasRemoteVideo = !!stream?.getVideoTracks().some(t => t.readyState === 'live')
+  const showVideo = !(isVideoOff || !stream || (!isLocal && !hasRemoteVideo))
+  useEffect(() => { attachTracks(ref.current, stream, 'video') }, [stream, showVideo, trackKey(stream, 'video')])
 
   // Remote audio plays through a dedicated <audio> element that is always mounted. Previously the
   // sound only came from the <video>, which isn't rendered while a camera is off -> no audio at all.
@@ -208,14 +209,11 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
   useEffect(() => {
     const el = audioRef.current
     if (!el || isLocal || !stream) return
-    if (el.srcObject !== stream) el.srcObject = stream
-    el.play?.().catch(() => {})
-    // Re-attempt when tracks arrive later (audio producer is consumed after video) or after a gesture
-    const retry = () => el.play?.().catch(() => {})
-    stream.addEventListener('addtrack', retry)
+    attachTracks(el, stream, 'audio') // re-run when the audio track arrives, which is often after the video
+    const retry = () => el.play?.().catch(() => {}) // a browser that blocked autoplay allows it after a click
     document.addEventListener('click', retry, { once: true })
-    return () => { stream.removeEventListener('addtrack', retry); document.removeEventListener('click', retry) }
-  }, [stream, isLocal])
+    return () => document.removeEventListener('click', retry)
+  }, [stream, isLocal, trackKey(stream, 'audio')])
 
   // The chosen speaker applies to everyone, including people who join later
   const speaker = useMeetingStore(s => s.selectedAudioOutputDevice)
@@ -237,7 +235,7 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {isVideoOff || !stream || (!isLocal && !hasRemoteVideo) ? (
+      {!showVideo ? (
         <div className="w-full h-full flex items-center justify-center bg-dark-300">
           <Avatar user={user} size={small ? 'lg' : 'xl'} />
         </div>
@@ -276,10 +274,10 @@ function VideoTile({ stream, user, isMuted, isVideoOff, isLocal, videoRef, small
             </button>
           )}
           {tileIsHost && onSpotlight && !isLocal && (
-            <button onClick={(e) => { e.stopPropagation(); onSpotlight() }}
+            <button onClick={(e) => { e.stopPropagation(); (isSpotlit ? onClearSpotlight : onSpotlight)?.() }}
               className="p-1.5 bg-black/60 rounded-lg hover:bg-black/80 transition-colors"
-              title="Spotlight">
-              <Star className="w-3.5 h-3.5" />
+              title={isSpotlit ? 'Remove spotlight' : 'Spotlight'} aria-label={isSpotlit ? 'Remove spotlight' : 'Spotlight'}>
+              <Star className={`w-3.5 h-3.5 ${isSpotlit ? 'fill-current' : ''}`} />
             </button>
           )}
         </div>
