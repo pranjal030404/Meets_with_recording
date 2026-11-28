@@ -170,11 +170,13 @@ class MeetingController extends ChangeNotifier {
   final Map<String, ({String userId, String mediaType, String consumerId})> _producerMap = {};
   bool _disposed = false;
   Timer? _captionTimer;
+  Timer? _speechTimer; // set while the mic is being captured for the transcript
 
   String get myId => Session.instance.userId;
   String get myName => Session.instance.name;
 
   void _notify() {
+    _syncSpeech(); // follows every change of the mic or of transcription, including a mute
     if (!_disposed) notifyListeners();
   }
 
@@ -917,6 +919,10 @@ class MeetingController extends ChangeNotifier {
       transcribing = d['enabled'] == true;
       _notify();
     });
+    _on('transcribe:unavailable', (_) {
+      infoMessage = 'The server cannot transcribe phone audio yet';
+      _notify();
+    });
     _on('host:spotlight', (d) {
       spotlightUserId = d['userId']?.toString();
       _notify();
@@ -1047,6 +1053,40 @@ class MeetingController extends ChangeNotifier {
       _notify();
       return false;
     }
+  }
+
+  // ---- speech for the live transcript (Android) ----
+  // The phone has no speech recogniser that can share the mic with the call, so short clips of our own
+  // mic go to the server. Only while transcription is on AND the mic is unmuted.
+  Future<void> _syncSpeech() async {
+    if (!Platform.isAndroid || viewOnly) return;
+    final wanted = transcribing && micOn && _socket != null;
+    if (wanted == (_speechTimer != null)) return;
+    try {
+      if (wanted) {
+        _speechTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
+          try {
+            _sendSpeech(await WebRTC.invokeMethod('takeSpeechAudio'));
+          } catch (e) {
+            debugPrint('speech capture: $e');
+          }
+        });
+        await WebRTC.invokeMethod('startSpeechCapture');
+      } else {
+        _speechTimer?.cancel();
+        _speechTimer = null;
+        _sendSpeech(await WebRTC.invokeMethod('stopSpeechCapture')); // what was said before muting
+      }
+    } catch (e) {
+      debugPrint('speech capture: $e');
+    }
+  }
+
+  void _sendSpeech(Object? audio) {
+    if (!transcribing || audio is! Uint8List || audio.length < 16000) return; // under half a second
+    final samples = audio.buffer.asInt16List(audio.offsetInBytes, audio.length ~/ 2);
+    if (!samples.any((s) => s.abs() > 600)) return; // silence
+    _socket?.emit('transcribe:audio', {'roomId': roomId, 'audio': audio});
   }
 
   // ---- background blur / picture (Android) ----
@@ -1437,6 +1477,12 @@ class MeetingController extends ChangeNotifier {
     }
     _handlers.clear();
     _captionTimer?.cancel();
+    transcribing = false;
+    if (_speechTimer != null) {
+      _speechTimer!.cancel();
+      _speechTimer = null;
+      WebRTC.invokeMethod('stopSpeechCapture').catchError((Object e) => debugPrint('speech capture: $e'));
+    }
     await stopRecording();
     await stopScreenShare();
     try {

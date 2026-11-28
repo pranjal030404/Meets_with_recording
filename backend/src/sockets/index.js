@@ -14,6 +14,7 @@ import { syncMeetingStatus } from '../services/meetingStatus.js';
 import { persistLiveTranscript, scheduleTranscriptCheckpoint, cancelTranscriptCheckpoint } from '../services/liveTranscriptStore.js';
 import { socketConnections, socketDisconnects, socketEvents, socketRateLimited } from '../observability/metrics.js';
 import { createSocketLimiter } from '../lib/socketLimiter.js';
+import { transcribeClip, canTranscribeSpeech, MAX_CLIP_BYTES } from '../services/speechChunks.js';
 import { sanitizeSettings } from '../lib/meetingSettings.js';
 import { modeFor, limitsFor, decideConsume } from '../media/subscriptionPolicy.js';
 import { trackState } from '../lib/stateRegistry.js';
@@ -313,6 +314,12 @@ export const initializeSocketHandlers = (io) => {
 
         if (!roomParticipants.has(roomId)) {
           roomParticipants.set(roomId, new Map());
+        }
+
+        // "Take notes": transcription starts with the meeting (once; a host who stops it stays stopped)
+        if (meeting.settings?.takeNotes && !parseBreakoutRoomId(roomId) && !roomTranscription.has(roomId)) {
+          roomTranscription.set(roomId, { enabled: true, by: 'meeting settings' });
+          persistRuntime(roomId);
         }
 
         const roomUsers = roomParticipants.get(roomId);
@@ -1261,10 +1268,7 @@ export const initializeSocketHandlers = (io) => {
       }
     });
 
-    // Each client recognises its own mic locally and sends finished phrases here
-    socket.on('transcribe:line', ({ roomId, text }) => {
-      if (!socket.rooms.has(roomId) || typeof text !== 'string') return;
-      if (!roomTranscription.get(roomId)?.enabled) return;
+    const addTranscriptLine = (roomId, text) => {
       const clean = text.trim().slice(0, MAX_LINE_CHARS);
       if (!clean) return;
 
@@ -1282,6 +1286,31 @@ export const initializeSocketHandlers = (io) => {
 
       io.to(roomId).emit('transcript:line', line);
       socket.to(roomId).emit('caption:text', { userId: line.userId, userName: line.userName, text: clean });
+    };
+
+    // Each client recognises its own mic locally and sends finished phrases here
+    socket.on('transcribe:line', ({ roomId, text }) => {
+      if (!socket.rooms.has(roomId) || typeof text !== 'string') return;
+      if (!roomTranscription.get(roomId)?.enabled) return;
+      addTranscriptLine(roomId, text);
+    });
+
+    // The phone app has no recogniser: it sends short clips of its own mic and the server transcribes them
+    socket.on('transcribe:audio', async ({ roomId, audio } = {}) => {
+      if (!socket.rooms.has(roomId) || !Buffer.isBuffer(audio)) return;
+      if (!roomTranscription.get(roomId)?.enabled) return;
+      if (audio.length < 2 || audio.length > MAX_CLIP_BYTES || audio.length % 2) return;
+      if (!canTranscribeSpeech()) {
+        socket.emit('transcribe:unavailable');
+        return;
+      }
+      try {
+        const text = await transcribeClip(audio, { language: process.env.TRANSCRIPTION_LANGUAGE });
+        // the meeting may have closed, or transcription stopped, while Whisper was working
+        if (text && socket.rooms.has(roomId) && roomTranscription.get(roomId)?.enabled) addTranscriptLine(roomId, text);
+      } catch (error) {
+        console.error('Speech transcription failed:', error.message);
+      }
     });
 
     socket.on('transcript:request', ({ roomId }) => {

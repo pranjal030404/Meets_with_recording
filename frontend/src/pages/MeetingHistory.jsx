@@ -22,6 +22,8 @@ import { useTaskStore } from '../store/taskStore'
 import AppShell from '../components/AppShell'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
+import { collapseSeries } from '../lib/recurrence'
+import EditMeetingModal from '../components/EditMeetingModal'
 
 export default function MeetingHistory() {
   const navigate = useNavigate()
@@ -45,7 +47,7 @@ export default function MeetingHistory() {
     if (!hasPendingTranscript) return
     const timer = setInterval(async () => {
       try {
-        const params = filter === 'all' ? {} : { status: filter }
+        const params = { limit: 200, ...(filter !== 'all' && { status: filter }) }
         const response = await api.get('/meetings', { params })
         useMeetingStore.setState({ meetings: response.data.data.meetings })
       } catch { /* try again next tick */ }
@@ -126,7 +128,7 @@ export default function MeetingHistory() {
           </div>
         ) : (
           <div className="space-y-5">
-            {meetings.map((meeting, i) => (
+            {collapseSeries(meetings).map((meeting, i) => (
               <MeetingCard
                 key={meeting._id}
                 meeting={meeting}
@@ -172,6 +174,7 @@ function InviteActions({ meeting, currentUserId }) {
   const { getMeetings } = useMeetingStore()
   const { user } = useAuthStore()
   const [inviting, setInviting] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [emails, setEmails] = useState('')
   const [busy, setBusy] = useState(false)
   const myId = currentUserId || user?.id
@@ -212,8 +215,13 @@ function InviteActions({ meeting, currentUserId }) {
       )}
       {!isHost && mine && mine.status !== 'pending' && <span className="text-xs text-gray-400">You {mine.status}</span>}
       {isHost && <button className="btn btn-secondary" onClick={() => setInviting(true)}>Invite</button>}
+      {isHost && meeting.status === 'scheduled' && meeting.scheduledAt && <button className="btn btn-secondary" onClick={() => setEditing(true)}>Edit</button>}
+      {editing && <EditMeetingModal meeting={meeting} onClose={() => setEditing(false)} onSaved={getMeetings} />}
       {isHost && meeting.status === 'scheduled' && (
-        <button disabled={busy} className="btn btn-ghost !text-red-300" onClick={() => window.confirm(`Cancel "${meeting.title}"?`) && run(() => api.put(`/meetings/${meeting.roomId}/cancel`), 'Meeting cancelled')}>Cancel meeting</button>
+        <button disabled={busy} className="btn btn-ghost !text-red-300" onClick={() => window.confirm(`Cancel "${meeting.title}"${meeting.recurrence?.seriesId ? ' on this date only' : ''}?`) && run(() => api.put(`/meetings/${meeting.roomId}/cancel`), 'Meeting cancelled')}>{meeting.recurrence?.seriesId ? 'Cancel this date' : 'Cancel meeting'}</button>
+      )}
+      {isHost && meeting.status === 'scheduled' && meeting.recurrence?.seriesId && (
+        <button disabled={busy} className="btn btn-ghost !text-red-300" onClick={() => window.confirm(`Cancel "${meeting.title}" on this and all later dates?`) && run(() => api.put(`/meetings/${meeting.roomId}/cancel`, { scope: 'series' }), 'Repeating meeting cancelled')}>Cancel all</button>
       )}
       {inviting && (
         <div className="modal-backdrop" onClick={() => setInviting(false)}>

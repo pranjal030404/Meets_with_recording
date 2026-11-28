@@ -34,7 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _load() async {
     try {
-      final d = Api.unwrap(await Api.instance.get('/meetings', query: {'limit': 100}));
+      final d = Api.unwrap(await Api.instance.get('/meetings', query: {'limit': 200}));
       final all = asList(d['meetings']).map(asMap).toList();
       final live = all.where((m) => m['status'] == 'active').toList();
       // A scheduled meeting stays "next" for an hour after its start time.

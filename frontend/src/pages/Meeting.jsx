@@ -20,6 +20,7 @@ import EmojiReactions from '../components/EmojiReactions'
 import CaptionsOverlay from '../components/CaptionsOverlay'
 import WaitingRoom from '../components/WaitingRoom'
 import DeviceSettings from '../components/DeviceSettings'
+import { linkRoomId } from '../lib/recurrence'
 import MeetingSettingsPanel from '../components/MeetingSettingsPanel'
 import MeetingDetailsPanel from '../components/MeetingDetailsPanel'
 import PollsQAPanel from '../components/PollsQAPanel'
@@ -753,7 +754,7 @@ export default function Meeting() {
 
   // Copy meeting link
   const handleCopyLink = useCallback(() => {
-    const link = `${window.location.origin}/meeting/${roomId}`
+    const link = `${window.location.origin}/meeting/${linkRoomId(useMeetingStore.getState().currentMeeting, roomId)}`
     navigator.clipboard.writeText(link)
     toast.success('Meeting link copied')
   }, [roomId])

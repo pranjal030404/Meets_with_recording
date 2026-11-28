@@ -135,7 +135,7 @@ const getSubscriptionDetails = async (userId) => {
   return { subscription, usage };
 };
 
-const assertCanCreateMeeting = async (userId) => {
+const assertCanCreateMeeting = async (userId, count = 1) => {
   const subscription = await ensureSubscription(userId);
   const limits = subscription.plan?.limits || {};
 
@@ -144,7 +144,7 @@ const assertCanCreateMeeting = async (userId) => {
   }
 
   const usage = await getUsageSummary(userId, subscription);
-  if (usage.meetingsCreated >= (limits.meetingsPerMonth || 0)) {
+  if (usage.meetingsCreated + count > (limits.meetingsPerMonth || 0)) {
     return {
       allowed: false,
       subscription,

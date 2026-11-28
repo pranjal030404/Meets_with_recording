@@ -273,3 +273,9 @@ class TallyDot extends StatelessWidget {
   Widget build(BuildContext context) =>
       Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppTheme.overdue, shape: BoxShape.circle));
 }
+
+/// The room in a meeting's invite link: one link for a whole repeating meeting.
+String linkRoomId(Map<String, dynamic>? meeting, String roomId) {
+  final series = meeting?['recurrence'];
+  return (series is Map ? series['seriesRoomId']?.toString() : null) ?? roomId;
+}

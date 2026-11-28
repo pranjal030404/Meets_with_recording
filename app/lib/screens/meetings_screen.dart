@@ -22,6 +22,52 @@ String parseRoomId(String input) {
 /// Live-stream links carry `?viewOnly=1`.
 bool isViewOnlyLink(String input) => input.contains('viewOnly=1');
 
+const _repeats = {
+  '': 'Does not repeat',
+  'daily': 'Every day',
+  'weekdays': 'Every weekday (Mon to Fri)',
+  'weekly': 'Every week',
+  'biweekly': 'Every 2 weeks',
+  'monthly': 'Every month',
+};
+
+/// Dates of a repeating meeting at the same local time. Mirrors frontend/src/lib/recurrence.js.
+List<DateTime> occurrences(DateTime start, String frequency, int count) {
+  final dates = <DateTime>[];
+  for (var step = 0; dates.length < count && step < 800; step++) {
+    final DateTime d;
+    if (frequency == 'monthly') {
+      d = DateTime(start.year, start.month + step, start.day, start.hour, start.minute);
+      if (d.day != start.day) continue; // that month has no such day
+    } else {
+      final days = step * (frequency == 'weekly' ? 7 : frequency == 'biweekly' ? 14 : 1);
+      d = DateTime(start.year, start.month, start.day + days, start.hour, start.minute);
+      if (frequency == 'weekdays' && d.weekday > DateTime.friday) continue;
+    }
+    dates.add(d);
+  }
+  return dates;
+}
+
+/// Moves dates by as many days as the first one moved, all at its new time of day.
+List<DateTime> shiftDates(List<DateTime> dates, DateTime newFirst) {
+  final first = dates.first;
+  final days = DateTime.utc(newFirst.year, newFirst.month, newFirst.day).difference(DateTime.utc(first.year, first.month, first.day)).inDays;
+  return dates.map((d) => DateTime(d.year, d.month, d.day + days, newFirst.hour, newFirst.minute)).toList();
+}
+
+/// Keeps only the soonest date of each repeating meeting in an already sorted list.
+List<Map<String, dynamic>> collapseSeries(List<Map<String, dynamic>> sorted) {
+  final seen = <Object>{};
+  final cutoff = DateTime.now().subtract(const Duration(hours: 12));
+  return sorted.where((m) {
+    final id = asMap(m['recurrence'])['seriesId'];
+    if (id == null || m['status'] != 'scheduled') return true;
+    if (parseDate(m['scheduledAt'])?.isBefore(cutoff) ?? false) return false;
+    return seen.add(id);
+  }).toList();
+}
+
 class MeetingsScreen extends StatefulWidget {
   const MeetingsScreen({super.key});
   @override
@@ -33,12 +79,12 @@ class MeetingsScreenState extends State<MeetingsScreen> {
   String _filter = 'upcoming'; // upcoming | past
 
   Future<List<Map<String, dynamic>>> _load() async {
-    final d = Api.unwrap(await Api.instance.get('/meetings', query: {'limit': 100}));
+    final d = Api.unwrap(await Api.instance.get('/meetings', query: {'limit': 200}));
     final all = asList(d['meetings']).map(asMap).toList();
     final upcoming = all.where((m) => m['status'] == 'scheduled' || m['status'] == 'active').toList()
       ..sort((a, b) => (parseDate(a['scheduledAt'] ?? a['createdAt']) ?? DateTime.now()).compareTo(parseDate(b['scheduledAt'] ?? b['createdAt']) ?? DateTime.now()));
     final past = all.where((m) => m['status'] == 'ended' || m['status'] == 'cancelled').toList();
-    return _filter == 'upcoming' ? upcoming : past;
+    return _filter == 'upcoming' ? collapseSeries(upcoming) : past;
   }
 
   void _reload() => _listKey.currentState?.reload();
@@ -188,7 +234,8 @@ class MeetingCard extends StatelessWidget {
 
 class ScheduleMeetingScreen extends StatefulWidget {
   final String? teamId;
-  const ScheduleMeetingScreen({super.key, this.teamId});
+  final Map<String, dynamic>? meeting; // set: edit this meeting instead of creating one
+  const ScheduleMeetingScreen({super.key, this.teamId, this.meeting});
   @override
   State<ScheduleMeetingScreen> createState() => _ScheduleMeetingScreenState();
 }
@@ -201,6 +248,56 @@ class _ScheduleMeetingScreenState extends State<ScheduleMeetingScreen> {
   bool _waitingRoom = false;
   bool _muteOnEntry = false;
   bool _busy = false;
+  String _repeat = '';
+  int _count = 10;
+  bool _takeNotes = false;
+  bool _allLater = false;
+  DateTime? _original;
+
+  bool get _editing => widget.meeting != null;
+  bool get _isSeries => asMap(widget.meeting?['recurrence'])['seriesId'] != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final m = widget.meeting;
+    if (m == null) return;
+    _title.text = m['title']?.toString() ?? '';
+    _desc.text = m['description']?.toString() ?? '';
+    _original = parseDate(m['scheduledAt'])?.toLocal();
+    _when = _original ?? _when;
+    final settings = asMap(m['settings']);
+    _waitingRoom = settings['waitingRoom'] == true;
+    _muteOnEntry = settings['muteOnEntry'] == true;
+    _takeNotes = settings['takeNotes'] == true;
+  }
+
+  Future<void> _saveEdit() async {
+    setState(() => _busy = true);
+    final room = widget.meeting!['roomId'];
+    final ok = await guard(context, () async {
+      List<String>? dates;
+      if (_when != _original) {
+        var moved = [_when];
+        if (_allLater) {
+          final d = Api.unwrap(await Api.instance.get('/meetings/$room/series'));
+          moved = shiftDates(asList(d['dates']).map((x) => parseDate(x)!.toLocal()).toList(), _when);
+        }
+        dates = moved.map((d) => d.toUtc().toIso8601String()).toList();
+      }
+      return Api.instance.put('/meetings/$room/schedule', {
+        'title': _title.text.trim(),
+        'description': _desc.text.trim(),
+        'scope': _allLater ? 'series' : 'one',
+        if (dates != null) 'dates': dates,
+        'settings': {'waitingRoom': _waitingRoom, 'muteOnEntry': _muteOnEntry, 'takeNotes': _takeNotes},
+      });
+    }, success: 'Meeting updated');
+    if (mounted) {
+      setState(() => _busy = false);
+      if (ok != null) Navigator.pop(context, true);
+    }
+  }
 
   Future<void> _pickDate() async {
     final d = await showDatePicker(context: context, initialDate: _when, firstDate: DateTime.now().subtract(const Duration(days: 1)), lastDate: DateTime.now().add(const Duration(days: 365 * 2)));
@@ -215,14 +312,17 @@ class _ScheduleMeetingScreenState extends State<ScheduleMeetingScreen> {
       toast(context, 'Please enter a title', error: true);
       return;
     }
+    if (_editing) return _saveEdit();
     setState(() => _busy = true);
     final emails = _invites.text.split(RegExp(r'[,\s;]+')).where((e) => e.contains('@')).toList();
+    final dates = _repeat.isEmpty ? null : occurrences(_when, _repeat, _count).map((d) => d.toUtc().toIso8601String()).toList();
     final ok = await guard(context, () => Api.instance.post('/meetings', {
           'title': _title.text.trim(),
           if (_desc.text.trim().isNotEmpty) 'description': _desc.text.trim(),
-          'scheduledAt': _when.toUtc().toIso8601String(),
+          'scheduledAt': dates?.first ?? _when.toUtc().toIso8601String(),
+          if (dates != null) 'recurrence': {'frequency': _repeat, 'dates': dates},
           if (widget.teamId != null) 'teamId': widget.teamId,
-          'settings': {'waitingRoom': _waitingRoom, 'muteOnEntry': _muteOnEntry},
+          'settings': {'waitingRoom': _waitingRoom, 'muteOnEntry': _muteOnEntry, 'takeNotes': _takeNotes},
           if (emails.isNotEmpty) 'invitees': emails.map((e) => {'email': e}).toList(),
         }), success: 'Meeting scheduled');
     if (mounted) {
@@ -234,8 +334,15 @@ class _ScheduleMeetingScreenState extends State<ScheduleMeetingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Schedule meeting')),
+      appBar: AppBar(title: Text(_editing ? 'Edit meeting' : 'Schedule meeting')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
+        if (_isSeries)
+          SwitchListTile(
+            value: _allLater,
+            onChanged: (v) => setState(() => _allLater = v),
+            title: const Text('Apply to all later dates too'),
+            subtitle: const Text('Later dates move by the same number of days'),
+          ),
         TextField(controller: _title, decoration: const InputDecoration(labelText: 'Title')),
         const SizedBox(height: 12),
         TextField(controller: _desc, maxLines: 3, decoration: const InputDecoration(labelText: 'Description (optional)')),
@@ -248,11 +355,29 @@ class _ScheduleMeetingScreenState extends State<ScheduleMeetingScreen> {
           onTap: _pickDate,
         ),
         const SizedBox(height: 12),
-        TextField(controller: _invites, decoration: const InputDecoration(labelText: 'Invite by email (comma separated)')),
+        if (!_editing) DropdownButtonFormField<String>(
+          initialValue: _repeat,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Repeat'),
+          items: _repeats.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+          onChanged: (v) => setState(() => _repeat = v ?? ''),
+        ),
+        if (_repeat.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<int>(
+            initialValue: _count,
+            decoration: const InputDecoration(labelText: 'Number of meetings'),
+            items: [for (var n = 2; n <= 52; n++) DropdownMenuItem(value: n, child: Text('$n'))],
+            onChanged: (v) => setState(() => _count = v ?? 10),
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (!_editing) TextField(controller: _invites, decoration: const InputDecoration(labelText: 'Invite by email (comma separated)')),
         SwitchListTile(value: _waitingRoom, onChanged: (v) => setState(() => _waitingRoom = v), title: const Text('Waiting room')),
         SwitchListTile(value: _muteOnEntry, onChanged: (v) => setState(() => _muteOnEntry = v), title: const Text('Mute participants on entry')),
+        SwitchListTile(value: _takeNotes, onChanged: (v) => setState(() => _takeNotes = v), title: const Text('Take notes (live transcript)')),
         const SizedBox(height: 12),
-        FilledButton(onPressed: _busy ? null : _save, child: const Text('Schedule')),
+        FilledButton(onPressed: _busy ? null : _save, child: Text(_editing ? 'Save changes' : 'Schedule')),
       ]),
     );
   }

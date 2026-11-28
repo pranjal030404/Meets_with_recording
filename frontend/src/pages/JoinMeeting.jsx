@@ -10,12 +10,15 @@ import {
   Link2,
   Radio,
   Sparkles,
+  Aperture,
   LogIn
 } from 'lucide-react'
 import { useMeetingStore } from '../store/meetingStore'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 import InviteDetails from '../components/InviteDetails'
+import { withBackground, savedBackground, saveBackground } from '../lib/backgroundEffect'
+import api from '../lib/api'
 import MeetingGate, { meetingGate } from '../components/MeetingGate'
 
 export default function JoinMeeting() {
@@ -37,8 +40,12 @@ export default function JoinMeeting() {
   const [selectedAudioDevice, setSelectedAudioDevice] = useState(null)
   const [selectedVideoDevice, setSelectedVideoDevice] = useState(null)
   const [audioLevel, setAudioLevel] = useState(0)
+  const [background, setBackground] = useState(() => savedBackground().mode)
+  const [backgroundVersion, setBackgroundVersion] = useState(0) // a second picture keeps the mode 'image'
+  const speaker = useMeetingStore(s => s.selectedAudioOutputDevice)
 
   const videoRef = useRef(null)
+  const fileRef = useRef(null)
   const streamRef = useRef(null)
   const audioContextRef = useRef(null)
   const analyserRef = useRef(null)
@@ -70,10 +77,36 @@ export default function JoinMeeting() {
     }
   }, [])
 
-  // Attach the preview whenever the <video> element (re)appears or the stream changes
+  // The preview shows what others will see. The stream keeps the plain camera: the meeting applies the
+  // saved effect again before anything is sent.
+  const cameraId = localStream?.getVideoTracks()[0]?.id
   useEffect(() => {
-    if (!isVideoOff && videoRef.current && localStream) videoRef.current.srcObject = localStream
-  }, [isVideoOff, localStream])
+    const video = videoRef.current
+    const raw = localStream?.getVideoTracks()[0]
+    if (isVideoOff || !video || !raw) return
+    let cancelled = false
+    let shown = null
+    video.srcObject = null // nothing unprocessed while the effect loads
+    withBackground(raw).then((track) => {
+      if (cancelled) return track.release?.()
+      shown = track
+      video.srcObject = new MediaStream([track])
+    }).catch((error) => {
+      console.error('Background effect error:', error)
+      if (!cancelled) toast.error('Background effects are not available in this browser', { id: 'background' })
+    })
+    return () => {
+      cancelled = true
+      shown?.release?.() // stops the effect, not the camera
+    }
+  }, [isVideoOff, localStream, cameraId, background, backgroundVersion])
+
+  const chooseBackground = (mode, file) => {
+    saveBackground(mode, file)
+    setBackground(mode)
+    setBackgroundVersion(v => v + 1)
+    useMeetingStore.setState({ background: mode })
+  }
 
   const startAudioLevelMonitoring = useCallback((stream) => {
     try {
@@ -118,12 +151,24 @@ export default function JoinMeeting() {
     const result = await getMeeting(id)
     setIsCheckingMeeting(false)
 
+    // The shared link of a repeating meeting leads on to the current date
+    if (result.success && result.nextRoomId) return navigate(`/join/${result.nextRoomId}`, { replace: true })
+
     if (result.success) {
       setMeeting(result.meeting)
       setPeople(result.people || [])
     } else {
       toast.error('Meeting not found')
       setMeeting(null)
+    }
+  }
+
+  const toggleNotes = async (takeNotes) => {
+    try {
+      const { data } = await api.put(`/meetings/${meeting.roomId}/settings`, { settings: { takeNotes } })
+      setMeeting(m => ({ ...m, settings: data.data.meeting.settings }))
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not change note taking')
     }
   }
 
@@ -271,7 +316,6 @@ export default function JoinMeeting() {
           const ns = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId }, width: 640, height: 480 } })
           localStream.addTrack(ns.getVideoTracks()[0])
           streamRef.current = localStream
-          if (videoRef.current) videoRef.current.srcObject = localStream
         }
       }
     } catch (err) {
@@ -409,6 +453,41 @@ export default function JoinMeeting() {
                     </div>
                   )}
                 </div>
+                {/* Background blur */}
+                <button
+                  onClick={() => chooseBackground(background === 'off' ? 'blur' : 'off')}
+                  className={`control-btn ${background === 'off' ? 'inactive' : 'active'}`}
+                  title={background === 'off' ? 'Blur my background' : 'Turn off background effect'}
+                  aria-pressed={background !== 'off'}
+                >
+                  <Aperture className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="mt-4 grid sm:grid-cols-2 gap-3">
+                <label className="text-xs text-gray-400">
+                  Background
+                  <select className="input mt-1" value={background}
+                    onChange={(e) => e.target.value === 'pick' ? fileRef.current.click() : chooseBackground(e.target.value)}>
+                    <option value="off">None</option>
+                    <option value="blur">Blur</option>
+                    {background === 'image' && <option value="image">My picture</option>}
+                    <option value="pick">Choose a picture…</option>
+                  </select>
+                </label>
+                <input ref={fileRef} type="file" accept="image/*" className="hidden"
+                  onChange={(e) => { const file = e.target.files?.[0]; if (file) chooseBackground('image', file); e.target.value = '' }} />
+                {/* Browsers list speakers only once permission is granted, and not all can switch them */}
+                {'setSinkId' in HTMLMediaElement.prototype && devices.audiooutput.some(d => d.label) && (
+                  <label className="text-xs text-gray-400">
+                    Speaker
+                    <select className="input mt-1" value={speaker || ''}
+                      onChange={(e) => useMeetingStore.setState({ selectedAudioOutputDevice: e.target.value })}>
+                      {!speaker && <option value="">Default</option>}
+                      {devices.audiooutput.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Speaker'}</option>)}
+                    </select>
+                  </label>
+                )}
               </div>
             </div>
           </div>
@@ -478,6 +557,15 @@ export default function JoinMeeting() {
                     <p className="text-xs text-yellow-400/90 mt-2.5 bg-yellow-500/10 border border-yellow-400/20 rounded-lg px-3 py-1.5 inline-block">Participants are muted on entry</p>
                   )}
                 </div>
+
+                {meeting.hostId === (user?.id || user?._id) ? (
+                  <label className="flex items-center justify-between gap-3 text-sm text-gray-300 cursor-pointer">
+                    Take notes (live transcript)
+                    <input type="checkbox" checked={!!meeting.settings?.takeNotes} onChange={(e) => toggleNotes(e.target.checked)} />
+                  </label>
+                ) : meeting.settings?.takeNotes && (
+                  <p className="text-sm text-gray-400">Notes will be taken: what you say while unmuted is transcribed.</p>
+                )}
 
                 <button
                   onClick={handleJoinMeeting}

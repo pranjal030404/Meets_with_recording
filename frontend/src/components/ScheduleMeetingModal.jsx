@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { useMeetingStore } from '../store/meetingStore'
 import useTeamStore from '../store/teamStore'
 import PeoplePicker, { isEmail } from './PeoplePicker'
+import { REPEATS, MAX_OCCURRENCES, occurrences, linkRoomId } from '../lib/recurrence'
 
 const REMINDERS = [{ time: 15, unit: 'minutes' }, { time: 1, unit: 'hours' }]
 
@@ -27,7 +28,7 @@ export default function ScheduleMeetingModal({ teamId = '', day, onClose, onSche
   const createMeeting = useMeetingStore(s => s.createMeeting)
   const { teams, fetchTeams } = useTeamStore()
   const [kind, setKind] = useState(teamId ? 'team' : 'personal')
-  const [form, setForm] = useState({ title: '', description: '', scheduledAt: defaultTime(day), teamId })
+  const [form, setForm] = useState({ title: '', description: '', scheduledAt: defaultTime(day), teamId, repeat: '', count: 10, takeNotes: false })
   const [invitees, setInvitees] = useState([])
   const [typed, setTyped] = useState('')
   const [saving, setSaving] = useState(false)
@@ -39,7 +40,7 @@ export default function ScheduleMeetingModal({ teamId = '', day, onClose, onSche
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value })
   const idOf = (team) => team._id || team.id
   const chosenTeam = form.teamId || (teams[0] && idOf(teams[0])) || ''
-  const link = created && `${window.location.origin}/meeting/${created.roomId}`
+  const link = created && `${window.location.origin}/meeting/${linkRoomId(created)}`
 
   const submit = async (e) => {
     e.preventDefault()
@@ -51,14 +52,22 @@ export default function ScheduleMeetingModal({ teamId = '', day, onClose, onSche
     if (kind === 'personal' && rest && !isEmail(rest)) return toast.error(`Pick "${rest}" from the list, or clear the box`)
     const guests = rest ? [...invitees, { email: rest }] : invitees
 
+    const count = Number(form.count)
+    if (form.repeat && !(Number.isInteger(count) && count >= 2 && count <= MAX_OCCURRENCES)) {
+      return toast.error(`Repeat between 2 and ${MAX_OCCURRENCES} times`)
+    }
+    const dates = form.repeat ? occurrences(at, form.repeat, count).map(d => d.toISOString()) : null
+
     setSaving(true)
     const result = await createMeeting({
       title: form.title,
       description: form.description,
-      scheduledAt: at.toISOString(),
+      scheduledAt: dates ? dates[0] : at.toISOString(),
+      recurrence: dates ? { frequency: form.repeat, dates } : undefined,
       teamId: kind === 'team' ? chosenTeam : undefined,
       invitees: kind === 'personal' ? guests.map(({ userId, email }) => ({ userId, email })) : [],
-      reminders: REMINDERS
+      reminders: REMINDERS,
+      settings: { takeNotes: form.takeNotes }
     })
     setSaving(false)
     if (!result.success) return toast.error(result.message || 'Could not schedule the meeting')
@@ -140,6 +149,24 @@ export default function ScheduleMeetingModal({ teamId = '', day, onClose, onSche
                 <label className={label}>Date & time *</label>
                 <input type="datetime-local" value={form.scheduledAt} onChange={set('scheduledAt')} className="input" required min={toInput(new Date())} />
               </div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={label}>Repeat</label>
+                  <select value={form.repeat} onChange={set('repeat')} className="input">
+                    {REPEATS.map(([key, text]) => <option key={key} value={key}>{text}</option>)}
+                  </select>
+                </div>
+                {form.repeat && (
+                  <div>
+                    <label className={label}>Number of meetings</label>
+                    <input type="number" value={form.count} onChange={set('count')} className="input" min="2" max={MAX_OCCURRENCES} required />
+                  </div>
+                )}
+              </div>
+              <label className="flex items-center justify-between text-sm text-gray-300 cursor-pointer">
+                Take notes (live transcript)
+                <input type="checkbox" checked={form.takeNotes} onChange={(e) => setForm({ ...form, takeNotes: e.target.checked })} />
+              </label>
               <p className="flex items-center gap-2 text-sm text-gray-400">
                 <Clock className="w-4 h-4 text-primary-400" /> Reminders 15 minutes and 1 hour before
               </p>
